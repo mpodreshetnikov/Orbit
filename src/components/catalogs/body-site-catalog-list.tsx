@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { BodySiteEditDialog } from "./body-site-edit-dialog";
 import { useBodySiteCatalog, useDeleteBodySite } from "@/hooks";
+import { matchesCatalogEntry } from "@/types/clinical-catalog";
 import type { BodySiteCatalog } from "@/types";
 
 export function BodySiteCatalogList() {
@@ -50,17 +51,9 @@ export function BodySiteCatalogList() {
   const deleteMutation = useDeleteBodySite();
 
   // Filter by search
-  const filteredItems = bodySites?.filter((item) => {
-    if (!debouncedSearch.trim()) return true;
-    const search = debouncedSearch.toLowerCase();
-    return (
-      item.site_code.toLowerCase().includes(search) ||
-      item.name_ru.toLowerCase().includes(search) ||
-      item.name_en.toLowerCase().includes(search) ||
-      item.synonyms_ru?.some((s) => s.toLowerCase().includes(search)) ||
-      item.synonyms_en?.some((s) => s.toLowerCase().includes(search))
-    );
-  });
+  const filteredItems = bodySites?.filter((item) =>
+    matchesCatalogEntry(item.site_code, item, debouncedSearch),
+  );
 
   // Handlers
   const handleAdd = () => {

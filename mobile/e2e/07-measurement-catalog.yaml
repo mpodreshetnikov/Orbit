@@ -1,0 +1,80 @@
+# The measurement catalogue, opened by its link: a type added with its category picked
+# from the sheet, then edited from its menu, and its delete asked and cancelled.
+appId: host.exp.Exponent
+name: Каталог измерений
+---
+- runFlow: setup/fresh.yaml
+- openLink: exp://127.0.0.1:8081/--/health/catalogs/measurements
+- tapOn:
+    text: "Open"
+    optional: true
+# A link opened over another screen can leave it on view for a moment: wait for this one's own button.
+- extendedWaitUntil:
+    visible: "Добавить тип измерения"
+    timeout: 60000
+- extendedWaitUntil:
+    visible: "ОСНОВНЫЕ"
+    timeout: 20000
+- takeScreenshot: catalog-01-list
+- tapOn: "Добавить тип измерения"
+- extendedWaitUntil:
+    visible: "Добавить новый тип измерения в каталог"
+    timeout: 10000
+# Each field's caption reads as its label too: tap the fields by id.
+- tapOn:
+    id: "catalog-code"
+# A fresh simulator shows the slide-to-type tip over its first keyboard.
+- tapOn:
+    text: "Continue"
+    optional: true
+- tapOn:
+    id: "catalog-code"
+- inputText: "wrist_left"
+- tapOn:
+    id: "catalog-name_ru"
+- inputText: "Левое запястье"
+- tapOn:
+    id: "catalog-name_en"
+- inputText: "Left wrist"
+- tapOn:
+    id: "catalog-unit_ru"
+- inputText: "см"
+- hideKeyboard
+- tapOn: "Категория: Тело"
+- tapOn: "Конечности"
+- takeScreenshot: catalog-02-new
+- tapOn: "Сохранить"
+- extendedWaitUntil:
+    visible: "Добавить тип измерения"
+    timeout: 20000
+- waitForAnimationToEnd
+# The new type lands in the last section, under iOS's search field and tab bar: find it by the
+# search, and submit it so the keyboard is gone before the row is tapped.
+- tapOn: "Поиск измерений..."
+- inputText: "запяст"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: "Левое запястье wrist_left"
+    timeout: 20000
+- takeScreenshot: catalog-03-added
+- tapOn: "Левое запястье wrist_left"
+- tapOn: "Редактировать"
+- extendedWaitUntil:
+    visible: "Изменить определение типа измерения"
+    timeout: 10000
+- tapOn:
+    id: "catalog-unit_en"
+- inputText: "cm"
+- hideKeyboard
+- tapOn: "Сохранить"
+- extendedWaitUntil:
+    visible: "Левое запястье wrist_left"
+    timeout: 20000
+- tapOn: "Левое запястье wrist_left"
+- tapOn: "Удалить"
+- extendedWaitUntil:
+    visible: "Удалить тип измерения"
+    timeout: 10000
+- takeScreenshot: catalog-04-delete
+- tapOn: "Отмена"
+- assertVisible: "Левое запястье wrist_left"

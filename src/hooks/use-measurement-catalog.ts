@@ -2,7 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase";
-import { sortByMeasurementOrder } from "@/lib/measurement-order";
+import { sortByMeasurementOrder } from "@/types/measurement-order";
 import type {
   MeasurementCatalog,
   CreateMeasurementCatalogInput,

@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
-import { getMeasurementTrend, type MeasurementTrend } from "@/lib/measurement-trend";
-import { sortByMeasurementOrder } from "@/lib/measurement-order";
+import { getMeasurementTrend, type MeasurementTrend } from "@/types/measurement-trend";
+import { sortByMeasurementOrder } from "@/types/measurement-order";
 import type { MeasurementCategory } from "@/types";
 
 /**

@@ -1,0 +1,21 @@
+# The accounts, reached from the money tab, and the form a new one is added with.
+appId: host.exp.Exponent
+name: Счета
+---
+- runFlow: setup/fresh.yaml
+- openLink: exp://127.0.0.1:8081/--/money
+- tapOn: { text: "Open", optional: true }
+- extendedWaitUntil:
+    visible: "Совпадений"
+    timeout: 60000
+- tapOn: "Счета"
+- extendedWaitUntil:
+    visible: "Tinkoff Black"
+    timeout: 20000
+- takeScreenshot: accounts-01-list
+- tapOn: "Добавить счет"
+- extendedWaitUntil:
+    visible: "Внешний ID"
+    timeout: 10000
+- takeScreenshot: accounts-02-form
+- tapOn: "Отмена"

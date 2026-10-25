@@ -18,6 +18,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useCreateFindingType, useUpdateFindingType } from "@/hooks";
+import { addSynonym } from "@/types/clinical-catalog";
 import type { FindingTypeCatalog } from "@/types";
 
 interface FindingTypeEditDialogProps {
@@ -72,17 +73,17 @@ export function FindingTypeEditDialog({
   }, [open, findingType]);
 
   const addSynonymRu = () => {
-    const trimmed = newSynonymRu.trim().toLowerCase();
-    if (trimmed && !synonymsRu.includes(trimmed)) {
-      setSynonymsRu([...synonymsRu, trimmed]);
+    const next = addSynonym(synonymsRu, newSynonymRu);
+    if (next) {
+      setSynonymsRu(next);
       setNewSynonymRu("");
     }
   };
 
   const addSynonymEn = () => {
-    const trimmed = newSynonymEn.trim().toLowerCase();
-    if (trimmed && !synonymsEn.includes(trimmed)) {
-      setSynonymsEn([...synonymsEn, trimmed]);
+    const next = addSynonym(synonymsEn, newSynonymEn);
+    if (next) {
+      setSynonymsEn(next);
       setNewSynonymEn("");
     }
   };

@@ -1,8 +1,16 @@
 import type { MedRegimen } from "@orbit-types/regimen";
 import { Stack, useRouter, type Href } from "expo-router";
 import { useMemo, useState } from "react";
-import { Settings } from "lucide-react-native";
-import { Alert, FlatList, Pressable, RefreshControl, ScrollView, View } from "react-native";
+import { Plus, Settings } from "lucide-react-native";
+import {
+  ActionSheetIOS,
+  Alert,
+  FlatList,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  View,
+} from "react-native";
 import { unitIcon } from "@/components/medication-icons";
 import { filterLabel, LowStockBadge, StatusBadge } from "@/components/medication-badges";
 import { Button, Icon, Placeholder, Text } from "@/components/ui";
@@ -27,7 +35,7 @@ import { radius, space, usePalette } from "@/theme";
  * The search is the system's own, in the navigation bar under the large title; the filter is a row
  * of chips rather than the web's select, because a phone shows five short words at once. Each card is
  * the web `RegimenCard` and opens the course. The gear in the bar is the web page's settings dialog:
- * how often an overdue dose is reminded about again, asked for in the system's own prompt.
+ * how often an overdue dose is reminded about again, in the system's prompt; the plus adds a course.
  */
 export default function MedicationsScreen() {
   const palette = usePalette();
@@ -58,6 +66,19 @@ export default function MedicationsScreen() {
       "number-pad",
     );
 
+  /** The web page's two add buttons as one: a one-off intake or a regular course. */
+  const add = () => {
+    const kinds = ["one_time", "regular"] as const;
+    const options = [t("medications.oneTime"), t("medications.regular"), t("common.cancel")];
+    ActionSheetIOS.showActionSheetWithOptions(
+      { title: t("medications.add"), options, cancelButtonIndex: options.length - 1 },
+      (index) => {
+        const kind = kinds[index];
+        if (kind) router.push(`/medications/new?kind=${kind}` as Href);
+      },
+    );
+  };
+
   const visible = useMemo(
     () => filterRegimens(regimens.data ?? [], { status, query }),
     [regimens.data, status, query],
@@ -68,14 +89,24 @@ export default function MedicationsScreen() {
       options={{
         title: t("medications.navTitle"),
         headerRight: () => (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={t("medications.settings")}
-            hitSlop={space.sm}
-            onPress={editInterval}
-          >
-            <Icon icon={Settings} size={22} tone="foreground" />
-          </Pressable>
+          <View style={{ flexDirection: "row", gap: space.lg }}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t("medications.settings")}
+              hitSlop={space.sm}
+              onPress={editInterval}
+            >
+              <Icon icon={Settings} size={22} tone="foreground" />
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t("medications.add")}
+              hitSlop={space.sm}
+              onPress={add}
+            >
+              <Icon icon={Plus} size={24} tone="foreground" />
+            </Pressable>
+          </View>
         ),
         headerSearchBarOptions: {
           placeholder: t("common.search"),

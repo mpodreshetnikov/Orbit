@@ -17,6 +17,7 @@ import {
   useCreateMoneyTransaction,
 } from "@/hooks";
 import { useUIStore } from "@/stores/ui-store";
+import { merchantNames } from "@/types/money-transaction-form";
 
 export default function NewMoneyTransactionPage() {
   const t = useTranslations();
@@ -30,17 +31,7 @@ export default function NewMoneyTransactionPage() {
   const { data: persons } = usePersons();
   const createMutation = useCreateMoneyTransaction();
 
-  const existingMerchantNames = useMemo(
-    () =>
-      [
-        ...new Set(
-          (transactions ?? [])
-            .map((tx) => tx.merchant_name)
-            .filter((name): name is string => !!name?.trim()),
-        ),
-      ].sort(),
-    [transactions],
-  );
+  const existingMerchantNames = useMemo(() => merchantNames(transactions ?? []), [transactions]);
 
   if (!selectedPersonId) {
     return (

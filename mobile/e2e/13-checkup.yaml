@@ -1,0 +1,34 @@
+# One checkup: the seeded annual blood work with its schedule, reason and completions, its sheet,
+# and the hypertension it is linked to, whose page lists it back.
+appId: host.exp.Exponent
+name: Чек-ап
+---
+- runFlow: setup/fresh.yaml
+- openLink: exp://127.0.0.1:8081/--/health/checkups
+- tapOn:
+    text: "Open"
+    optional: true
+- extendedWaitUntil:
+    visible: ".*Annual blood work.*"
+    timeout: 60000
+- waitForAnimationToEnd
+- tapOn:
+    text: ".*Annual blood work.*"
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: "Расписание"
+    timeout: 20000
+- takeScreenshot: checkup-01-detail
+- scrollUntilVisible:
+    element: "История выполнений"
+- takeScreenshot: checkup-02-history
+- tapOn: "Действия: Annual blood work"
+- takeScreenshot: checkup-03-sheet
+- tapOn: "Отмена"
+- scrollUntilVisible:
+    element: ".*Essential hypertension.*"
+    direction: UP
+- tapOn: ".*Essential hypertension.*"
+- scrollUntilVisible:
+    element: "Чек-апы по этому диагнозу"
+- takeScreenshot: checkup-04-condition

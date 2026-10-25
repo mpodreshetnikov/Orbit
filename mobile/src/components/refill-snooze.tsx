@@ -2,14 +2,10 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 import { useState } from "react";
 import { View } from "react-native";
 import { Button, Text } from "@/components/ui";
+import { noonOf } from "@/features/medications/form";
 import { t } from "@/lib/i18n";
 import { dayKey, useRefillSnooze, useSetRefillSnooze } from "@/lib/queries";
 import { radius, space, usePalette } from "@/theme";
-
-/** A stored `YYYY-MM-DD` at noon, so no time zone can move it to the day before. */
-function noonOf(day: string): Date {
-  return new Date(`${day}T12:00:00`);
-}
 
 /**
  * The web course page's low-stock box: put the reminder about running out off until a day, when a

@@ -321,14 +321,20 @@ describe("the bridge", () => {
     });
   });
 
-  it("reaches this repository's own task-claim check from a session started elsewhere", () => {
-    const out = runBridge(ORBIT_ROOT, {
-      hook_event_name: "PostToolUse",
-      tool_name: "Edit",
-      tool_input: { file_path: path.join(ORBIT_ROOT, "docs", "tasks", "x.md") },
-    });
-    // A registry edit needs no claim; the point is that the bridge ran the real settings cleanly.
-    expect(out.status).toBe(0);
-    expect(out.stderr).toBe("");
-  });
+  // Spawns the bridge and the claim check it reaches; 6-10 s on a runner shared with the database
+  // lane, so the default 10 s budget made it fail at random.
+  it(
+    "reaches this repository's own task-claim check from a session started elsewhere",
+    { timeout: 30_000 },
+    () => {
+      const out = runBridge(ORBIT_ROOT, {
+        hook_event_name: "PostToolUse",
+        tool_name: "Edit",
+        tool_input: { file_path: path.join(ORBIT_ROOT, "docs", "tasks", "x.md") },
+      });
+      // A registry edit needs no claim; the point is that the bridge ran the real settings cleanly.
+      expect(out.status).toBe(0);
+      expect(out.stderr).toBe("");
+    },
+  );
 });

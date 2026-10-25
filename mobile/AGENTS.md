@@ -88,3 +88,11 @@ and Maestro matches text whole, so match rows by prefix (`"Vitamin D3.*"`); the 
 `supabase/seed.sql`'s user `dev@example.com`, with today's doses and yesterday's (taken) generated
 in the run, and Magnesium given a low stock. Seeded rows keep fixed ids, so a flow can open one by
 link (`exp://127.0.0.1:8081/--/medications/<id>`).
+
+Every flow starts with `- runFlow: setup/fresh.yaml`, which relaunches the client on «Сегодня»: a
+flow that fails can leave a form's sheet open, and every later link would land inside it. Then open
+the screen by its own link and wait for something only that screen has, because a screen the link
+replaced stays readable for a moment and a tap on a word both share hits the old one. A field whose
+caption reads the same as its label is tapped by `testID`. A row low on a list with a search field
+sits under that field on iOS 26: `scrollUntilVisible` with `centerElement: true` before the tap.
+Close the keyboard before tapping a choice: the first tap past it only closes it.

@@ -22,7 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { ConditionStatusBadge } from "./condition-status-badge";
-import { isAwaitingClosureReview } from "@/lib/conditions/unverified-closure";
+import { isAwaitingClosureReview } from "@/types/condition-closure";
 import { getConditionIcdName } from "@/hooks";
 import type { ConditionRecordWithDetails } from "@/types";
 

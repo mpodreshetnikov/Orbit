@@ -42,7 +42,7 @@ function chooseInSheet(label: string) {
 function answerAlert(label: string) {
   const titles: string[] = [];
   jest.spyOn(Alert, "alert").mockImplementationOnce((title, _message, buttons) => {
-    titles.push(title);
+    titles.push(title ?? "");
     (buttons as AlertButton[]).find((button) => button.text === label)?.onPress?.();
   });
   return titles;
@@ -91,7 +91,13 @@ describe("a course's menu", () => {
     const asked = answerAlert("В архив");
     await openCourseMenu("Vitamin D3");
 
-    expect(offered[0]).toEqual(["Пополнить", "В архив", "Удалить лекарство", "Отмена"]);
+    expect(offered[0]).toEqual([
+      "Редактировать",
+      "Пополнить",
+      "В архив",
+      "Удалить лекарство",
+      "Отмена",
+    ]);
     await waitFor(() => expect(asked[0]).toMatch(/^Отправить лекарство в архив\?/));
     await waitFor(() =>
       expect(db.tables.med_regimens.find((row) => row.id === "reg-vitd")?.status).toBe("archived"),
@@ -110,7 +116,12 @@ describe("a course's menu", () => {
     await openCourseMenu("Магний");
 
     // Магний keeps no stock, so there is nothing to refill.
-    expect(offered[0]).toEqual(["Вернуть из архива", "Удалить лекарство", "Отмена"]);
+    expect(offered[0]).toEqual([
+      "Редактировать",
+      "Вернуть из архива",
+      "Удалить лекарство",
+      "Отмена",
+    ]);
     await waitFor(() =>
       expect(db.tables.med_regimens.find((row) => row.id === "reg-mg")?.status).toBe("active"),
     );

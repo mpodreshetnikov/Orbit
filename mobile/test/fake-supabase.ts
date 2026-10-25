@@ -9,8 +9,8 @@ import type { Session } from "@supabase/supabase-js";
  * would for the simple cases the app uses, so a screen test also covers the query it depends on.
  * A joined column (`regimen:med_regimens(...)`) is not resolved; seed the row with the nested object
  * already in place. The three dose RPCs change the seeded dose as the database functions do, so a
- * refetch after a tap sees the new state; any other RPC is answered by `rpcHandlers`. Every call is
- * recorded in `calls`.
+ * refetch after a tap sees the new state; any other RPC, and any edge function, is answered by
+ * `rpcHandlers`. Every call is recorded in `calls`.
  *
  * Writes work the same way: `insert`, `update`, `upsert` and `delete` change the seeded rows, after
  * the filters chained to them, and a `select()` after one returns what was written. A new row gets an
@@ -46,6 +46,7 @@ const listeners = new Set<(event: string, session: Session | null) => void>();
 export function seed(tables: Record<string, Row[]>) {
   db.tables = structuredClone(tables);
   db.failing.clear();
+  failingOnce.clear();
   calls.rpc = [];
   for (const name of Object.keys(rpcHandlers)) {
     delete rpcHandlers[name];
@@ -56,6 +57,13 @@ export function seed(tables: Record<string, Row[]>) {
 export function fail(name: string) {
   db.failing.add(name);
 }
+
+/** Fail the next request to `name` only, so what follows it (a refetch after an error) succeeds. */
+export function failOnce(name: string) {
+  failingOnce.add(name);
+}
+
+const failingOnce = new Set<string>();
 
 export function setSession(next: Session | null) {
   session = next;
@@ -78,6 +86,8 @@ function compare(a: unknown, b: unknown): number {
   if (a === b) return 0;
   if (a == null) return -1;
   if (b == null) return 1;
+  // Numbers order as numbers, as Postgres orders them; the rest as text.
+  if (typeof a === "number" && typeof b === "number") return a < b ? -1 : 1;
   return String(a) < String(b) ? -1 : 1;
 }
 
@@ -93,6 +103,7 @@ class Query {
   private filters: Filter[] = [];
   private orders: { column: string; ascending: boolean }[] = [];
   private one = false;
+  private window: [number, number] | null = null;
   private write: Write | null = null;
 
   constructor(private readonly table: string) {}
@@ -118,8 +129,11 @@ class Query {
   select() {
     return this;
   }
+  /** A dotted column filters on an embedded row, as `.eq("medical_records.status", …)` does. */
   eq(column: string, value: unknown) {
-    this.filters.push((row) => row[column] === value);
+    this.filters.push(
+      (row) => column.split(".").reduce<unknown>((at, key) => (at as Row)?.[key], row) === value,
+    );
     return this;
   }
   is(column: string, value: unknown) {
@@ -142,6 +156,11 @@ class Query {
     this.orders.push({ column, ascending: options.ascending ?? true });
     return this;
   }
+  /** Rows `from` to `to`, both inclusive, as PostgREST pages them. */
+  range(from: number, to: number) {
+    this.window = [from, to];
+    return this;
+  }
   maybeSingle() {
     this.one = true;
     return this;
@@ -160,7 +179,11 @@ class Query {
     }
     if (write.kind === "upsert") {
       return write.rows.map((row) => {
-        const existing = table.find((one) => one[write.key] === row[write.key]);
+        // `onConflict` may name several columns, as "recipient_user_id,person_id" does.
+        const columns = write.key.split(",").map((column) => column.trim());
+        const existing = table.find((one) =>
+          columns.every((column) => one[column] === row[column]),
+        );
         if (existing) return Object.assign(existing, structuredClone(row));
         const created = { id: `new-${nextId++}`, ...structuredClone(row) };
         table.push(created);
@@ -177,7 +200,7 @@ class Query {
   }
 
   private run(): Result {
-    if (db.failing.has(this.table)) {
+    if (failingOnce.delete(this.table) || db.failing.has(this.table)) {
       return { data: null, error: { message: `${this.table} is unavailable` } };
     }
     if (this.write) {
@@ -192,7 +215,9 @@ class Query {
       }
       return 0;
     });
-    const copy = structuredClone(sorted);
+    const copy = structuredClone(
+      this.window ? sorted.slice(this.window[0], this.window[1] + 1) : sorted,
+    );
     return { data: this.one ? (copy[0] ?? null) : copy, error: null };
   }
 
@@ -214,6 +239,10 @@ export const supabase = {
     }
     doseFunctions[name]?.(args);
     return { data: rpcHandlers[name]?.(args) ?? null, error: null };
+  },
+  functions: {
+    invoke: (name: string, options: { body?: Record<string, unknown> } = {}) =>
+      supabase.rpc(name, options.body),
   },
   auth: {
     getSession: async () => ({ data: { session }, error: null }),

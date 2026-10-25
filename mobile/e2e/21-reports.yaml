@@ -1,0 +1,21 @@
+# The budget report, opened by its link, and a category's target.
+appId: host.exp.Exponent
+name: Отчеты
+---
+- runFlow: setup/fresh.yaml
+- openLink: exp://127.0.0.1:8081/--/money/reports
+- tapOn: { text: "Open", optional: true }
+- extendedWaitUntil:
+    visible: "(Фактические доходы|Не удалось загрузить.*)" # The rates sync needs the edge function.
+    timeout: 60000
+- takeScreenshot: reports-01-month
+- runFlow:
+    when: { visible: "Изменить цель: Food" }
+    commands:
+      - tapOn: "Изменить цель: Food"
+      - extendedWaitUntil: { visible: "Сумма цели.*", timeout: 10000 }
+      - takeScreenshot: reports-02-target
+      - tapOn: "Отмена"
+- tapOn: "Псевдонимы для переводов себе"
+- extendedWaitUntil: { visible: "Добавить", timeout: 10000 }
+- takeScreenshot: reports-03-aliases

@@ -1,0 +1,78 @@
+# A course added from the list's plus, edited from its menu, then a one-off taken into a picked course.
+appId: host.exp.Exponent
+name: Курс — форма
+---
+- runFlow: setup/fresh.yaml
+- openLink: exp://127.0.0.1:8081/--/medications
+- tapOn: { text: "Open", optional: true }
+- extendedWaitUntil:
+    visible: "Vitamin D3.*"
+    timeout: 60000
+- retry: # A list still settling can swallow the plus: tap until its sheet opens.
+    maxRetries: 3
+    commands:
+      - tapOn: "Добавить лекарство"
+      - extendedWaitUntil: { visible: "Регулярно", timeout: 5000 }
+- tapOn: "Регулярно"
+- extendedWaitUntil:
+    visible: "Основные данные"
+    timeout: 10000
+- tapOn:
+    text: "Continue"
+    optional: true
+- inputText: "Омега-3"
+- hideKeyboard
+- takeScreenshot: form-01-new
+- scrollUntilVisible:
+    element: "Приёмов в день.*"
+- tapOn: "2"
+- takeScreenshot: form-02-schedule
+- scrollUntilVisible:
+    element: "Учитывать запас"
+- tapOn:
+    id: "inventory-enabled"
+- tapOn: { id: "stock-current" } # The label does not focus its field.
+- inputText: "60" # A number pad has no key to hide it by; Save is in the bar above it.
+- takeScreenshot: form-03-stock
+- tapOn: "Сохранить"
+- extendedWaitUntil:
+    visible: "Сейчас: 60.*"
+    timeout: 20000
+- takeScreenshot: form-04-saved
+- tapOn: "Действия: Омега-3"
+- tapOn: "Редактировать"
+- extendedWaitUntil:
+    visible: "Основные данные"
+    timeout: 10000
+- scrollUntilVisible:
+    element: "Частота: Ежедневно"
+- tapOn: "Частота: Ежедневно"
+- tapOn: "Конкретные дни недели"
+- takeScreenshot: form-05-edit-weekly
+- tapOn: "Сохранить"
+- extendedWaitUntil:
+    visible: ".*Пн.*"
+    timeout: 20000
+- takeScreenshot: form-06-edited
+- openLink: exp://127.0.0.1:8081/--/medications
+- extendedWaitUntil:
+    visible: "Vitamin D3.*"
+    timeout: 15000
+- tapOn: "Добавить лекарство"
+- tapOn: "Разово"
+- extendedWaitUntil:
+    visible: "Когда принять"
+    timeout: 10000
+- inputText: "Vit"
+- tapOn: "Vitamin D3" # The suggestion; the list under the sheet is out of reach.
+# Picking the suggestion closes the keyboard. A hideKeyboard here would tap the sheet instead and
+# could open the time picker: "Сохранить" in the bar is reachable as it is.
+- tapOn:
+    text: "dismiss popup"
+    optional: true
+- takeScreenshot: form-07-one-off
+- tapOn: "Сохранить"
+- extendedWaitUntil:
+    visible: "История приёмов.*"
+    timeout: 20000
+- takeScreenshot: form-08-one-off-saved

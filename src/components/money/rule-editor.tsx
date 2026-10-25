@@ -51,9 +51,7 @@ import { cn } from "@/lib/utils";
 import { useUIStore } from "@/stores/ui-store";
 import type {
   CreateMoneyCategoryRuleInput,
-  MoneyCategory,
   MoneyCategoryRule,
-  MoneyCategoryRuleFilter,
   MoneyCategoryRuleFilterOperator,
   MoneyCategoryRuleKind,
   MoneyCategoryRuleMatchMode,
@@ -63,35 +61,23 @@ import type {
   UpdateMoneyCategoryRuleInput,
 } from "@/types";
 import {
+  emptyRuleForm,
+  isSmartRuleKind,
+  RULE_FILTER_FIELDS,
+  RULE_FILTER_OPERATORS,
+  ruleCategoryLabel,
+  ruleFilterDraft,
+  ruleFormOf,
+  ruleFormProblem,
+  ruleNumberInput,
+  rulePayload,
+  type RuleForm,
+} from "@/types/money-rules";
+import {
   MONEY_CATEGORY_RULE_KINDS,
   MONEY_CATEGORY_RULE_MATCH_MODES,
   MONEY_CATEGORY_RULE_SCOPE_FILTERS,
 } from "@/types";
-
-interface EditableFilterDraft {
-  id: string;
-  field: string;
-  operator: MoneyCategoryRuleFilterOperator;
-  value: string;
-  values: string;
-  min: string;
-  max: string;
-}
-
-interface RuleFormState {
-  id: string | null;
-  name: string;
-  description: string;
-  enabled: boolean;
-  ruleKind: MoneyCategoryRuleKind;
-  targetCategoryId: string;
-  matchMode: MoneyCategoryRuleMatchMode;
-  scopeFilter: MoneyCategoryRuleScopeFilter;
-  stopProcessing: boolean;
-  prompt: string;
-  fallbackSystemKey: string;
-  filters: EditableFilterDraft[];
-}
 
 interface MoneyRuleEditorProps {
   mode: "create" | "edit";
@@ -99,204 +85,6 @@ interface MoneyRuleEditorProps {
   initialExampleTransactionId?: string | null;
   initialExampleLineItemId?: string | null;
   autoRunExample?: boolean;
-}
-
-const FILTER_FIELD_OPTIONS: { value: string; labelKey: string }[] = [
-  { value: "line_item_title", labelKey: "money.ruleFieldLineItemTitle" },
-  { value: "merchant_name", labelKey: "money.ruleFieldMerchantName" },
-  { value: "transaction_comment", labelKey: "money.ruleFieldTransactionComment" },
-  { value: "source_comment", labelKey: "money.ruleFieldSourceComment" },
-  { value: "source", labelKey: "money.ruleFieldSource" },
-  { value: "source_category_id", labelKey: "money.ruleFieldSourceCategoryId" },
-  { value: "source_category_name", labelKey: "money.ruleFieldSourceCategoryName" },
-  { value: "mcc", labelKey: "money.ruleFieldMcc" },
-  { value: "transaction_type", labelKey: "money.ruleFieldTransactionType" },
-  { value: "account_source", labelKey: "money.ruleFieldAccountSource" },
-  { value: "account_kind", labelKey: "money.ruleFieldAccountKind" },
-  { value: "payer_person_id", labelKey: "money.ruleFieldPayerPerson" },
-  { value: "line_item_amount", labelKey: "money.ruleFieldLineItemAmount" },
-  { value: "transaction_amount", labelKey: "money.ruleFieldTransactionAmount" },
-  { value: "current_category_id", labelKey: "money.ruleFieldCurrentCategory" },
-  { value: "canonical_branch_system_key", labelKey: "money.ruleFieldCanonicalBranch" },
-  { value: "is_transfer", labelKey: "money.ruleFieldTransferFlag" },
-];
-
-const FILTER_OPERATOR_OPTIONS: { value: MoneyCategoryRuleFilterOperator; labelKey: string }[] = [
-  { value: "contains", labelKey: "money.ruleOperatorContains" },
-  { value: "not_contains", labelKey: "money.ruleOperatorNotContains" },
-  { value: "equals", labelKey: "money.ruleOperatorEquals" },
-  { value: "starts_with", labelKey: "money.ruleOperatorStartsWith" },
-  { value: "regex", labelKey: "money.ruleOperatorRegex" },
-  { value: "contains_any_in_set", labelKey: "money.ruleOperatorContainsAnyOfSet" },
-  { value: "equals_any_in_set", labelKey: "money.ruleOperatorEqualsAnyOfSet" },
-  { value: "range", labelKey: "money.ruleOperatorRange" },
-  { value: "is_empty", labelKey: "money.ruleOperatorIsEmpty" },
-  { value: "is_not_empty", labelKey: "money.ruleOperatorIsNotEmpty" },
-];
-
-function normalizeDraftOperator(
-  operator: MoneyCategoryRuleFilterOperator | undefined,
-): MoneyCategoryRuleFilterOperator {
-  if (operator === "in_set") return "equals_any_in_set";
-  return operator ?? "contains";
-}
-
-function buildDraftId() {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-function createEmptyFilterDraft(seed: Partial<EditableFilterDraft> = {}): EditableFilterDraft {
-  return {
-    id: seed.id ?? buildDraftId(),
-    field: seed.field ?? "merchant_name",
-    operator: normalizeDraftOperator(seed.operator),
-    value: seed.value ?? "",
-    values: seed.values ?? "",
-    min: seed.min ?? "",
-    max: seed.max ?? "",
-  };
-}
-
-function filtersToDrafts(filters: MoneyCategoryRuleFilter[]): EditableFilterDraft[] {
-  return filters.map((filter) =>
-    createEmptyFilterDraft({
-      field: filter.field,
-      operator: filter.operator,
-      value: filter.value == null ? "" : String(filter.value),
-      values: Array.isArray(filter.values) ? filter.values.join(", ") : "",
-      min: filter.min == null ? "" : String(filter.min),
-      max: filter.max == null ? "" : String(filter.max),
-    }),
-  );
-}
-
-function normalizeFilters(filters: EditableFilterDraft[]): MoneyCategoryRuleFilter[] {
-  return filters.reduce<MoneyCategoryRuleFilter[]>((accumulator, filter) => {
-    const normalizedField = filter.field.trim();
-    if (!normalizedField) return accumulator;
-
-    const normalized: MoneyCategoryRuleFilter = {
-      field: normalizedField,
-      operator: filter.operator,
-    };
-
-    if (filter.operator === "contains_any_in_set" || filter.operator === "equals_any_in_set") {
-      const values = filter.values
-        .split(",")
-        .map((value) => value.trim())
-        .filter(Boolean);
-      if (values.length > 0) normalized.values = values;
-    } else if (filter.operator === "range") {
-      normalized.min = filter.min.trim() ? Number(filter.min) : null;
-      normalized.max = filter.max.trim() ? Number(filter.max) : null;
-    } else if (filter.operator !== "is_empty" && filter.operator !== "is_not_empty") {
-      normalized.value = filter.value.trim();
-    }
-
-    accumulator.push(normalized);
-    return accumulator;
-  }, []);
-}
-
-function buildInitialFormState(): RuleFormState {
-  return {
-    id: null,
-    name: "",
-    description: "",
-    enabled: true,
-    ruleKind: "direct",
-    targetCategoryId: "",
-    matchMode: "all",
-    scopeFilter: "all_line_items",
-    stopProcessing: false,
-    prompt: "",
-    fallbackSystemKey: "uncategorized",
-    filters: [],
-  };
-}
-
-function toFormState(rule: MoneyCategoryRule): RuleFormState {
-  return {
-    id: rule.id,
-    name: rule.name,
-    description: rule.description ?? "",
-    enabled: rule.enabled,
-    ruleKind: rule.rule_kind,
-    targetCategoryId: rule.target_category_id ?? "",
-    matchMode: rule.match_mode,
-    scopeFilter: rule.scope_filter,
-    stopProcessing: rule.stop_processing,
-    prompt: typeof rule.config.prompt === "string" ? rule.config.prompt : "",
-    fallbackSystemKey:
-      typeof rule.config.target_system_key === "string"
-        ? rule.config.target_system_key
-        : "uncategorized",
-    filters: filtersToDrafts(rule.filters),
-  };
-}
-
-function buildRulePayload(
-  selectedPersonId: string,
-  form: RuleFormState,
-  rules: MoneyCategoryRule[],
-): CreateMoneyCategoryRuleInput | UpdateMoneyCategoryRuleInput {
-  const config: Record<string, unknown> = {};
-
-  if (form.ruleKind === "llm_categorization" && form.prompt.trim()) {
-    config.prompt = form.prompt.trim();
-  }
-
-  if (form.ruleKind === "fallback_uncategorized") {
-    config.target_system_key = form.fallbackSystemKey.trim() || "uncategorized";
-  }
-
-  const sharedFields = {
-    name: form.name.trim(),
-    description: form.description.trim() || null,
-    enabled: form.enabled,
-    rule_kind: form.ruleKind,
-    target_category_id: form.ruleKind === "direct" ? form.targetCategoryId || null : null,
-    match_mode: form.matchMode,
-    scope_filter: form.scopeFilter,
-    filters: normalizeFilters(form.filters),
-    config,
-    stop_processing: form.stopProcessing,
-  };
-
-  if (form.id) {
-    return sharedFields;
-  }
-
-  return {
-    person_id: selectedPersonId,
-    sort_order: rules.length + 1,
-    ...sharedFields,
-  };
-}
-
-function normalizeNumberInput(value: string): string {
-  let normalized = value.replace(/[^\d.-]/g, "");
-  normalized = normalized.replace(/(?!^)-/g, "");
-
-  const dotIndex = normalized.indexOf(".");
-  if (dotIndex !== -1) {
-    normalized =
-      normalized.slice(0, dotIndex + 1) + normalized.slice(dotIndex + 1).replace(/[.]/g, "");
-  }
-
-  return normalized;
-}
-
-function isSmartRuleKind(kind: MoneyCategoryRuleKind) {
-  return kind !== "direct" && kind !== "fallback_uncategorized";
-}
-
-function buildCategoryLabel(category: MoneyCategory) {
-  const systemKey = category.system_key ? ` (${category.system_key})` : "";
-  return `${category.name_en} / ${category.name_ru}${systemKey}`;
 }
 
 function Field({
@@ -358,9 +146,7 @@ export function MoneyRuleEditor({
   const { data: rules } = useMoneyCategoryRules(personId);
   const { data: transactions } = useMoneyTransactions(personId);
 
-  const [form, setForm] = useState<RuleFormState>(() =>
-    rule ? toFormState(rule) : buildInitialFormState(),
-  );
+  const [form, setForm] = useState<RuleForm>(() => (rule ? ruleFormOf(rule) : emptyRuleForm()));
   const [hasLocalChanges, setHasLocalChanges] = useState(false);
   const [previewRun, setPreviewRun] = useState<MoneyCategoryRuleRun | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -383,7 +169,7 @@ export function MoneyRuleEditor({
     const nextRuleId = rule?.id ?? null;
     const didRuleIdentityChange = previousRuleIdRef.current !== nextRuleId;
 
-    setForm(rule ? toFormState(rule) : buildInitialFormState());
+    setForm(rule ? ruleFormOf(rule) : emptyRuleForm());
     setHasLocalChanges(false);
     setPreviewRun(null);
     setPreviewError(null);
@@ -482,7 +268,7 @@ export function MoneyRuleEditor({
   const isPreviewing = previewMutation.isPending;
   const isBusy = isSaving || isPreviewing;
 
-  const updateForm = (updater: (current: RuleFormState) => RuleFormState) => {
+  const updateForm = (updater: (current: RuleForm) => RuleForm) => {
     setForm((current) => updater(current));
     setHasLocalChanges(true);
   };
@@ -490,7 +276,7 @@ export function MoneyRuleEditor({
   const getCategoryLabelById = (categoryId: string | null | undefined) => {
     if (!categoryId) return t("money.categoryUnassigned");
     const category = categoryById.get(categoryId);
-    return category ? buildCategoryLabel(category) : categoryId;
+    return category ? ruleCategoryLabel(category) : categoryId;
   };
 
   const getCurrentCanonicalSystemKey = (lineItem: MoneyLineItem | null) => {
@@ -567,28 +353,19 @@ export function MoneyRuleEditor({
 
   const validateForm = () => {
     if (!personId) return false;
-
-    if (!form.name.trim()) {
-      toast.error(t("money.ruleValidationNameRequired"));
+    const problem = ruleFormProblem(form);
+    if (problem) {
+      toast.error(
+        t(
+          problem === "name"
+            ? "money.ruleValidationNameRequired"
+            : problem === "target"
+              ? "money.ruleValidationTargetRequired"
+              : "money.ruleValidationRegexInvalid",
+        ),
+      );
       return false;
     }
-
-    if (form.ruleKind === "direct" && !form.targetCategoryId) {
-      toast.error(t("money.ruleValidationTargetRequired"));
-      return false;
-    }
-
-    for (const filter of form.filters) {
-      if (filter.operator === "regex" && filter.value.trim()) {
-        try {
-          void new RegExp(filter.value);
-        } catch {
-          toast.error(t("money.ruleValidationRegexInvalid"));
-          return false;
-        }
-      }
-    }
-
     return true;
   };
 
@@ -616,7 +393,7 @@ export function MoneyRuleEditor({
   const handlePersistRule = async (previewAfterSave: boolean) => {
     if (!personId || !validateForm()) return;
 
-    const payload = buildRulePayload(personId, form, rules ?? []);
+    const payload = rulePayload(personId, form, rules ?? []);
 
     try {
       if (form.id) {
@@ -833,7 +610,7 @@ export function MoneyRuleEditor({
                                       : "opacity-0",
                                   )}
                                 />
-                                <span className="truncate">{buildCategoryLabel(category)}</span>
+                                <span className="truncate">{ruleCategoryLabel(category)}</span>
                               </CommandItem>
                             ))}
                           </CommandGroup>
@@ -901,7 +678,7 @@ export function MoneyRuleEditor({
                                       : "opacity-0",
                                   )}
                                 />
-                                <span className="truncate">{buildCategoryLabel(category)}</span>
+                                <span className="truncate">{ruleCategoryLabel(category)}</span>
                               </CommandItem>
                             ))}
                           </CommandGroup>
@@ -984,7 +761,7 @@ export function MoneyRuleEditor({
                   onClick={() =>
                     updateForm((current) => ({
                       ...current,
-                      filters: [...current.filters, createEmptyFilterDraft()],
+                      filters: [...current.filters, ruleFilterDraft()],
                     }))
                   }
                 >
@@ -1018,7 +795,7 @@ export function MoneyRuleEditor({
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            {FILTER_FIELD_OPTIONS.map((option) => (
+                            {RULE_FILTER_FIELDS.map((option) => (
                               <SelectItem key={option.value} value={option.value}>
                                 {t(option.labelKey)}
                               </SelectItem>
@@ -1045,7 +822,7 @@ export function MoneyRuleEditor({
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            {FILTER_OPERATOR_OPTIONS.map((option) => (
+                            {RULE_FILTER_OPERATORS.map((option) => (
                               <SelectItem key={option.value} value={option.value}>
                                 {t(option.labelKey)}
                               </SelectItem>
@@ -1096,7 +873,7 @@ export function MoneyRuleEditor({
                                   ...current,
                                   filters: current.filters.map((item) =>
                                     item.id === filter.id
-                                      ? { ...item, min: normalizeNumberInput(event.target.value) }
+                                      ? { ...item, min: ruleNumberInput(event.target.value) }
                                       : item,
                                   ),
                                 }))
@@ -1115,7 +892,7 @@ export function MoneyRuleEditor({
                                   ...current,
                                   filters: current.filters.map((item) =>
                                     item.id === filter.id
-                                      ? { ...item, max: normalizeNumberInput(event.target.value) }
+                                      ? { ...item, max: ruleNumberInput(event.target.value) }
                                       : item,
                                   ),
                                 }))

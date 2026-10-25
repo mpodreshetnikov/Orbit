@@ -1,0 +1,48 @@
+# A spend added from the money tab's plus, opened from the feed, then deleted from its sheet.
+appId: host.exp.Exponent
+name: Транзакция
+---
+- runFlow: setup/fresh.yaml
+- openLink: exp://127.0.0.1:8081/--/money
+- tapOn:
+    text: "Open"
+    optional: true
+- extendedWaitUntil:
+    visible: "Совпадений"
+    timeout: 60000
+- tapOn:
+    text: "Добавить транзакцию"
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: "Строки"
+    timeout: 10000
+- inputText: "-420"
+# The field's caption reads «Мерчант» too: tap the field itself.
+- tapOn:
+    id: "transaction-merchant"
+- inputText: "Пекарня у дома"
+- hideKeyboard
+- takeScreenshot: transaction-01-form
+- tapOn: "Сохранить"
+# The field holds the same words: wait for the form to close first.
+- extendedWaitUntil:
+    notVisible:
+      id: "transaction-merchant"
+    timeout: 20000
+- extendedWaitUntil:
+    visible: "Пекарня у дома.*"
+    timeout: 20000
+- takeScreenshot: transaction-02-feed
+- tapOn: "Пекарня у дома.*"
+- extendedWaitUntil:
+    visible: "Строки"
+    timeout: 10000
+- takeScreenshot: transaction-03-page
+- tapOn: "Действия: Пекарня у дома"
+- tapOn: "Удалить транзакцию"
+- tapOn:
+    text: "Удалить транзакцию"
+    index: 1
+- extendedWaitUntil:
+    notVisible: "Пекарня у дома.*"
+    timeout: 20000

@@ -8,7 +8,7 @@ import type {
 } from "@/types";
 import { createTestQueryClient, createTestQueryWrapper } from "../../test/utils/web/render";
 import { createQueryBuilder } from "../../test/utils/web/supabase-query";
-import { AUTHORITATIVE_STATUS_FILTER } from "@/lib/conditions/unverified-closure";
+import { AUTHORITATIVE_STATUS_FILTER } from "@/types/condition-closure";
 
 const { createClientMock } = vi.hoisted(() => ({
   createClientMock: vi.fn(),

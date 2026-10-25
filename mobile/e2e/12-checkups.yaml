@@ -1,0 +1,49 @@
+# Checkups: «Чек-апы» opened by its link, grouped by when they are due, one planned for today from
+# its card, then marked done with a note.
+appId: host.exp.Exponent
+name: Чек-апы
+---
+- runFlow: setup/fresh.yaml
+- openLink: exp://127.0.0.1:8081/--/health/checkups
+- tapOn:
+    text: "Open"
+    optional: true
+- extendedWaitUntil:
+    visible: "Отметить выполненным"
+    timeout: 60000
+- waitForAnimationToEnd
+- takeScreenshot: checkups-01-list
+- tapOn:
+    text: "Запланировать"
+    index: 0
+- extendedWaitUntil:
+    visible: "Запланировать на дату"
+    timeout: 10000
+- takeScreenshot: checkups-02-plan
+- tapOn: "Сохранить"
+- extendedWaitUntil:
+    visible: ".*Запланировано на: .*"
+    timeout: 20000
+- takeScreenshot: checkups-03-planned
+- tapOn:
+    text: "Отметить выполненным"
+    index: 0
+- extendedWaitUntil:
+    visible: "Дата выполнения"
+    timeout: 10000
+- tapOn:
+    id: "completion-note"
+# A fresh simulator shows the slide-to-type tip over its first keyboard.
+- tapOn:
+    text: "Continue"
+    optional: true
+- tapOn:
+    id: "completion-note"
+- inputText: "Сдал натощак"
+- hideKeyboard
+- takeScreenshot: checkups-04-complete
+- tapOn: "Сохранить"
+- extendedWaitUntil:
+    notVisible: "Дата выполнения"
+    timeout: 20000
+- takeScreenshot: checkups-05-done

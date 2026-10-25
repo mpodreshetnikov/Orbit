@@ -6,6 +6,8 @@ import {
   ChevronRight,
   Clock,
   MoreHorizontal,
+  Settings,
+  Wallet,
   X,
 } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -19,7 +21,6 @@ import { doseAmountLabel, doseName, doseUnit, isOpen, type DayDose } from "@/fea
 import { intakeAdviceLabel } from "@/features/medications/format";
 import { t } from "@/lib/i18n";
 import { useDayDoses, useDoseAction, usePerson, type DoseAction } from "@/lib/queries";
-import { useSession } from "@/lib/session";
 import { radius, space, usePalette } from "@/theme";
 
 /** How long a dose acted on stays in place, showing its new state, before it moves to the completed
@@ -45,7 +46,6 @@ function shiftDay(day: Date, by: number): Date {
 export default function TodayScreen() {
   const palette = usePalette();
   const router = useRouter();
-  const { signOut } = useSession();
   const person = usePerson();
   const [today, setToday] = useState(() => startOfDay(new Date()));
   const [offset, setOffset] = useState(0);
@@ -129,11 +129,24 @@ export default function TodayScreen() {
     <Stack.Screen
       options={{
         title: isToday ? t("medications.dateToday") : dateLabel,
+        headerLeft: () => (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t("money.addTransaction")}
+            hitSlop={space.sm}
+            onPress={() => router.push("/today/spend" as Href)}
+          >
+            <Icon icon={Wallet} size={22} tone="foreground" />
+          </Pressable>
+        ),
         headerRight: () => (
-          <Pressable accessibilityRole="button" onPress={() => void signOut()} hitSlop={space.sm}>
-            <Text size="base" tone="mutedForeground">
-              {t("auth.signOut")}
-            </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t("nav.settings")}
+            hitSlop={space.sm}
+            onPress={() => router.push("/today/settings" as Href)}
+          >
+            <Icon icon={Settings} size={22} tone="foreground" />
           </Pressable>
         ),
       }}

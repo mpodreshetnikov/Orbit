@@ -69,7 +69,8 @@ describe("the app", () => {
     setSession(fakeSession(USER_ID));
     await renderApp("/");
     expect((await screen.findAllByText("Vitamin D3")).length).toBeGreaterThan(0);
-    expect(calls.rpc).toEqual([]);
+    // Every tab is mounted: only the money tab's feed is asked of a function.
+    expect(calls.rpc.filter((call) => !call.name.startsWith("money_"))).toEqual([]);
   });
 
   it("says why the sign-in could not start", async () => {
@@ -132,7 +133,8 @@ describe("the app", () => {
   it("signs out back to the sign-in screen", async () => {
     setSession(fakeSession(USER_ID));
     await renderApp("/today");
-    await fireEvent.press((await screen.findAllByText("Выйти"))[0]);
+    await fireEvent.press((await screen.findAllByLabelText("Настройки"))[0]!);
+    await fireEvent.press(await screen.findByText("Выйти"));
     expect(await screen.findByText("Войти через Google")).toBeOnTheScreen();
   });
 });

@@ -1,0 +1,26 @@
+# Lab values: «Анализы» opened by its link, the seeded blood test's values, and one value's history
+# with its reference range.
+appId: host.exp.Exponent
+name: Анализы
+---
+- runFlow: setup/fresh.yaml
+- openLink: exp://127.0.0.1:8081/--/health/observations
+- tapOn:
+    text: "Open"
+    optional: true
+# A row reads as one element, its name first: match the whole of it.
+- extendedWaitUntil:
+    visible: "(Гемоглобин|Hemoglobin).*"
+    timeout: 60000
+- takeScreenshot: observations-01-list
+# iOS keeps the search field over the bottom of the list: bring the row to the middle before a tap.
+- scrollUntilVisible:
+    element: "(Гемоглобин|Hemoglobin).*"
+    centerElement: true
+- tapOn:
+    text: "(Гемоглобин|Hemoglobin).*"
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: "Референсный интервал"
+    timeout: 20000
+- takeScreenshot: observations-02-hemoglobin

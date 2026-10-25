@@ -1,0 +1,23 @@
+# The category tree, opened by its link, and the form a custom category is added with.
+appId: host.exp.Exponent
+name: Категории
+---
+- runFlow: setup/fresh.yaml
+- openLink: exp://127.0.0.1:8081/--/money/categories
+- tapOn: { text: "Open", optional: true }
+# A category row reads as one element, its name first.
+- extendedWaitUntil:
+    visible: "Income.*"
+    timeout: 60000
+- takeScreenshot: categories-01-tree
+- tapOn: "Income.*"
+- extendedWaitUntil:
+    visible: "Добавить категорию"
+    timeout: 10000
+- takeScreenshot: categories-02-actions
+- tapOn: "Добавить категорию"
+- extendedWaitUntil:
+    visible: "Каноническая ветка"
+    timeout: 10000
+- takeScreenshot: categories-03-form
+- tapOn: "Отмена"

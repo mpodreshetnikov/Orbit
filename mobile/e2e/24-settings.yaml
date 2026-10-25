@@ -1,0 +1,14 @@
+# The settings, as today's header opens them: whose record the phone shows, and the notification
+# choices.
+appId: host.exp.Exponent
+name: Настройки
+---
+- runFlow: setup/fresh.yaml
+- openLink: exp://127.0.0.1:8081/--/today/settings
+- tapOn: { text: "Open", optional: true }
+- extendedWaitUntil: { visible: "ВЫБРАТЬ ПЕРСОНУ", timeout: 60000 }
+- takeScreenshot: settings-01-person
+- scrollUntilVisible: { element: "КОГО УВЕДОМЛЯТЬ", direction: DOWN }
+- takeScreenshot: settings-02-reminders
+- scrollUntilVisible: { element: "Выйти", direction: DOWN }
+- takeScreenshot: settings-03-routing

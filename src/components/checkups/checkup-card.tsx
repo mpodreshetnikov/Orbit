@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
+import { checkupLateness, isoDay } from "@/types/checkup-summary";
 import type { CheckupItem, CheckupItemStatus, CheckupCategory } from "@/types";
 
 interface CheckupCardProps {
@@ -64,13 +65,10 @@ export function CheckupCard({
 }: CheckupCardProps) {
   const t = useTranslations();
   const dateLocale = useDateFnsLocale();
-  const today = new Date().toISOString().slice(0, 10);
-  const isOverdueByDue = item.status === "active" && item.next_due_at && item.next_due_at < today;
-  const isOverdueByPlan =
-    item.status === "active" &&
-    item.planned_on &&
-    item.planned_on < today &&
-    (!item.next_due_at || item.next_due_at >= today);
+  const { byDue: isOverdueByDue, byPlan: isOverdueByPlan } = checkupLateness(
+    item,
+    isoDay(new Date()),
+  );
   const isOverdue = isOverdueByDue || isOverdueByPlan;
   const canMarkComplete = item.status === "active";
   const canPlan = item.status === "active" && item.next_due_at;

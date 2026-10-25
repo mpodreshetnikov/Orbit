@@ -46,7 +46,7 @@ function calendarDay(day: string): string {
  * The card says what the course is: its status, its schedule, its dates, its stock and notes, and,
  * when the stock runs low, lets the reminder about it be put off. Below it the last few intakes, each
  * answerable or undoable from its menu exactly as on the web, and a row into the full history. The
- * button in the bar holds what the web page's toolbar does: refill, archive or bring back, delete. Reached from either tab, so the history it opens is pushed onto whichever
+ * button in the bar holds what the web page's toolbar does: edit, refill, archive or bring back, delete. Reached from either tab, so the history it opens is pushed onto whichever
  * stack the course is on and the back gesture returns where it came from.
  */
 export default function MedicationScreen() {
@@ -80,6 +80,7 @@ export default function MedicationScreen() {
                 hitSlop={space.sm}
                 onPress={() =>
                   showCourseSheet(course, {
+                    edit: () => router.push(`${pathname}/edit` as Href),
                     change: (kind) =>
                       change.mutate(
                         { regimenId: course.id, change: kind },

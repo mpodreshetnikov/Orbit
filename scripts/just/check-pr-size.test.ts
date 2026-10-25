@@ -505,21 +505,27 @@ describe("base ref resolution", () => {
     return `${result.stdout}${result.stderr}`;
   }
 
-  it("steps aside on CI's push to main, and measures a pull request whatever its branch is called", () => {
-    // The deploy of #96 itself failed here: the tests inherited the runner's environment, and on
-    // the push to main every one of them was told the gate had stepped aside.
-    const skipped = runScript([], { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/main" });
-    expect(skipped.status, skipped.stderr).toBe(0);
-    expect(skipped.stdout).toContain("PR size check skipped");
+  // Two runs of the script, each a child node and several git calls: on a runner that also hosts
+  // the database lane it has taken 10-20 s, so the default 10 s budget made it fail at random.
+  it(
+    "steps aside on CI's push to main, and measures a pull request whatever its branch is called",
+    { timeout: 30_000 },
+    () => {
+      // The deploy of #96 itself failed here: the tests inherited the runner's environment, and on
+      // the push to main every one of them was told the gate had stepped aside.
+      const skipped = runScript([], { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/main" });
+      expect(skipped.status, skipped.stderr).toBe(0);
+      expect(skipped.stdout).toContain("PR size check skipped");
 
-    const measured = runScript([], {
-      GITHUB_EVENT_NAME: "pull_request",
-      GITHUB_REF: "refs/pull/1/merge",
-      PR_SIZE_BRANCH: "main",
-    });
-    expect(measured.status, measured.stderr).toBeLessThan(2);
-    expect(`${measured.stdout}${measured.stderr}`).not.toContain("PR size check skipped");
-  });
+      const measured = runScript([], {
+        GITHUB_EVENT_NAME: "pull_request",
+        GITHUB_REF: "refs/pull/1/merge",
+        PR_SIZE_BRANCH: "main",
+      });
+      expect(measured.status, measured.stderr).toBeLessThan(2);
+      expect(`${measured.stdout}${measured.stderr}`).not.toContain("PR size check skipped");
+    },
+  );
 
   it("checks against the base it was given", () => {
     expect(resolvedAgainst(runScript([], { PR_SIZE_BASE: "origin/main" }))).toContain(

@@ -4,44 +4,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { callMoneyCategorizeAction } from "@/lib/money-categorize-client";
 import { createClient } from "@/lib/supabase";
 import type { Database, Json } from "@/types/database";
+import { rowToMoneyCategoryRule } from "@/types/money-rules";
 import type {
   CreateMoneyCategoryRuleInput,
   MoneyCategoryRule,
-  MoneyCategoryRuleFilter,
   MoneyCategoryRuleRun,
   UpdateMoneyCategoryRuleInput,
 } from "@/types";
 
 type MoneyCategoryRuleInsert = Database["public"]["Tables"]["money_category_rules"]["Insert"];
 type MoneyCategoryRuleUpdate = Database["public"]["Tables"]["money_category_rules"]["Update"];
-
-function normalizeFilters(value: unknown): MoneyCategoryRuleFilter[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter((item): item is MoneyCategoryRuleFilter =>
-    Boolean(item && typeof item === "object"),
-  );
-}
-
-function rowToMoneyCategoryRule(row: Record<string, unknown>): MoneyCategoryRule {
-  return {
-    id: String(row.id),
-    person_id: String(row.person_id),
-    name: String(row.name ?? ""),
-    description: (row.description as string | null) ?? null,
-    enabled: Boolean(row.enabled),
-    sort_order: Number(row.sort_order ?? 0),
-    rule_kind: row.rule_kind as MoneyCategoryRule["rule_kind"],
-    target_category_id: (row.target_category_id as string | null) ?? null,
-    match_mode: (row.match_mode as MoneyCategoryRule["match_mode"]) ?? "all",
-    scope_filter: (row.scope_filter as MoneyCategoryRule["scope_filter"]) ?? "all_line_items",
-    filters: normalizeFilters(row.filters),
-    config: (row.config as Record<string, unknown> | null) ?? {},
-    stop_processing: Boolean(row.stop_processing),
-    created_by: (row.created_by as string | null) ?? null,
-    created_at: String(row.created_at ?? ""),
-    updated_at: String(row.updated_at ?? ""),
-  };
-}
 
 function asRuleStep(raw: Record<string, unknown>) {
   return {

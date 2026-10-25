@@ -16,173 +16,7 @@ import {
   useReorderMoneyCategoryRules,
 } from "@/hooks";
 import { useUIStore } from "@/stores/ui-store";
-import type { MoneyCategoryRule } from "@/types";
-
-const FILTER_FIELD_OPTIONS: { value: string; labelKey: string; fallbackLabel: string }[] = [
-  {
-    value: "line_item_title",
-    labelKey: "money.ruleFieldLineItemTitle",
-    fallbackLabel: "Line-item title",
-  },
-  {
-    value: "merchant_name",
-    labelKey: "money.ruleFieldMerchantName",
-    fallbackLabel: "Merchant name",
-  },
-  {
-    value: "transaction_comment",
-    labelKey: "money.ruleFieldTransactionComment",
-    fallbackLabel: "Transaction comment",
-  },
-  {
-    value: "source_comment",
-    labelKey: "money.ruleFieldSourceComment",
-    fallbackLabel: "Source comment",
-  },
-  { value: "source", labelKey: "money.ruleFieldSource", fallbackLabel: "Source" },
-  {
-    value: "source_category_id",
-    labelKey: "money.ruleFieldSourceCategoryId",
-    fallbackLabel: "Source category id",
-  },
-  {
-    value: "source_category_name",
-    labelKey: "money.ruleFieldSourceCategoryName",
-    fallbackLabel: "Source category name",
-  },
-  { value: "mcc", labelKey: "money.ruleFieldMcc", fallbackLabel: "MCC" },
-  {
-    value: "transaction_type",
-    labelKey: "money.ruleFieldTransactionType",
-    fallbackLabel: "Transaction type",
-  },
-  {
-    value: "account_source",
-    labelKey: "money.ruleFieldAccountSource",
-    fallbackLabel: "Account source",
-  },
-  { value: "account_kind", labelKey: "money.ruleFieldAccountKind", fallbackLabel: "Account kind" },
-  {
-    value: "payer_person_id",
-    labelKey: "money.ruleFieldPayerPerson",
-    fallbackLabel: "Payer person",
-  },
-  {
-    value: "line_item_amount",
-    labelKey: "money.ruleFieldLineItemAmount",
-    fallbackLabel: "Line-item amount",
-  },
-  {
-    value: "transaction_amount",
-    labelKey: "money.ruleFieldTransactionAmount",
-    fallbackLabel: "Transaction amount",
-  },
-  {
-    value: "current_category_id",
-    labelKey: "money.ruleFieldCurrentCategory",
-    fallbackLabel: "Current category",
-  },
-  {
-    value: "canonical_branch_system_key",
-    labelKey: "money.ruleFieldCanonicalBranch",
-    fallbackLabel: "Canonical branch",
-  },
-  { value: "is_transfer", labelKey: "money.ruleFieldTransferFlag", fallbackLabel: "Transfer flag" },
-];
-
-const FILTER_OPERATOR_OPTIONS: { value: string; labelKey: string; fallbackLabel: string }[] = [
-  { value: "contains", labelKey: "money.ruleOperatorContains", fallbackLabel: "contains" },
-  {
-    value: "not_contains",
-    labelKey: "money.ruleOperatorNotContains",
-    fallbackLabel: "does not contain",
-  },
-  { value: "equals", labelKey: "money.ruleOperatorEquals", fallbackLabel: "equals" },
-  { value: "starts_with", labelKey: "money.ruleOperatorStartsWith", fallbackLabel: "starts with" },
-  { value: "regex", labelKey: "money.ruleOperatorRegex", fallbackLabel: "matches regex" },
-  {
-    value: "contains_any_in_set",
-    labelKey: "money.ruleOperatorContainsAnyOfSet",
-    fallbackLabel: "contains any of set",
-  },
-  {
-    value: "equals_any_in_set",
-    labelKey: "money.ruleOperatorEqualsAnyOfSet",
-    fallbackLabel: "equals any of set",
-  },
-  {
-    value: "in_set",
-    labelKey: "money.ruleOperatorEqualsAnyOfSet",
-    fallbackLabel: "equals any of set",
-  },
-  { value: "range", labelKey: "money.ruleOperatorRange", fallbackLabel: "is between" },
-  { value: "is_empty", labelKey: "money.ruleOperatorIsEmpty", fallbackLabel: "is empty" },
-  {
-    value: "is_not_empty",
-    labelKey: "money.ruleOperatorIsNotEmpty",
-    fallbackLabel: "is not empty",
-  },
-];
-
-function resolveSummaryLabel(t: (key: string) => string, labelKey: string, fallbackLabel: string) {
-  const translated = t(labelKey);
-  return translated === labelKey ? fallbackLabel : translated;
-}
-
-function formatRuleSummary(
-  rule: MoneyCategoryRule,
-  t: (key: string) => string,
-  categoryNameById: Map<string, string>,
-) {
-  if (!rule.filters.length) {
-    return t("money.ruleSummaryNoFilters");
-  }
-
-  const fieldLabelByValue = new Map(
-    FILTER_FIELD_OPTIONS.map((option) => [
-      option.value,
-      resolveSummaryLabel(t, option.labelKey, option.fallbackLabel),
-    ]),
-  );
-  const operatorLabelByValue = new Map(
-    FILTER_OPERATOR_OPTIONS.map((option) => [
-      option.value,
-      resolveSummaryLabel(t, option.labelKey, option.fallbackLabel),
-    ]),
-  );
-
-  const parts = rule.filters.map((filter) => {
-    const fieldLabel = fieldLabelByValue.get(filter.field) ?? filter.field;
-    const operatorLabel = operatorLabelByValue.get(filter.operator) ?? filter.operator;
-
-    if (filter.operator === "range") {
-      return `${fieldLabel} ${operatorLabel} ${filter.min ?? "..."} - ${filter.max ?? "..."}`;
-    }
-
-    if (
-      filter.operator === "contains_any_in_set" ||
-      filter.operator === "equals_any_in_set" ||
-      filter.operator === "in_set"
-    ) {
-      const values = (filter.values ?? []).map((value) => `'${value}'`).join(", ");
-      return `${fieldLabel} ${operatorLabel} ${values}`;
-    }
-
-    if (filter.operator === "is_empty" || filter.operator === "is_not_empty") {
-      return `${fieldLabel} ${operatorLabel}`;
-    }
-
-    if (filter.field === "current_category_id" && typeof filter.value === "string") {
-      return `${fieldLabel} ${operatorLabel} '${categoryNameById.get(filter.value) ?? filter.value}'`;
-    }
-
-    return `${fieldLabel} ${operatorLabel} '${String(filter.value ?? "")}'`;
-  });
-
-  const joiner =
-    rule.match_mode === "all" ? ` ${t("money.ruleSummaryAnd")} ` : ` ${t("money.ruleSummaryOr")} `;
-  return parts.join(joiner);
-}
+import { movedRuleIds, ruleCategoryLabel, ruleSummary } from "@/types/money-rules";
 
 export default function MoneyRulesPage() {
   const t = useTranslations();
@@ -200,13 +34,7 @@ export default function MoneyRulesPage() {
   );
 
   const categoryNameById = useMemo(
-    () =>
-      new Map(
-        (categories ?? []).map((category) => [
-          category.id,
-          `${category.name_en} / ${category.name_ru}${category.system_key ? ` (${category.system_key})` : ""}`,
-        ]),
-      ),
+    () => new Map((categories ?? []).map((category) => [category.id, ruleCategoryLabel(category)])),
     [categories],
   );
 
@@ -225,20 +53,13 @@ export default function MoneyRulesPage() {
 
   const handleMoveRule = async (ruleId: string, direction: "up" | "down") => {
     if (!selectedPersonId) return;
-    const currentIndex = orderedRules.findIndex((rule) => rule.id === ruleId);
-    if (currentIndex === -1) return;
-
-    const nextIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
-    if (nextIndex < 0 || nextIndex >= orderedRules.length) return;
-
-    const reordered = [...orderedRules];
-    const [movedRule] = reordered.splice(currentIndex, 1);
-    reordered.splice(nextIndex, 0, movedRule);
+    const orderedRuleIds = movedRuleIds(orderedRules, ruleId, direction);
+    if (!orderedRuleIds) return;
 
     try {
       await reorderRuleMutation.mutateAsync({
         personId: selectedPersonId,
-        orderedRuleIds: reordered.map((rule) => rule.id),
+        orderedRuleIds,
       });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t("common.error"));
@@ -304,7 +125,7 @@ export default function MoneyRulesPage() {
                       <p className="text-sm text-muted-foreground">{rule.description}</p>
                     ) : null}
                     <p className="text-sm text-muted-foreground">
-                      {formatRuleSummary(rule, t, categoryNameById)}
+                      {ruleSummary(rule, t, categoryNameById)}
                     </p>
                     <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
                       <span>{t(`money.ruleScope${rule.scope_filter}`)}</span>

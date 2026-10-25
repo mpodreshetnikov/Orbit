@@ -9,10 +9,7 @@ import {
   proposedClosureStillHolds,
   type PersistedObservation,
 } from "@/lib/conditions/resolution-proposal";
-import {
-  isConfirmedByRecordApproval,
-  isUnverifiedClosure,
-} from "@/lib/conditions/unverified-closure";
+import { isConfirmedByRecordApproval, isUnverifiedClosure } from "@/types/condition-closure";
 
 /**
  * Bringing a document in over MCP (ADR-261021-z02, T-260914-6n1).

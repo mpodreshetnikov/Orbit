@@ -370,7 +370,7 @@ export function createSupabaseHealthStructureRepository(
     // active chart. `active` and `suspected` are how conditions reach the chart at all, so they
     // still apply unreviewed.
     //
-    // The web app carries the same rule in `src/lib/conditions/unverified-closure.ts`; this tree
+    // The web app carries the same rule in `src/types/condition-closure.ts`; this tree
     // imports nothing from that one, so it is written twice on purpose. Change one, change both.
     const { data } = await admin
       .from("condition_records")
