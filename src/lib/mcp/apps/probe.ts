@@ -23,7 +23,7 @@ export const PROBE_HTML = `<!doctype html>
   h1 { margin: 0 0 6px; font-size: 16px; }
   p { margin: 4px 0; }
   .muted { opacity: .7; font-size: 12px; }
-  button { margin-top: 10px; padding: 8px 14px; border-radius: 8px; border: 0; font: inherit; background: #2563eb; color: #fff; }
+  button { margin: 10px 8px 0 0; padding: 8px 14px; border-radius: 8px; border: 0; font: inherit; background: #2563eb; color: #fff; }
   code { font-size: 12px; }
 </style>
 </head>
@@ -32,9 +32,13 @@ export const PROBE_HTML = `<!doctype html>
   <h1>Карточка Orbit работает</h1>
   <p class="muted" id="rendered"></p>
   <p>Связь с Claude: <code id="bridge">ждём ответа…</code></p>
+  <p>Режимы показа: <code id="modes">неизвестно</code></p>
+  <p>Размер: <code id="size">не сообщался</code></p>
   <p>Результат инструмента: <code id="result">ещё не пришёл</code></p>
   <button id="ping" type="button">Проверить вызов сервера</button>
+  <button id="expand" type="button">Развернуть</button>
   <p>Вызов сервера: <code id="call">не проверялся</code></p>
+  <p>Развернуть: <code id="fullscreen">не проверялось</code></p>
 </div>
 <script>
   var nextId = 1;
@@ -64,16 +68,54 @@ export const PROBE_HTML = `<!doctype html>
     if (data.method === "ui/notifications/tool-result") {
       $("result").textContent = "пришёл";
     }
+    if (data.method === "ui/notifications/host-context-changed") {
+      showContext(data.params);
+    }
   });
+  // The host sizes the frame from what the card reports; a card that never reports stays at the
+  // host's default height, which on a phone shows about three lines.
+  var lastHeight = 0;
+  function reportSize() {
+    // Measured from the card and its 8 px margins, not the document, which is never shorter than
+    // the frame it is in, and not from a viewport coordinate, which moves when the card scrolls.
+    var height = Math.ceil(document.querySelector(".card").offsetHeight + 16);
+    if (height === lastHeight) return;
+    lastHeight = height;
+    $("size").textContent = "сообщили " + height + " px";
+    send({
+      jsonrpc: "2.0",
+      method: "ui/notifications/size-changed",
+      params: { width: Math.ceil(document.documentElement.scrollWidth), height: height }
+    });
+  }
+  // Hosts send partial context updates, so each one is merged and the line is drawn afresh.
+  var hostContext = {};
+  function showContext(update) {
+    if (!update) return;
+    for (var key in update) hostContext[key] = update[key];
+    var modes = Array.isArray(hostContext.availableDisplayModes)
+      ? hostContext.availableDisplayModes.join(", ") || "нет"
+      : "неизвестно";
+    var dims = hostContext.containerDimensions;
+    if (dims) {
+      var limit = dims.height ? "высота " + dims.height : dims.maxHeight ? "до " + dims.maxHeight : "без предела";
+      modes += " · рамка: " + limit;
+    }
+    $("modes").textContent = modes;
+    if (update.displayMode) $("fullscreen").textContent = "сейчас " + update.displayMode;
+  }
   $("rendered").textContent = "Отрисована " + new Date().toLocaleString("ru-RU");
   request("ui/initialize", {
     protocolVersion: "2026-01-26",
-    appInfo: { name: "orbit-probe", version: "1.0.0" },
-    appCapabilities: {}
+    appInfo: { name: "orbit-probe", version: "1.1.0" },
+    appCapabilities: { availableDisplayModes: ["inline", "fullscreen"] }
   }).then(function (result) {
     var host = result && result.hostInfo ? result.hostInfo.name + " " + (result.hostInfo.version || "") : "клиент";
     $("bridge").textContent = "есть (" + host.trim() + ")";
+    showContext(result && result.hostContext);
     send({ jsonrpc: "2.0", method: "ui/notifications/initialized", params: {} });
+    reportSize();
+    if (window.ResizeObserver) new ResizeObserver(reportSize).observe(document.body);
   }, function (error) {
     $("bridge").textContent = "нет: " + error.message;
   });
@@ -90,6 +132,15 @@ export const PROBE_HTML = `<!doctype html>
       $("call").textContent = Array.isArray(persons) ? "работает, людей: " + persons.length : "работает";
     }, function (error) {
       $("call").textContent = "не работает: " + error.message;
+    });
+  });
+  // Asked for even when the host does not list fullscreen, so the probe records what it answers.
+  $("expand").addEventListener("click", function () {
+    $("fullscreen").textContent = "просим…";
+    request("ui/request-display-mode", { mode: "fullscreen" }).then(function (result) {
+      $("fullscreen").textContent = "ответ: " + ((result && result.mode) || "без режима");
+    }, function (error) {
+      $("fullscreen").textContent = "не работает: " + error.message;
     });
   });
 </script>
@@ -129,7 +180,7 @@ export function registerAppProbe(server: Pick<McpServer, "registerTool" | "regis
           type: "text",
           text: [
             "If this client renders MCP Apps, a card titled «Карточка Orbit работает» is shown with this call.",
-            "Ask the user what they see: no card; a card whose «Связь с Claude» line says «нет»; or a card whose button «Проверить вызов сервера» reports «работает». Do not describe the card as shown unless they confirm it.",
+            "Ask the user what they see: no card; a card whose «Связь с Claude» line says «нет»; or a card whose button «Проверить вызов сервера» reports «работает». Also ask whether the whole card fits, and what the «Режимы показа», «Размер» and «Развернуть» lines say after pressing «Развернуть». Do not describe the card as shown unless they confirm it.",
           ].join(" "),
         },
       ],
