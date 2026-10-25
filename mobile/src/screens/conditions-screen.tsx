@@ -115,7 +115,7 @@ export default function ConditionsScreen() {
               <Icon icon={CheckCircle2} size={28} tone="success" />
               <Text tone="mutedForeground">{t("conditions.allResolved")}</Text>
             </View>
-          ) : null
+          ) : undefined
         }
         ListEmptyComponent={
           conditions.isPending || person.isPending ? (

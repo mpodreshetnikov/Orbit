@@ -92,7 +92,12 @@ function SheetHeader({
         title,
         headerLargeTitle: false,
         headerLeft: () => (
-          <Button compact variant="ghost" label={t("common.cancel")} onPress={router.back} />
+          <Button
+            compact
+            variant="ghost"
+            label={t("common.cancel")}
+            onPress={() => router.back()}
+          />
         ),
         headerRight: () => (
           <Button compact variant="ghost" label={t("common.save")} busy={busy} onPress={onSave} />

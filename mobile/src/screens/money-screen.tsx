@@ -285,7 +285,7 @@ export default function MoneyScreen() {
                 }
               />
             </View>
-          ) : null
+          ) : undefined
         }
         renderItem={({ item }) => {
           const [icon, tone] = TYPE_LOOK[item.transaction_type] ?? TYPE_LOOK.expense;

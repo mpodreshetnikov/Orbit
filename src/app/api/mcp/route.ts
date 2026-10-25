@@ -1,5 +1,6 @@
 import { createMcpHandler, withMcpAuth } from "mcp-handler";
 import { PROTECTED_RESOURCE_METADATA_PATH, isMcpServerEnabled } from "@/lib/mcp/config";
+import { registerAppProbe } from "@/lib/mcp/apps/probe";
 import { registerHealthTools } from "@/lib/mcp/tools";
 import { verifyMcpBearerToken } from "@/lib/mcp/verify-token";
 
@@ -22,6 +23,7 @@ export const maxDuration = 60;
 const handler = createMcpHandler(
   (server) => {
     registerHealthTools(server);
+    registerAppProbe(server);
   },
   {
     serverInfo: { name: "orbit-health", version: "1.0.0" },

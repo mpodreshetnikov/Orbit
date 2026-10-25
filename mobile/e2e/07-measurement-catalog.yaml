@@ -45,6 +45,15 @@ name: Каталог измерений
 - takeScreenshot: catalog-02-new
 - tapOn: "Сохранить"
 - extendedWaitUntil:
+    visible: "Добавить тип измерения"
+    timeout: 20000
+- waitForAnimationToEnd
+# The new type lands in the last section, under iOS's search field and tab bar: find it by the
+# search, and submit it so the keyboard is gone before the row is tapped.
+- tapOn: "Поиск измерений..."
+- inputText: "запяст"
+- pressKey: Enter
+- extendedWaitUntil:
     visible: "Левое запястье wrist_left"
     timeout: 20000
 - takeScreenshot: catalog-03-added

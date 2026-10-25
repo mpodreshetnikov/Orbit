@@ -292,7 +292,7 @@ describe("editing a condition", () => {
     await fireEvent.changeText(screen.getByLabelText("Код МКБ-10"), "d50.9");
     expect(await screen.findByText("Iron deficiency anaemia")).toBeOnTheScreen();
     await fireEvent.changeText(screen.getByLabelText("Заметки"), "  ");
-    const search = jest.spyOn(Linking, "openURL").mockResolvedValue(true);
+    const search = jest.spyOn(Linking, "openURL").mockResolvedValue(undefined);
     await fireEvent.press(screen.getByText("Найти код МКБ-10 в Google"));
     expect(search).toHaveBeenCalledWith(
       "https://www.google.com/search?q=%D0%90%D0%BD%D0%B5%D0%BC%D0%B8%D1%8F%20ICD-10%20code",

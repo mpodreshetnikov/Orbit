@@ -98,7 +98,12 @@ function CatalogEntryForm({ id, initial }: { id?: string; initial: CatalogColumn
           title: t(id ? "catalogs.editMeasurement" : "catalogs.addMeasurement"),
           headerLargeTitle: false,
           headerLeft: () => (
-            <Button compact variant="ghost" label={t("common.cancel")} onPress={router.back} />
+            <Button
+              compact
+              variant="ghost"
+              label={t("common.cancel")}
+              onPress={() => router.back()}
+            />
           ),
           headerRight: () => (
             <Button
