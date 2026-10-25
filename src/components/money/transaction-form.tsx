@@ -45,6 +45,7 @@ import {
   lineItemsMismatch,
   lineItemsTotal,
   manualCategoryChange,
+  parseAmount,
   transactionFormProblem,
   withMerchantCategory,
   type LineItemDraft,
@@ -244,7 +245,7 @@ export function MoneyTransactionForm({
       toast.error(t(problem));
       return;
     }
-    const parsedAmount = parseFloat(amount);
+    const parsedAmount = parseAmount(amount);
 
     const lineItemsPayload = lineItemInputs(lineItems, merchantName);
 
@@ -299,14 +300,14 @@ export function MoneyTransactionForm({
         <div className="space-y-2">
           <label className="text-sm font-medium">{t("money.amount")}</label>
           <Input
-            type="number"
-            step="0.01"
+            type="text"
+            inputMode="decimal"
             value={amount}
             onChange={(e) => {
               const v = e.target.value;
               setAmount(v);
               if (mode === "create" && !amountTypeSyncedOnce.current) {
-                const n = parseFloat(v);
+                const n = parseAmount(v);
                 if (Number.isFinite(n)) {
                   setTransactionType(n >= 0 ? "income" : "expense");
                   amountTypeSyncedOnce.current = true;
@@ -488,8 +489,8 @@ export function MoneyTransactionForm({
                       {t("money.lineItemAmount")}
                     </label>
                     <Input
-                      type="number"
-                      step="0.01"
+                      type="text"
+                      inputMode="decimal"
                       value={item.amount}
                       onChange={(e) =>
                         handleLineItemChange(item.key, {
@@ -503,8 +504,8 @@ export function MoneyTransactionForm({
                       {t("money.lineItemQuantity")}
                     </label>
                     <Input
-                      type="number"
-                      step="0.01"
+                      type="text"
+                      inputMode="decimal"
                       value={item.quantity}
                       onChange={(e) =>
                         handleLineItemChange(item.key, {

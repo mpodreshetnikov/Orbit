@@ -17,7 +17,7 @@ import type {
   MoneyTransactionFeedSummary,
   UpdateMoneyTransactionInput,
 } from "@/types";
-import type { Database } from "@/types/database";
+import type { Database, Json } from "@/types/database";
 import {
   feedSummaryOf,
   MONEY_FEED_PAGE_SIZE,
@@ -25,15 +25,14 @@ import {
   normalizeFeedItem,
 } from "@/types/money-feed";
 import {
-  lineItemChanges,
   lineItemRow,
   lineItemsOrWhole,
+  lineItemUpdateRows,
   transactionInsertRow,
 } from "@/types/money-transaction-form";
 
 type MoneyTransactionInsert = Database["public"]["Tables"]["money_transactions"]["Insert"];
 type MoneyLineItemInsert = Database["public"]["Tables"]["money_line_items"]["Insert"];
-type MoneyLineItemUpdate = Database["public"]["Tables"]["money_line_items"]["Update"];
 
 /**
  * One retry, not react-query's three: each attempt has the request budget, and three retries
@@ -322,79 +321,19 @@ async function updateMoneyTransactionWithLines({
   lineItems: CreateMoneyLineItemInput[];
 }): Promise<MoneyTransactionDetail> {
   const supabase = createClient();
+  const items = lineItemsOrWhole(lineItems, updates.merchant_name, updates.amount ?? 0);
 
-  const { data: tx, error } = await supabase
-    .from("money_transactions")
-    .update(updates)
-    .eq("id", id)
-    .select()
-    .single();
+  // One RPC, so the transaction and its line items change together or not at all.
+  const { data, error } = await supabase.rpc("money_update_transaction_with_lines", {
+    p_transaction_id: id,
+    p_updates: updates as Json,
+    p_line_items: lineItemUpdateRows(items, id) as Json,
+  });
 
   if (error) throw new Error(error.message);
 
-  const items = lineItemsOrWhole(lineItems, updates.merchant_name, updates.amount ?? 0);
-  const { data: currentLineRows, error: currentLineError } = await supabase
-    .from("money_line_items")
-    .select("id")
-    .eq("transaction_id", id);
-
-  if (currentLineError) throw new Error(currentLineError.message);
-
-  const {
-    removed: removedLineIds,
-    changed,
-    added: newItems,
-  } = lineItemChanges(
-    (currentLineRows ?? []).map((row) => row.id),
-    items,
-  );
-
-  if (removedLineIds.length > 0) {
-    const { error: deleteError } = await supabase
-      .from("money_line_items")
-      .delete()
-      .in("id", removedLineIds);
-
-    if (deleteError) throw new Error(deleteError.message);
-  }
-
-  const updatedLineMap = new Map<string, MoneyLineItem>();
-
-  for (const item of changed) {
-    const { data: updatedLine, error: updateLineError } = await supabase
-      .from("money_line_items")
-      .update(lineItemRow(item, id) as MoneyLineItemUpdate)
-      .eq("id", item.id!)
-      .select()
-      .single();
-
-    if (updateLineError) throw new Error(updateLineError.message);
-    updatedLineMap.set(item.id!, updatedLine as MoneyLineItem);
-  }
-
-  let insertedLines: MoneyLineItem[] = [];
-  if (newItems.length > 0) {
-    const { data: insertedLineRows, error: lineError } = await supabase
-      .from("money_line_items")
-      .insert(newItems.map((item) => lineItemRow(item, id) as MoneyLineItemInsert))
-      .select();
-
-    if (lineError) throw new Error(lineError.message);
-    insertedLines = (insertedLineRows ?? []) as MoneyLineItem[];
-  }
-
-  const insertedLineQueue = [...insertedLines];
-  const lines = items.map((item) => {
-    if (item.id && updatedLineMap.has(item.id)) {
-      return updatedLineMap.get(item.id)!;
-    }
-    return insertedLineQueue.shift() as MoneyLineItem;
-  });
-
-  return {
-    ...(tx as MoneyTransaction),
-    line_items: lines,
-  };
+  const saved = data as unknown as { transaction: MoneyTransaction; line_items: MoneyLineItem[] };
+  return { ...saved.transaction, line_items: saved.line_items };
 }
 
 export function useUpdateMoneyTransaction() {

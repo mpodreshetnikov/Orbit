@@ -7,9 +7,9 @@ import type {
   UpdateMoneyTransactionInput,
 } from "@orbit-types/money";
 import {
-  lineItemChanges,
   lineItemRow,
   lineItemsOrWhole,
+  lineItemUpdateRows,
   merchantNames,
   transactionInsertRow,
 } from "@orbit-types/money-transaction-form";
@@ -65,39 +65,20 @@ export async function createTransaction(
   return row.id;
 }
 
-/** Change a transaction and bring its saved line items to the ones given. */
+/** Change a transaction and bring its saved line items to the ones given, in one database call. */
 export async function updateTransaction(
   id: string,
   updates: UpdateMoneyTransactionInput,
   lineItems: CreateMoneyLineItemInput[],
 ): Promise<void> {
-  check(await supabase.from("money_transactions").update(asRow(updates)).eq("id", id));
   const items = lineItemsOrWhole(lineItems, updates.merchant_name, updates.amount ?? 0);
-  const current = check(
-    await supabase.from("money_line_items").select("id").eq("transaction_id", id),
-  ) as { id: string }[];
-  const { removed, changed, added } = lineItemChanges(
-    current.map((one) => one.id),
-    items,
+  check(
+    await supabase.rpc("money_update_transaction_with_lines", {
+      p_transaction_id: id,
+      p_updates: asRow(updates),
+      p_line_items: asRow(lineItemUpdateRows(items, id)),
+    }),
   );
-  if (removed.length > 0) {
-    check(await supabase.from("money_line_items").delete().in("id", removed));
-  }
-  for (const item of changed) {
-    check(
-      await supabase
-        .from("money_line_items")
-        .update(asRow(lineItemRow(item, id)))
-        .eq("id", item.id!),
-    );
-  }
-  if (added.length > 0) {
-    check(
-      await supabase
-        .from("money_line_items")
-        .insert(asRow(added.map((item) => lineItemRow(item, id)))),
-    );
-  }
 }
 
 export async function deleteTransaction(id: string): Promise<void> {

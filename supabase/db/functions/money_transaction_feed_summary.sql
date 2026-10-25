@@ -1,5 +1,6 @@
 -- Function: money_transaction_feed_summary(...)
--- Returns filtered transaction aggregates for the ledger UI.
+-- Returns filtered transaction aggregates for the ledger UI, one row per currency: amounts in
+-- different currencies are never added together. No matching transactions, no rows.
 
 DROP FUNCTION IF EXISTS public.money_transaction_feed_summary(
   uuid,
@@ -27,6 +28,7 @@ CREATE OR REPLACE FUNCTION public.money_transaction_feed_summary(
   p_to timestamptz DEFAULT NULL
 )
 RETURNS TABLE (
+  currency text,
   total_count bigint,
   total_positive_amount numeric,
   total_negative_amount numeric
@@ -62,7 +64,7 @@ BEGIN
 
   RETURN QUERY
   WITH filtered_transactions AS (
-    SELECT t.amount
+    SELECT t.amount, t.currency
     FROM public.money_transactions AS t
     WHERE t.payer_person_id = p_payer_person_id
       AND (
@@ -127,10 +129,15 @@ BEGIN
       AND (p_to IS NULL OR t.posted_at <= p_to)
   )
   SELECT
+    filtered.currency::text AS currency,
     count(*)::bigint AS total_count,
-    COALESCE(sum(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) AS total_positive_amount,
-    COALESCE(sum(CASE WHEN amount < 0 THEN amount ELSE 0 END), 0) AS total_negative_amount
-  FROM filtered_transactions;
+    COALESCE(sum(CASE WHEN filtered.amount > 0 THEN filtered.amount ELSE 0 END), 0)
+      AS total_positive_amount,
+    COALESCE(sum(CASE WHEN filtered.amount < 0 THEN filtered.amount ELSE 0 END), 0)
+      AS total_negative_amount
+  FROM filtered_transactions AS filtered
+  GROUP BY filtered.currency
+  ORDER BY count(*) DESC, filtered.currency;
 END;
 $$;
 
@@ -146,4 +153,4 @@ COMMENT ON FUNCTION public.money_transaction_feed_summary(
   timestamptz,
   timestamptz
 ) IS
-  'Returns filtered transaction counts plus positive and negative amount totals for the ledger UI.';
+  'Returns filtered transaction counts plus positive and negative amount totals for the ledger UI, one row per currency.';

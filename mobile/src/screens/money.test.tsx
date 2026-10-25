@@ -88,7 +88,12 @@ beforeEach(() => {
     return rows.slice(offset, offset + (args.p_limit as number));
   };
   rpcHandlers.money_transaction_feed_summary = () => [
-    { total_count: 3, total_positive_amount: 50000, total_negative_amount: -470.5 },
+    {
+      currency: "RUB",
+      total_count: 3,
+      total_positive_amount: 50000,
+      total_negative_amount: -470.5,
+    },
   ];
   setSession(fakeSession(USER_ID));
 });
@@ -195,13 +200,30 @@ describe("the money tab, beyond the first page", () => {
     expect(await screen.findByText("Пятёрочка")).toBeOnTheScreen();
   });
 
-  it("shows no sums across currencies", async () => {
+  it("sums each currency on its own line", async () => {
     feed = [...FEED, transaction("usd", 19, -10, { currency: "USD" })];
+    rpcHandlers.money_transaction_feed_summary = () => [
+      {
+        currency: "RUB",
+        total_count: 3,
+        total_positive_amount: 50000,
+        total_negative_amount: -470.5,
+      },
+      { currency: "USD", total_count: 1, total_positive_amount: 0, total_negative_amount: -10 },
+    ];
     await renderScreens(routes, "/money");
-    expect(
-      await screen.findByText("Суммы не показаны: в операциях больше одной валюты"),
-    ).toBeOnTheScreen();
-    expect(screen.getAllByText(/^50\s000,00\s₽$/)).toHaveLength(1);
+    expect(await screen.findByText("4")).toBeOnTheScreen();
+    expect(screen.getByText(/^-470,50\s₽$/)).toBeOnTheScreen();
+    expect(screen.getByText(/^0,00\s\$$/)).toBeOnTheScreen();
+    expect(screen.getAllByText(/^-10,00\s\$$/)).toHaveLength(2);
+  });
+
+  it("shows zero sums in the feed's currency when nothing matches", async () => {
+    feed = [];
+    rpcHandlers.money_transaction_feed_summary = () => [];
+    await renderScreens(routes, "/money");
+    expect(await screen.findByText("Пока нет транзакций")).toBeOnTheScreen();
+    expect(screen.getAllByText(/^0,00\s₽$/)).toHaveLength(2);
   });
 });
 

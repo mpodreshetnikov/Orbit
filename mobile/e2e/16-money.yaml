@@ -1,4 +1,5 @@
-# The money tab: the seeded transactions by day with their sums, then only the money that came in.
+# The money tab: the seeded transactions by day with their sums, one line per currency, then only
+# the money that came in.
 appId: host.exp.Exponent
 name: Деньги
 ---
@@ -15,6 +16,10 @@ name: Деньги
 - extendedWaitUntil:
     visible: "Steam.*"
     timeout: 30000
+# The workflow adds one dollar spend: the sums keep it apart from the rubles.
+- extendedWaitUntil:
+    visible: "-12,50.*"
+    timeout: 20000
 - takeScreenshot: money-01-feed
 - tapOn:
     text: "Доходы"

@@ -182,6 +182,10 @@ const categories: MoneyCategory[] = [
 
 const persons = [{ id: "person-1", name: "Alex" }];
 
+/** The amount, then each line item's amount and quantity. */
+const decimalInputs = () =>
+  Array.from(document.querySelectorAll<HTMLInputElement>("input[inputmode='decimal']"));
+
 describe("MoneyTransactionForm", () => {
   beforeEach(() => {
     toastErrorMock.mockReset();
@@ -250,7 +254,7 @@ describe("MoneyTransactionForm", () => {
     await user.type(screen.getByPlaceholderText("money.merchantPlaceholder"), "Shop A");
     await user.type(screen.getByPlaceholderText("money.lineItemTitle"), "Milk");
 
-    const spinButtons = screen.getAllByRole("spinbutton");
+    const spinButtons = decimalInputs();
     await user.type(spinButtons[1], "1200");
 
     await user.click(screen.getByRole("button", { name: "money.saveTransaction" }));
@@ -284,6 +288,45 @@ describe("MoneyTransactionForm", () => {
     });
   });
 
+  it("reads a decimal comma in the amounts", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+
+    render(
+      <MoneyTransactionForm
+        mode="create"
+        accounts={accounts}
+        categories={categories}
+        persons={persons}
+        onSubmit={onSubmit}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Main account \(RUB\)/ }));
+    const postedAtInput = document.querySelector(
+      "input[type='datetime-local']",
+    ) as HTMLInputElement;
+    fireEvent.change(postedAtInput, { target: { value: "2026-02-21T09:30" } });
+    await user.type(screen.getByPlaceholderText("-1200"), "-12,50");
+    await user.type(screen.getByPlaceholderText("money.lineItemTitle"), "Milk");
+    await user.type(decimalInputs()[1], "12,50");
+    await user.clear(decimalInputs()[2]);
+    await user.type(decimalInputs()[2], "0,5");
+
+    await user.click(screen.getByRole("button", { name: "money.saveTransaction" }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          amount: -12.5,
+          transaction_type: "expense",
+          line_items: [expect.objectContaining({ amount: 12.5, quantity: 0.5 })],
+        }),
+      );
+    });
+  });
+
   it("supports merchant suggestions, mismatch warning, and cancel action", async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     const onCancel = vi.fn();
@@ -305,7 +348,7 @@ describe("MoneyTransactionForm", () => {
     await user.click(screen.getByRole("button", { name: /Main account \(RUB\)/ }));
     await user.type(screen.getByPlaceholderText("-1200"), "50");
 
-    const spinButtons = screen.getAllByRole("spinbutton");
+    const spinButtons = decimalInputs();
     await user.type(spinButtons[1], "30");
     expect(screen.getByText("money.lineItemsMismatch")).toBeInTheDocument();
 
@@ -348,7 +391,7 @@ describe("MoneyTransactionForm", () => {
       target: { value: "Shop A" },
     });
 
-    const spinButtons = screen.getAllByRole("spinbutton");
+    const spinButtons = decimalInputs();
     fireEvent.change(spinButtons[1], { target: { value: "1200" } });
 
     await user.click(screen.getByRole("button", { name: "Food / Food RU" }));

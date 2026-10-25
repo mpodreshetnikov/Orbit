@@ -298,6 +298,7 @@ describe("use-money-transactions", () => {
         return createQueryBuilder({
           data: [
             {
+              currency: "RUB",
               total_count: 2,
               total_positive_amount: 800,
               total_negative_amount: -1200,
@@ -341,8 +342,7 @@ describe("use-money-transactions", () => {
     });
     expect(result.current.data).toEqual({
       totalCount: 2,
-      totalPositiveAmount: 800,
-      totalNegativeAmount: -1200,
+      byCurrency: [{ currency: "RUB", count: 2, positiveAmount: 800, negativeAmount: -1200 }],
     });
   });
 
@@ -379,11 +379,7 @@ describe("use-money-transactions", () => {
       p_from: null,
       p_to: null,
     });
-    expect(loaded.result.current.data).toEqual({
-      totalCount: 0,
-      totalPositiveAmount: 0,
-      totalNegativeAmount: 0,
-    });
+    expect(loaded.result.current.data).toEqual({ totalCount: 0, byCurrency: [] });
 
     const disabled = renderHookWithQueryClient(() => useMoneyTransactionFeedSummary(null));
     await waitFor(() => expect(disabled.result.current.fetchStatus).toBe("idle"));
@@ -647,158 +643,67 @@ describe("use-money-transactions", () => {
     ).rejects.toThrow("tx insert failed");
   });
 
-  it("updates transaction line items in place and preserves existing metadata", async () => {
-    const tx = {
-      id: "tx-1",
-      payer_person_id: "p1",
-    };
-    const txBuilder = createQueryBuilder({ data: tx, error: null });
-    const existingIdsBuilder = createQueryBuilder({
-      data: [{ id: "line-2" }],
-      error: null,
-    });
-    const updateLineBuilder = createQueryBuilder({
-      data: {
-        id: "line-2",
-        transaction_id: "tx-1",
-        title: "Manual item",
-        amount: 10,
-        assignment_method: "rule",
-        assignment_rule_id: "rule-1",
-        assignment_confidence: 0.8,
-        raw_payload: { source: "import" },
-        last_category_rule_id: "rule-1",
-        last_category_rule_run_id: "run-1",
-      },
-      error: null,
-    });
-    let moneyLineItemsCall = 0;
-    const from = vi.fn((table: string) => {
-      if (table === "money_transactions") return txBuilder;
-      if (table === "money_line_items") {
-        moneyLineItemsCall += 1;
-        return moneyLineItemsCall === 1 ? existingIdsBuilder : updateLineBuilder;
-      }
-      return createQueryBuilder({ data: null, error: null });
-    });
-    createClientMock.mockReturnValue({ from });
+  it("updates the transaction and its line items in one rpc", async () => {
+    const rpc = vi.fn(() =>
+      createQueryBuilder({
+        data: {
+          transaction: { id: "tx-1", payer_person_id: "p1", amount: 65 },
+          line_items: [
+            { id: "line-1", transaction_id: "tx-1", title: "Updated line", amount: 25 },
+            { id: "line-3", transaction_id: "tx-1", title: "Inserted line", amount: 40 },
+          ],
+        },
+        error: null,
+      }),
+    );
+    const from = vi.fn();
+    createClientMock.mockReturnValue({ rpc, from });
 
     const { useUpdateMoneyTransaction } = await import("./use-money-transactions");
     const { result, queryClient } = renderHookWithQueryClient(() => useUpdateMoneyTransaction());
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
 
+    let saved: unknown;
     await act(async () => {
-      await result.current.mutateAsync({
+      saved = await result.current.mutateAsync({
         id: "tx-1",
-        updates: { amount: 10, merchant_name: "" } as UpdateMoneyTransactionInput,
-        lineItems: [
-          {
-            id: "line-2",
-            title: "Manual item",
-            amount: 10,
-            assignment_method: "rule",
-            assignment_rule_id: "rule-1",
-            assignment_confidence: 0.8,
-            raw_payload: { source: "import" },
-            last_category_rule_id: "rule-1",
-            last_category_rule_run_id: "run-1",
-          },
-        ],
-      });
-    });
-
-    expect(existingIdsBuilder.select).toHaveBeenCalledWith("id");
-    expect(updateLineBuilder.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        transaction_id: "tx-1",
-        title: "Manual item",
-        amount: 10,
-        assignment_method: "rule",
-        assignment_rule_id: "rule-1",
-        assignment_confidence: 0.8,
-        raw_payload: { source: "import" },
-        last_category_rule_id: "rule-1",
-        last_category_rule_run_id: "run-1",
-      }),
-    );
-    expect(updateLineBuilder.eq).toHaveBeenCalledWith("id", "line-2");
-    expect(updateLineBuilder.delete).not.toHaveBeenCalled();
-    expect(updateLineBuilder.insert).not.toHaveBeenCalled();
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["money-transaction", "tx-1"],
-    });
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["money-transactions", "p1"],
-    });
-  });
-
-  it("updates transactions by deleting removed lines and inserting new ones in submitted order", async () => {
-    const txBuilder = createQueryBuilder({
-      data: { id: "tx-1", payer_person_id: "p1", currency: "USD" },
-      error: null,
-    });
-    const existingIdsBuilder = createQueryBuilder({
-      data: [{ id: "line-1" }, { id: "line-2" }],
-      error: null,
-    });
-    const deleteBuilder = createQueryBuilder({ data: null, error: null });
-    const updateLineBuilder = createQueryBuilder({
-      data: {
-        id: "line-1",
-        transaction_id: "tx-1",
-        title: "Updated line",
-        amount: 25,
-      },
-      error: null,
-    });
-    const insertLineBuilder = createQueryBuilder({
-      data: [
-        {
-          id: "line-3",
-          transaction_id: "tx-1",
-          title: "Inserted line",
-          amount: 40,
-        },
-      ],
-      error: null,
-    });
-
-    let moneyLineItemsCall = 0;
-    createClientMock.mockReturnValue({
-      from: vi.fn((table: string) => {
-        if (table === "money_transactions") return txBuilder;
-        if (table === "money_line_items") {
-          moneyLineItemsCall += 1;
-          if (moneyLineItemsCall === 1) return existingIdsBuilder;
-          if (moneyLineItemsCall === 2) return deleteBuilder;
-          if (moneyLineItemsCall === 3) return updateLineBuilder;
-          return insertLineBuilder;
-        }
-        return createQueryBuilder({ data: null, error: null });
-      }),
-    });
-
-    const { useUpdateMoneyTransaction } = await import("./use-money-transactions");
-    const { result } = renderHookWithQueryClient(() => useUpdateMoneyTransaction());
-
-    await expect(
-      result.current.mutateAsync({
-        id: "tx-1",
-        updates: { amount: 25, merchant_name: "Updated merchant" } as UpdateMoneyTransactionInput,
+        updates: { amount: 65, merchant_name: "Updated merchant" } as UpdateMoneyTransactionInput,
         lineItems: [
           {
             id: "line-1",
             title: "Updated line",
             amount: 25,
-            raw_payload: null,
+            assignment_method: "rule",
+            assignment_rule_id: "rule-1",
+            last_category_rule_run_id: "run-1",
           },
-          {
-            title: "Inserted line",
-            amount: 40,
-          },
+          { title: "Inserted line", amount: 40 },
         ],
-      }),
-    ).resolves.toEqual(
+      });
+    });
+
+    expect(from).not.toHaveBeenCalled();
+    expect(rpc).toHaveBeenCalledWith("money_update_transaction_with_lines", {
+      p_transaction_id: "tx-1",
+      p_updates: { amount: 65, merchant_name: "Updated merchant" },
+      p_line_items: [
+        expect.objectContaining({
+          id: "line-1",
+          transaction_id: "tx-1",
+          title: "Updated line",
+          assignment_method: "rule",
+          assignment_rule_id: "rule-1",
+          last_category_rule_run_id: "run-1",
+        }),
+        expect.objectContaining({
+          id: null,
+          title: "Inserted line",
+          amount: 40,
+          raw_payload: null,
+        }),
+      ],
+    });
+    expect(saved).toEqual(
       expect.objectContaining({
         id: "tx-1",
         line_items: [
@@ -807,213 +712,50 @@ describe("use-money-transactions", () => {
         ],
       }),
     );
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["money-transaction", "tx-1"] });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["money-transactions", "p1"] });
+  });
 
-    expect(deleteBuilder.in).toHaveBeenCalledWith("id", ["line-2"]);
-    expect(insertLineBuilder.insert).toHaveBeenCalledWith(
-      expect.arrayContaining([
-        expect.objectContaining({
-          transaction_id: "tx-1",
-          title: "Inserted line",
-          amount: 40,
-          raw_payload: null,
-        }),
-      ]),
+  it("sends one line item for the whole amount when none are given", async () => {
+    const rpc = vi.fn(() =>
+      createQueryBuilder({
+        data: { transaction: { id: "tx-1", payer_person_id: "p1" }, line_items: [] },
+        error: null,
+      }),
+    );
+    createClientMock.mockReturnValue({ rpc });
+
+    const { useUpdateMoneyTransaction } = await import("./use-money-transactions");
+    const { result } = renderHookWithQueryClient(() => useUpdateMoneyTransaction());
+    await act(async () => {
+      await result.current.mutateAsync({
+        id: "tx-1",
+        updates: { amount: -300, merchant_name: "Кафе" } as UpdateMoneyTransactionInput,
+        lineItems: [],
+      });
+    });
+
+    expect(rpc).toHaveBeenCalledWith(
+      "money_update_transaction_with_lines",
+      expect.objectContaining({
+        p_line_items: [expect.objectContaining({ id: null, title: "Кафе", amount: -300 })],
+      }),
     );
   });
 
-  it("returns update errors for update/delete/line insert stages", async () => {
-    const updateErrorBuilder = createQueryBuilder({
-      data: null,
-      error: { message: "update failed" },
-    });
+  it("returns the update rpc's error", async () => {
     createClientMock.mockReturnValue({
-      from: vi.fn(() => updateErrorBuilder),
+      rpc: vi.fn(() => createQueryBuilder({ data: null, error: { message: "update failed" } })),
     });
     const { useUpdateMoneyTransaction } = await import("./use-money-transactions");
-    let hook = renderHookWithQueryClient(() => useUpdateMoneyTransaction());
+    const { result } = renderHookWithQueryClient(() => useUpdateMoneyTransaction());
     await expect(
-      hook.result.current.mutateAsync({
+      result.current.mutateAsync({
         id: "tx-1",
         updates: { amount: 5 } as UpdateMoneyTransactionInput,
         lineItems: [],
       }),
     ).rejects.toThrow("update failed");
-
-    const updatedTx = createQueryBuilder({
-      data: { id: "tx-1", payer_person_id: "p1" },
-      error: null,
-    });
-    const deleteErrorBuilder = createQueryBuilder({
-      data: null,
-      error: { message: "delete lines failed" },
-    });
-    createClientMock.mockReturnValue({
-      from: vi.fn((table: string) => {
-        if (table === "money_transactions") return updatedTx;
-        if (table === "money_line_items") return deleteErrorBuilder;
-        return createQueryBuilder({ data: null, error: null });
-      }),
-    });
-    hook = renderHookWithQueryClient(() => useUpdateMoneyTransaction());
-    await expect(
-      hook.result.current.mutateAsync({
-        id: "tx-1",
-        updates: { amount: 5 } as UpdateMoneyTransactionInput,
-        lineItems: [],
-      }),
-    ).rejects.toThrow("delete lines failed");
-
-    const lineInsertErrorBuilder = createQueryBuilder({
-      data: null,
-      error: { message: "insert lines failed" },
-    });
-    createClientMock.mockReturnValue({
-      from: vi.fn((table: string) => {
-        if (table === "money_transactions") return updatedTx;
-        if (table === "money_line_items") return lineInsertErrorBuilder;
-        return createQueryBuilder({ data: null, error: null });
-      }),
-    });
-    hook = renderHookWithQueryClient(() => useUpdateMoneyTransaction());
-    await expect(
-      hook.result.current.mutateAsync({
-        id: "tx-1",
-        updates: { merchant_name: " ", amount: 0 } as UpdateMoneyTransactionInput,
-        lineItems: [
-          {
-            title: "A",
-            amount: 1,
-          },
-        ],
-      }),
-    ).rejects.toThrow("insert lines failed");
-  });
-
-  it("returns update errors for existing-line lookup and line update stages", async () => {
-    const updatedTx = createQueryBuilder({
-      data: { id: "tx-1", payer_person_id: "p1" },
-      error: null,
-    });
-    const currentLineErrorBuilder = createQueryBuilder({
-      data: null,
-      error: { message: "lookup lines failed" },
-    });
-    createClientMock.mockReturnValue({
-      from: vi.fn((table: string) => {
-        if (table === "money_transactions") return updatedTx;
-        if (table === "money_line_items") return currentLineErrorBuilder;
-        return createQueryBuilder({ data: null, error: null });
-      }),
-    });
-
-    const { useUpdateMoneyTransaction } = await import("./use-money-transactions");
-    let hook = renderHookWithQueryClient(() => useUpdateMoneyTransaction());
-    await expect(
-      hook.result.current.mutateAsync({
-        id: "tx-1",
-        updates: { amount: 5 } as UpdateMoneyTransactionInput,
-        lineItems: [],
-      }),
-    ).rejects.toThrow("lookup lines failed");
-
-    const existingIdsBuilder = createQueryBuilder({
-      data: [{ id: "line-1" }],
-      error: null,
-    });
-    const updateLineErrorBuilder = createQueryBuilder({
-      data: null,
-      error: { message: "update line failed" },
-    });
-    let moneyLineItemsCall = 0;
-    createClientMock.mockReturnValue({
-      from: vi.fn((table: string) => {
-        if (table === "money_transactions") return updatedTx;
-        if (table === "money_line_items") {
-          moneyLineItemsCall += 1;
-          return moneyLineItemsCall === 1 ? existingIdsBuilder : updateLineErrorBuilder;
-        }
-        return createQueryBuilder({ data: null, error: null });
-      }),
-    });
-
-    hook = renderHookWithQueryClient(() => useUpdateMoneyTransaction());
-    await expect(
-      hook.result.current.mutateAsync({
-        id: "tx-1",
-        updates: { amount: 5 } as UpdateMoneyTransactionInput,
-        lineItems: [{ id: "line-1", title: "Keep", amount: 5 }],
-      }),
-    ).rejects.toThrow("update line failed");
-  });
-
-  it("returns update errors when delete and insert stages are actually reached", async () => {
-    const updatedTx = createQueryBuilder({
-      data: { id: "tx-1", payer_person_id: "p1" },
-      error: null,
-    });
-    const existingIdsBuilder = createQueryBuilder({
-      data: [{ id: "line-1" }],
-      error: null,
-    });
-    const deleteErrorBuilder = createQueryBuilder({
-      data: null,
-      error: { message: "delete lines failed" },
-    });
-    let moneyLineItemsCall = 0;
-    createClientMock.mockReturnValue({
-      from: vi.fn((table: string) => {
-        if (table === "money_transactions") return updatedTx;
-        if (table === "money_line_items") {
-          moneyLineItemsCall += 1;
-          return moneyLineItemsCall === 1 ? existingIdsBuilder : deleteErrorBuilder;
-        }
-        return createQueryBuilder({ data: null, error: null });
-      }),
-    });
-
-    const { useUpdateMoneyTransaction } = await import("./use-money-transactions");
-    let hook = renderHookWithQueryClient(() => useUpdateMoneyTransaction());
-    await expect(
-      hook.result.current.mutateAsync({
-        id: "tx-1",
-        updates: { amount: 5 } as UpdateMoneyTransactionInput,
-        lineItems: [],
-      }),
-    ).rejects.toThrow("delete lines failed");
-
-    const currentLineRowsBuilder = createQueryBuilder({
-      data: null,
-      error: null,
-    });
-    const insertLineErrorBuilder = createQueryBuilder({
-      data: null,
-      error: { message: "insert lines failed" },
-    });
-    moneyLineItemsCall = 0;
-    createClientMock.mockReturnValue({
-      from: vi.fn((table: string) => {
-        if (table === "money_transactions") return updatedTx;
-        if (table === "money_line_items") {
-          moneyLineItemsCall += 1;
-          return moneyLineItemsCall === 1 ? currentLineRowsBuilder : insertLineErrorBuilder;
-        }
-        return createQueryBuilder({ data: null, error: null });
-      }),
-    });
-
-    hook = renderHookWithQueryClient(() => useUpdateMoneyTransaction());
-    await expect(
-      hook.result.current.mutateAsync({
-        id: "tx-1",
-        updates: { merchant_name: " ", amount: undefined } as UpdateMoneyTransactionInput,
-        lineItems: [
-          {
-            title: "Inserted line",
-            amount: 1,
-          },
-        ],
-      }),
-    ).rejects.toThrow("insert lines failed");
   });
 
   it("deletes transaction and invalidates list", async () => {
