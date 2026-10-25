@@ -190,6 +190,52 @@ describe("createSelfUpdater", () => {
     expect(reload).toHaveBeenCalledOnce();
   });
 
+  it("stages again before retrying an apply that timed out but finished late", async () => {
+    vi.useFakeTimers();
+    try {
+      // Like both hosts: a successful apply removes the staged copy it mirrored from.
+      const onHost = new Set<string>();
+      let applies = 0;
+      const actions: string[] = [];
+      const { updater, registry, reload } = setup({
+        sendNative: (message) => {
+          const version = String(message.version);
+          actions.push(String(message.action));
+          if (message.action === "stage") {
+            onHost.add(version);
+            return Promise.resolve({ ok: true });
+          }
+          if (!onHost.has(version)) {
+            return Promise.resolve({ ok: false, error: `Version ${version} is not staged.` });
+          }
+          applies += 1;
+          if (applies === 1) {
+            // Answers after the extension gave up on it.
+            return new Promise((resolve) =>
+              setTimeout(() => {
+                onHost.delete(version);
+                resolve({ ok: true });
+              }, SELF_UPDATE_TIMEOUTS_MS.apply + 1_000),
+            );
+          }
+          onHost.delete(version);
+          return Promise.resolve({ ok: true });
+        },
+      });
+      const first = updater.check("manual");
+      await vi.advanceTimersByTimeAsync(SELF_UPDATE_TIMEOUTS_MS.apply + 2_000);
+      expect((await first).phase).toBe("error");
+      expect(registry.begin("run-1")).toBe(false);
+
+      await updater.check("manual");
+      expect(actions).toEqual(["stage", "apply", "stage", "apply"]);
+      expect(reload).toHaveBeenCalledOnce();
+      expect(registry.isHeldForUpdate()).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("holds the reload when a session was stored while the files were replaced", async () => {
     const { updater, reload } = setup({ busy: [false, true] });
     expect((await updater.check("alarm")).phase).toBe("reload_pending");

@@ -257,6 +257,17 @@ export function createSelfUpdater(deps: SelfUpdaterDeps): SelfUpdater {
       return "reloaded";
     });
 
+  /**
+   * Keeps runs out after an apply that may have left the folder broken. What the host staged is
+   * forgotten too: an apply that did finish late, or got far, has used the staged copy up, so
+   * the retry stages again -- harmless -- rather than asking for a version the host no longer has.
+   */
+  const keepBroken = (releaseHold: () => void) => {
+    brokenTreeHold = releaseHold;
+    staged = null;
+    return "kept" as const;
+  };
+
   const applyWhenIdle = async () => {
     const release = staged;
     if (!release) return;
@@ -270,8 +281,7 @@ export function createSelfUpdater(deps: SelfUpdaterDeps): SelfUpdater {
         // A host Chrome could not start touched nothing. Any other failure -- one that never
         // answered -- may be mirroring still, so the folder is treated as broken.
         if (isHostMissingError(state.error ?? "")) return "done";
-        brokenTreeHold = releaseHold;
-        return "kept";
+        return keepBroken(releaseHold);
       }
       if (!reply?.ok) {
         fail(new Error(reply?.error || "The updater could not apply the release."));
@@ -279,8 +289,7 @@ export function createSelfUpdater(deps: SelfUpdaterDeps): SelfUpdater {
           brokenTreeHold = null;
           return "done";
         }
-        brokenTreeHold = releaseHold;
-        return "kept";
+        return keepBroken(releaseHold);
       }
       staged = null;
       brokenTreeHold = null;
@@ -376,8 +385,8 @@ export function createSelfUpdater(deps: SelfUpdaterDeps): SelfUpdater {
         await reloadWhenIdle();
         return { ...state };
       }
-      // A kept hold means the folder is broken: repair it with the staged release first.
-      if ((state.phase === "waiting_for_import" || brokenTreeHold) && staged) {
+      // A kept hold is repaired by a full pass, which stages the release again under it.
+      if (state.phase === "waiting_for_import" && staged) {
         await applyWhenIdle();
         return { ...state };
       }
