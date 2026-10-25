@@ -5,6 +5,7 @@ import {
   createSelfUpdater,
   isHostMissingError,
   parseReleaseInfo,
+  SELF_UPDATE_TIMEOUTS_MS,
   type NativeHostReply,
   type ReleaseInfo,
   type SelfUpdaterDeps,
@@ -284,6 +285,37 @@ describe("createSelfUpdater", () => {
     await updater.check("alarm");
     await vi.waitFor(() => expect(reload).toHaveBeenCalledOnce());
     expect(calls.map((call) => call.action)).toEqual(["stage", "apply"]);
+  });
+
+  it("gives up on a release check that never answers", async () => {
+    vi.useFakeTimers();
+    try {
+      const { updater } = setup({ fetchLatest: () => new Promise(() => undefined) });
+      const status = updater.check("manual");
+      await vi.advanceTimersByTimeAsync(SELF_UPDATE_TIMEOUTS_MS.fetch);
+      expect(await status).toMatchObject({ phase: "error" });
+      expect((await status).error).toContain("did not answer");
+      // The pass is over, so the next check is a new one rather than the stuck one.
+      expect(updater.status().phase).toBe("error");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("gives up on a host that never replies, and keeps runs out if it was applying", async () => {
+    vi.useFakeTimers();
+    try {
+      const { updater, registry } = setup({
+        sendNative: (message) =>
+          message.action === "apply" ? new Promise(() => undefined) : Promise.resolve({ ok: true }),
+      });
+      const status = updater.check("manual");
+      await vi.advanceTimersByTimeAsync(SELF_UPDATE_TIMEOUTS_MS.apply);
+      expect(await status).toMatchObject({ phase: "error" });
+      expect(registry.isHeldForUpdate()).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("reports when nothing is published", async () => {
