@@ -49,4 +49,19 @@ describe("registerAppProbe", () => {
     expect(result.contents[0].text.match(/name: "/g)).toHaveLength(2);
     expect(result.contents[0].text).toContain("result.isError");
   });
+
+  it("reports its height to the host and can ask to be shown full screen", async () => {
+    const resource = register().resources.get("orbit-app-probe")!;
+    const result = (await resource.handler(new URL(PROBE_RESOURCE_URI))) as {
+      contents: Array<{ text: string }>;
+    };
+    const html = result.contents[0].text;
+
+    expect(html).toContain('method: "ui/notifications/size-changed"');
+    expect(html).toContain("new ResizeObserver(reportSize)");
+    expect(html).toContain('request("ui/request-display-mode", { mode: "fullscreen" })');
+    expect(html).toContain('availableDisplayModes: ["inline", "fullscreen"]');
+    expect(html).toContain(".offsetHeight");
+    expect(html).not.toContain("getBoundingClientRect");
+  });
 });
