@@ -76,8 +76,9 @@ export const PROBE_HTML = `<!doctype html>
   // host's default height, which on a phone shows about three lines.
   var lastHeight = 0;
   function reportSize() {
-    // Measured from the card, not the document, which is never shorter than the frame it is in.
-    var height = Math.ceil(document.querySelector(".card").getBoundingClientRect().bottom + 8);
+    // Measured from the card and its 8 px margins, not the document, which is never shorter than
+    // the frame it is in, and not from a viewport coordinate, which moves when the card scrolls.
+    var height = Math.ceil(document.querySelector(".card").offsetHeight + 16);
     if (height === lastHeight) return;
     lastHeight = height;
     $("size").textContent = "сообщили " + height + " px";
@@ -87,17 +88,21 @@ export const PROBE_HTML = `<!doctype html>
       params: { width: Math.ceil(document.documentElement.scrollWidth), height: height }
     });
   }
-  function showContext(context) {
-    if (!context) return;
-    if (Array.isArray(context.availableDisplayModes)) {
-      $("modes").textContent = context.availableDisplayModes.join(", ") || "нет";
-    }
-    var dims = context.containerDimensions;
+  // Hosts send partial context updates, so each one is merged and the line is drawn afresh.
+  var hostContext = {};
+  function showContext(update) {
+    if (!update) return;
+    for (var key in update) hostContext[key] = update[key];
+    var modes = Array.isArray(hostContext.availableDisplayModes)
+      ? hostContext.availableDisplayModes.join(", ") || "нет"
+      : "неизвестно";
+    var dims = hostContext.containerDimensions;
     if (dims) {
       var limit = dims.height ? "высота " + dims.height : dims.maxHeight ? "до " + dims.maxHeight : "без предела";
-      $("modes").textContent += " · рамка: " + limit;
+      modes += " · рамка: " + limit;
     }
-    if (context.displayMode) $("fullscreen").textContent = "сейчас " + context.displayMode;
+    $("modes").textContent = modes;
+    if (update.displayMode) $("fullscreen").textContent = "сейчас " + update.displayMode;
   }
   $("rendered").textContent = "Отрисована " + new Date().toLocaleString("ru-RU");
   request("ui/initialize", {

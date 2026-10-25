@@ -61,5 +61,7 @@ describe("registerAppProbe", () => {
     expect(html).toContain("new ResizeObserver(reportSize)");
     expect(html).toContain('request("ui/request-display-mode", { mode: "fullscreen" })');
     expect(html).toContain('availableDisplayModes: ["inline", "fullscreen"]');
+    expect(html).toContain(".offsetHeight");
+    expect(html).not.toContain("getBoundingClientRect");
   });
 });
