@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it, vi } from "vitest";
-import { CONTENT_BRIDGE_PROBE, createContentBridge } from "./content-bridge.js";
+import { CONTENT_BRIDGE_PROBE, claimContentBridge, createContentBridge } from "./content-bridge.js";
 
 describe("content-bridge", () => {
   it("relays ping from window to runtime and sends pong", () => {
@@ -336,5 +336,12 @@ describe("attention page requests", () => {
 
     expect(sendResponse).toHaveBeenCalledWith({ alive: true });
     expect(windowPostMessage).not.toHaveBeenCalled();
+  });
+
+  it("lets only the first injection in a world install the bridge", () => {
+    const scope: Record<string, unknown> = {};
+    expect(claimContentBridge(scope)).toBe(true);
+    expect(claimContentBridge(scope)).toBe(false);
+    expect(claimContentBridge({})).toBe(true);
   });
 });

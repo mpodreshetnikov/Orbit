@@ -25,6 +25,20 @@ export interface ContentBridgeDeps {
   onWarning?: (event: string, attrs: Record<string, unknown>) => void;
 }
 
+const BRIDGE_INSTALLED_KEY = "__orbitContentBridgeInstalled";
+
+/**
+ * True for the first caller in this isolated world, false after. The manifest's injection and
+ * the background's re-injection after an update can both reach a tab that was loading at the
+ * time, and two bridges would forward every request twice -- two bank tabs for one click. An
+ * orphaned script from before the update lives in another world and does not count.
+ */
+export function claimContentBridge(scope: Record<string, unknown>): boolean {
+  if (scope[BRIDGE_INSTALLED_KEY]) return false;
+  scope[BRIDGE_INSTALLED_KEY] = true;
+  return true;
+}
+
 export function createContentBridge(deps: ContentBridgeDeps) {
   const nowMs = deps.nowMs ?? (() => Date.now());
 
