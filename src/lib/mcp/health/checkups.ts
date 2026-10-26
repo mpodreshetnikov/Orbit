@@ -153,29 +153,53 @@ function normalizeTitle(title: string): string {
   return title.toLowerCase().replace(/ё/g, "е").replace(/\s+/g, " ").trim();
 }
 
-function addInterval(day: string, every: number, unit: string): string {
-  const date = new Date(`${day}T00:00:00Z`);
-  if (unit === "week") date.setUTCDate(date.getUTCDate() + 7 * every);
-  else if (unit === "month") date.setUTCMonth(date.getUTCMonth() + every);
-  else date.setUTCFullYear(date.getUTCFullYear() + every);
-  return date.toISOString().slice(0, 10);
+/**
+ * `day + every unit`, as PostgreSQL adds an interval to a date: weeks are exact, and months and
+ * years keep the day of the month, clamped to the target month's last day (2027-01-31 plus a month
+ * is 2027-02-28, not 2027-03-03 as `Date` overflow would make it). A negative `every` goes back.
+ */
+export function addInterval(day: string, every: number, unit: string): string {
+  const [year, month, date] = day.split("-").map(Number);
+  if (unit === "week") {
+    return new Date(Date.UTC(year, month - 1, date + 7 * every)).toISOString().slice(0, 10);
+  }
+  const months = year * 12 + (month - 1) + (unit === "month" ? every : 12 * every);
+  const targetYear = Math.floor(months / 12);
+  const targetMonth = months - targetYear * 12;
+  const lastDay = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(targetYear, targetMonth, Math.min(date, lastDay)))
+    .toISOString()
+    .slice(0, 10);
 }
 
 /**
- * The first due date `checkup_item_set_next_due_on_insert` will give an interval checkup: its
- * anchor when that is today or later, else the first date of the series that is; one interval from
- * today without an anchor.
+ * Where an interval series is anchored so it first falls due on `firstDue`.
+ *
+ * `checkup_item_set_next_due_on_insert` sets the first due date to the anchor plus one interval:
+ * the anchor is when the series counts from, as a completion is. Anchoring on the due date itself
+ * would schedule it a whole interval late.
+ */
+export function anchorFor(
+  schedule: Extract<ProposedCheckup["schedule"], { type: "interval" }>,
+  firstDue: string,
+): string {
+  return addInterval(firstDue, -schedule.every, schedule.unit);
+}
+
+/**
+ * The first due date the insert trigger will set: a one-off's own date; for an interval, one
+ * interval after its anchor, which is today when none was asked for. Computed the way the database
+ * computes it, so at a month's end it can be a day or three before the date asked for, and the card
+ * shows the date that will actually be stored.
  */
 export function firstDueDate(
   schedule: ProposedCheckup["schedule"],
-  anchor: string | null | undefined,
+  requested: string | null | undefined,
   today: string,
 ): string {
   if (schedule.type === "one_off") return schedule.due_at;
-  if (!anchor) return addInterval(today, schedule.every, schedule.unit);
-  let due = anchor;
-  while (due < today) due = addInterval(due, schedule.every, schedule.unit);
-  return due;
+  const anchor = requested ? anchorFor(schedule, requested) : today;
+  return addInterval(anchor, schedule.every, schedule.unit);
 }
 
 /**
@@ -294,7 +318,7 @@ export async function addProposedCheckups(
     category: input.category,
     schedule:
       input.schedule.type === "interval" && input.first_due_at
-        ? { ...input.schedule, anchor_date: input.first_due_at }
+        ? { ...input.schedule, anchor_date: anchorFor(input.schedule, input.first_due_at) }
         : input.schedule,
     why_text: input.why.trim() || null,
     why_links:

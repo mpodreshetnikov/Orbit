@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   addProposedCheckups,
+  addInterval,
+  anchorFor,
   firstDueDate,
   getCheckup,
   listCheckups,
@@ -217,13 +219,31 @@ describe("getCheckup", () => {
 describe("firstDueDate", () => {
   const halfYear = { type: "interval" as const, every: 6, unit: "month" as const };
 
-  it("takes the anchor, or one interval from today without one", () => {
+  it("takes the date asked for, or one interval from today without one", () => {
     expect(firstDueDate(halfYear, "2026-12-01", "2026-10-26")).toBe("2026-12-01");
     expect(firstDueDate(halfYear, null, "2026-10-26")).toBe("2027-04-26");
   });
 
-  it("moves a past anchor along the series, as the insert trigger does", () => {
-    expect(firstDueDate(halfYear, "2026-03-06", "2026-10-26")).toBe("2027-03-06");
+  it("anchors one interval before the first due date, which the trigger adds back", () => {
+    // The trigger sets next_due_at to anchor + interval; anchoring on the due date itself put the
+    // first one a whole interval late.
+    expect(anchorFor({ type: "interval", every: 1, unit: "year" }, "2027-03-06")).toBe(
+      "2026-03-06",
+    );
+    expect(anchorFor({ type: "interval", every: 2, unit: "week" }, "2027-01-10")).toBe(
+      "2026-12-27",
+    );
+  });
+
+  it("clamps months and years to the month's last day, as PostgreSQL does", () => {
+    const monthly = { type: "interval" as const, every: 1, unit: "month" as const };
+    expect(addInterval("2027-01-31", 1, "month")).toBe("2027-02-28");
+    expect(addInterval("2028-02-29", 1, "year")).toBe("2029-02-28");
+    expect(addInterval("2027-03-31", -1, "month")).toBe("2027-02-28");
+    expect(firstDueDate(monthly, null, "2027-01-31")).toBe("2027-02-28");
+    // At a month's end the stored date can fall a few days before the one asked for; the card
+    // shows the stored one.
+    expect(firstDueDate(monthly, "2027-03-31", "2026-10-26")).toBe("2027-03-28");
   });
 
   it("keeps a one-off date even when it has passed", () => {
@@ -314,7 +334,7 @@ describe("reviewCheckupProposals", () => {
         person_id: "p-1",
         title: "УЗИ щитовидной железы",
         category: "imaging",
-        schedule: { type: "interval", every: 1, unit: "year", anchor_date: "2027-03-06" },
+        schedule: { type: "interval", every: 1, unit: "year", anchor_date: "2026-03-06" },
         why_text: "Узел 4 мм, контроль через год",
         why_links: [{ type: "condition", id: "cond-1", label: "Узел" }],
         notes: "Добавлено из Claude по записи «УЗИ» от 2026-03-06.",

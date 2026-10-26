@@ -209,7 +209,7 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
     page.style.paddingBottom = (insets.bottom || (isFullscreen() ? 0 : 6)) + "px";
     page.style.paddingLeft = 2 + (insets.left || 0) + "px";
     page.style.paddingRight = 2 + (insets.right || 0) + "px";
-    if (draft) render();
+    if (draft || checkups) render();
   }
   function canFullscreen() {
     var modes = hostContext.availableDisplayModes;
@@ -491,8 +491,12 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
       : decision && decision.kind === "skipped" ? el("span", "chip off", "Не добавлено")
       : el("span", "chip", "Предложение"));
     card.appendChild(eyebrow);
-    var items = checkups.items;
-    card.appendChild(el("h1", null, items.length === 1 ? items[0].title : "Новые чекапы: " + items.length));
+    // Once added, the card lists what reached the schedule; the rest is named in the result box.
+    var items = decision && decision.added
+      ? checkups.items.filter(function (c) { return decision.added.indexOf(c.title.trim()) !== -1; })
+      : checkups.items;
+    var offered = checkups.items;
+    card.appendChild(el("h1", null, offered.length === 1 ? offered[0].title : "Новые чекапы: " + offered.length));
     card.appendChild(el("div", "meta", [checkups.person_name, checkups.evidence_label ? "по записи «" + checkups.evidence_label + "»" : null].filter(Boolean).join(" · ")));
     var list = section(decision && decision.kind === "added" ? "В расписании" : "Добавится в расписание", items, function (c) {
       var lines = [c.category_label + " · " + c.schedule_label, c.why, c.condition_name ? "Диагноз: " + c.condition_name : null];
@@ -538,18 +542,33 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
     tellModel("The owner chose not to add the proposed checkup(s) " + checkupTitles() + " on the Orbit card. Do not schedule them.");
     render();
   }
+  // The server's reasons are for the model; the owner reads the gist.
+  function refusalLabel(reason) {
+    if (/^already scheduled/.test(reason)) return "уже есть в расписании";
+    if (/^condition_id/.test(reason)) return "диагноз не найден";
+    if (/^evidence_record_id/.test(reason)) return "запись не найдена";
+    return reason;
+  }
   function settleCheckups(result) {
     busy = null;
     if (result && result.isError) {
       decision = { kind: "error", message: resultText(result) || "сервер ответил ошибкой" };
     } else {
+      // What reached the schedule is what the server says it added, not what the card offered:
+      // the second check can refuse an item, or all of them.
       var outcome = (result && result.structuredContent) || {};
+      var added = (outcome.added || []).map(function (a) { return a.title; });
       var refused = outcome.refused || [];
+      var refusedText = refused.map(function (r) { return r.title + " (" + refusalLabel(r.reason) + ")"; }).join(", ");
       decision = {
-        kind: "added",
-        details: refused.length ? "Уже были в расписании и не добавлены: " + refused.map(function (r) { return r.title; }).join(", ") + "." : null
+        kind: added.length ? "added" : "skipped",
+        added: added,
+        details: refused.length ? "Не добавлено: " + refusedText + "." : null
       };
-      tellModel("The owner added the proposed checkup(s) " + checkupTitles() + " on the Orbit card; they are scheduled now." + (refused.length ? " " + refused.length + " were not added because they were already scheduled." : ""));
+      tellModel(added.length
+        ? "The owner pressed Add on the Orbit card; scheduled now: " + added.map(function (t) { return "\\"" + t + "\\""; }).join(", ") + "." +
+          (refused.length ? " Not added: " + refused.map(function (r) { return "\\"" + r.title + "\\" (" + r.reason + ")"; }).join(", ") + "; those are NOT scheduled." : "")
+        : "The owner pressed Add on the Orbit card, but nothing was scheduled: " + refused.map(function (r) { return "\\"" + r.title + "\\" (" + r.reason + ")"; }).join(", ") + ".");
     }
     render();
   }
