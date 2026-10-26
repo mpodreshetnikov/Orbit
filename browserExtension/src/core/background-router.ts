@@ -730,7 +730,7 @@ export async function routeBackgroundMessage(
       const messageText = error instanceof Error ? error.message : "Unknown import error";
       const diagnostics = extractErrorDiagnostics(error);
       if (!message.debug?.parse_only) {
-        await tryCompleteSessionAsFailed(session, deps.importRunnerDeps.callEdge);
+        await tryCompleteSessionAsFailed(session, deps.importRunnerDeps.callEdge, error);
         await recordManualFailure(deps, session, messageText);
       }
       await deps.sessionStore.setSession(null);

@@ -679,6 +679,10 @@ export default function MoneyImportReportPage() {
     parseFiniteNumber(batchMeta.in_range_row_count) ?? batch?.inserted_count ?? 0;
   const filteredOutOfRangeCount = parseFiniteNumber(batchMeta.filtered_out_of_range_count) ?? 0;
   const filteredInvalidDateCount = parseFiniteNumber(batchMeta.filtered_invalid_date_count) ?? 0;
+  const failureMessage =
+    typeof batchMeta.failure_message === "string" && batchMeta.failure_message.trim()
+      ? batchMeta.failure_message.trim()
+      : null;
   const selectionMode = normalizeId(rangeSelectionMeta.selection_mode);
   const presetKey = normalizeId(rangeSelectionMeta.preset_key);
 
@@ -1247,6 +1251,11 @@ export default function MoneyImportReportPage() {
           <CardTitle className="text-base">{t("money.importResultStatus")}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
+          {failureMessage && batch?.status === "failed" && (
+            <p className="text-sm text-destructive">
+              {t("money.importReportFailureReason", { value: failureMessage })}
+            </p>
+          )}
           {(filteredOutOfRangeCount > 0 || filteredInvalidDateCount > 0) && (
             <Button
               type="button"
