@@ -6,6 +6,7 @@ import {
   dismissConditionClosure,
   dismissRecordProposals,
   findMissingPages,
+  signRecordPageLinks,
   proposeRecordReconciliation,
   removeRecordDraft,
   storagePathForPage,
@@ -28,8 +29,22 @@ function stubWithStorage(
     data: storedFiles.map((name) => ({ name })),
     error: null,
   }));
-  Object.assign(stub.client, { storage: { from: vi.fn(() => ({ createSignedUploadUrl, list })) } });
-  return { ...stub, createSignedUploadUrl, list };
+  const createSignedUrls = vi.fn(async (paths: string[]) => ({
+    data: paths.map((path) =>
+      path.includes("missing")
+        ? { path, signedUrl: "", error: "Object not found" }
+        : {
+            path,
+            signedUrl: `https://orbit.test/storage/v1/object/sign/${path}?token=t`,
+            error: null,
+          },
+    ),
+    error: null,
+  }));
+  Object.assign(stub.client, {
+    storage: { from: vi.fn(() => ({ createSignedUploadUrl, createSignedUrls, list })) },
+  });
+  return { ...stub, createSignedUploadUrl, createSignedUrls, list };
 }
 
 const B12_CLOSURE = {
@@ -132,6 +147,40 @@ describe("createDraftRecord", () => {
       }),
     ).rejects.toThrow("denied");
     expect(stub.argsFor("medical_records", "delete")).toHaveLength(1);
+  });
+});
+
+describe("signRecordPageLinks", () => {
+  it("links each page for an hour, in page order, and keeps a page it cannot sign by name", async () => {
+    const stub = stubWithStorage({
+      record_attachments: [
+        {
+          data: [
+            { original_filename: "a.jpg", mime_type: "image/jpeg", storage_path: "p/r/1-a.jpg" },
+            {
+              original_filename: "b.pdf",
+              mime_type: "application/pdf",
+              storage_path: "p/r/2-missing.pdf",
+            },
+          ],
+        },
+      ],
+    });
+
+    const pages = await signRecordPageLinks(stub.client, "r");
+
+    expect(stub.argsFor("record_attachments", "order")).toEqual([
+      ["sort_order", { ascending: true }],
+    ]);
+    expect(stub.createSignedUrls).toHaveBeenCalledWith(["p/r/1-a.jpg", "p/r/2-missing.pdf"], 3600);
+    expect(pages).toEqual([
+      {
+        name: "a.jpg",
+        mime_type: "image/jpeg",
+        url: "https://orbit.test/storage/v1/object/sign/p/r/1-a.jpg?token=t",
+      },
+      { name: "b.pdf", mime_type: "application/pdf", url: null },
+    ]);
   });
 });
 

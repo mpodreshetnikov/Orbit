@@ -58,6 +58,12 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
   h1 { margin: 8px 0 2px; font-size: 17px; line-height: 1.3; font-weight: 600; }
   .meta { color: var(--color-text-secondary); font-size: 13px; }
   .summary { margin: 10px 0 0; color: var(--color-text-secondary); }
+  .pages { display: flex; gap: 8px; overflow-x: auto; margin: 12px 0 2px; padding-bottom: 2px; }
+  .page-tile { flex: 0 0 auto; width: 64px; height: 84px; border: 1px solid var(--color-border-primary); border-radius: var(--border-radius-md); background: var(--color-background-secondary); overflow: hidden; padding: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font: inherit; color: var(--color-text-secondary); cursor: pointer; }
+  .page-tile:disabled { cursor: default; opacity: .6; }
+  .page-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .page-tile .kind { font-size: 11px; font-weight: 600; letter-spacing: .04em; }
+  .page-tile .name { font-size: 10px; max-width: 58px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   section { margin-top: 18px; }
   .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--color-border-primary); }
   h2 { margin: 0; font-size: 13px; font-weight: 600; }
@@ -321,6 +327,8 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
     card.appendChild(el("h1", null, draft.title));
     card.appendChild(el("div", "meta", [draft.person_name, draft.type_label, formatDate(draft.record_date)].filter(Boolean).join(" · ")));
     if (draft.summary) card.appendChild(el("p", "summary", draft.summary));
+    var pages = renderPages();
+    if (pages) card.appendChild(pages);
 
     var flagged = draft.observations.filter(function (o) { return o.flag || o.critical; }).length;
     var done = decision && decision.kind === "confirmed" && !decision.partial;
@@ -415,6 +423,43 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
     footer.appendChild(actions);
     footer.appendChild(renderLinks(decision && decision.kind === "error"));
     return footer;
+  }
+
+  // The document's own pages, so the owner can check a value against the original without Claude
+  // rendering screenshots. A tap opens the file; a thumbnail the host refuses to load falls back to
+  // the page's name.
+  function renderPages() {
+    var list = draft.pages || [];
+    if (!list.length) return null;
+    var strip = el("div", "pages");
+    list.forEach(function (page, index) {
+      var tile = el("button", "page-tile");
+      tile.type = "button";
+      tile.title = page.name;
+      tile.setAttribute("aria-label", "Страница " + (index + 1) + ": " + page.name);
+      var label = function () {
+        tile.textContent = "";
+        tile.appendChild(el("span", "kind", page.mime_type === "application/pdf" ? "PDF" : String(index + 1)));
+        tile.appendChild(el("span", "name", page.name));
+      };
+      if (page.url && page.mime_type.indexOf("image/") === 0) {
+        var img = el("img");
+        img.alt = page.name;
+        img.loading = "lazy";
+        img.addEventListener("error", label);
+        img.src = page.url;
+        tile.appendChild(img);
+      } else {
+        label();
+      }
+      if (page.url && hostCaps.openLinks) {
+        tile.addEventListener("click", function () { request("ui/open-link", { url: page.url }, 10000).catch(function () {}); });
+      } else {
+        tile.disabled = true;
+      }
+      strip.appendChild(tile);
+    });
+    return strip;
   }
 
   function renderLinks(withChatFallback) {

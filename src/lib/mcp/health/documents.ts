@@ -167,6 +167,52 @@ export async function signPageUploads(
   return uploads;
 }
 
+/** A page of a record as the draft card shows it: a link to the file, good for an hour. */
+export interface RecordPageLink {
+  name: string;
+  mime_type: string;
+  url: string | null;
+}
+
+export const PAGE_LINK_SECONDS = 60 * 60;
+
+/**
+ * Signed download links for a record's pages, in page order. A page that cannot be signed -- its
+ * file never arrived, say -- keeps its name with no link rather than failing the card.
+ */
+export async function signRecordPageLinks(
+  supabase: SupabaseClient<Database>,
+  recordId: string,
+): Promise<RecordPageLink[]> {
+  const { data, error } = await supabase
+    .from("record_attachments")
+    .select("original_filename, mime_type, storage_path")
+    .eq("record_id", recordId)
+    .order("sort_order", { ascending: true });
+  if (error) throw new Error(`Failed to load the record's pages: ${error.message}`);
+  const pages = (data ?? []) as Array<{
+    original_filename: string;
+    mime_type: string;
+    storage_path: string;
+  }>;
+  if (pages.length === 0) return [];
+
+  const { data: signed } = await supabase.storage.from(ATTACHMENT_BUCKET).createSignedUrls(
+    pages.map((page) => page.storage_path),
+    PAGE_LINK_SECONDS,
+  );
+  const urls = new Map(
+    (signed ?? []).flatMap((item) =>
+      item.path && item.signedUrl && !item.error ? [[item.path, item.signedUrl] as const] : [],
+    ),
+  );
+  return pages.map((page) => ({
+    name: page.original_filename,
+    mime_type: page.mime_type,
+    url: urls.get(page.storage_path) ?? null,
+  }));
+}
+
 export interface IngestableRecord {
   id: string;
   person_id: string;
