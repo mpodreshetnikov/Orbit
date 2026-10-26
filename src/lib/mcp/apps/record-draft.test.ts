@@ -414,7 +414,8 @@ describe("registerRecordDraftApp", () => {
 describe("RECORD_DRAFT_HTML", () => {
   it("ships a script that parses", () => {
     // The page is a template literal, so one wrong escape breaks the whole card with no other sign.
-    const script = RECORD_DRAFT_HTML.match(/<script>([\s\S]*)<\/script>/)![1];
+    const start = RECORD_DRAFT_HTML.indexOf("<script>") + "<script>".length;
+    const script = RECORD_DRAFT_HTML.slice(start, RECORD_DRAFT_HTML.lastIndexOf("</script>"));
     expect(() => new Function(script)).not.toThrow();
   });
 
