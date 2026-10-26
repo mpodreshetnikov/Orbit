@@ -77,10 +77,10 @@ export async function applyBatchAction(
  * Replays a pending batch's preview rows into final rows, with the decisions the preview
  * suggested wherever nobody chose otherwise.
  *
- * Two callers: a person's "Apply" on the report (through `applyBatchAction`, which checks
- * that the caller is a signed-in user), and the final preview chunk of an unattended run,
- * where the server applies on its own -- an import nobody started is an import nobody would
- * come back to apply. The batch itself, not the caller, says which it is.
+ * Two callers: a person's "Apply" on the report or after a file upload (through
+ * `applyBatchAction`, which checks that the caller is a signed-in user), and the final preview
+ * chunk of every extension run, where the server applies on its own -- an import is rolled
+ * back when it is wrong, not reviewed before it lands (T-261026-2ew).
  */
 export async function applyPendingBatch(batchId: string, deps: ApplyBatchDeps): Promise<Response> {
   const actionSpan = deps.telemetry?.startSpan("edge.money_import.apply_batch");

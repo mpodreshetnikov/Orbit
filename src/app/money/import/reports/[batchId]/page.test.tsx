@@ -836,6 +836,89 @@ describe("MoneyImportReportPage", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("leads an applied import with its result and rolls it back after a confirmation", async () => {
+    batchResult = { data: makeBatch({ status: "completed", error_count: 1 }), error: null };
+    rowsResult = { data: makeRows(), error: null };
+    rpcMock.mockResolvedValue({ data: { status: "rolled_back" }, error: null });
+
+    render(<MoneyImportReportPage />);
+
+    const outcome = await screen.findByTestId("money-import-outcome");
+    expect(outcome).toHaveAttribute("data-outcome", "applied");
+    expect(within(outcome).getByText("money.importOutcomeAppliedTitle 1 1")).toBeInTheDocument();
+    expect(within(outcome).getByText("money.importOutcomeAppliedHint")).toBeInTheDocument();
+    expect(within(outcome).getByText("money.importOutcomeErrors 1")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "money.importApplyBatch" })).toBeNull();
+
+    await userEvent.click(within(outcome).getByRole("button", { name: "money.importRollback" }));
+    expect(rpcMock).not.toHaveBeenCalled();
+    expect(await screen.findByText("money.importRollbackConfirmBody 1")).toBeInTheDocument();
+
+    batchResult = {
+      data: makeBatch({ status: "rolled_back", meta: { rolled_back_transactions: 1 } }),
+      error: null,
+    };
+    await userEvent.click(screen.getByRole("button", { name: "money.importRollback" }));
+
+    expect(rpcMock).toHaveBeenCalledWith("money_rollback_import_batch", { p_batch_id: "batch-1" });
+    await waitFor(() =>
+      expect(screen.getByTestId("money-import-outcome")).toHaveAttribute(
+        "data-outcome",
+        "rolled_back",
+      ),
+    );
+    expect(screen.getByText("money.importOutcomeRolledBackHint 1")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "money.importRollback" })).toBeNull();
+  });
+
+  it("keeps the page up when a rollback is refused", async () => {
+    batchResult = { data: makeBatch({ status: "completed" }), error: null };
+    rowsResult = { data: makeRows(), error: null };
+    rpcMock.mockResolvedValue({ data: null, error: { message: "only a completed batch" } });
+
+    render(<MoneyImportReportPage />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "money.importRollback" }));
+    await userEvent.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "money.importRollback",
+      }),
+    );
+
+    await waitFor(() => expect(rpcMock).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId("money-import-outcome")).toHaveAttribute("data-outcome", "applied");
+  });
+
+  it("follows a running import until it lands, without blanking the page", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      batchResult = {
+        data: makeBatch({ status: "running", parsed_transactions_count: 7 }),
+        error: null,
+      };
+      rowsResult = { data: makeRows(), error: null };
+
+      render(<MoneyImportReportPage />);
+
+      const outcome = await screen.findByTestId("money-import-outcome");
+      expect(outcome).toHaveAttribute("data-outcome", "running");
+      expect(within(outcome).getByText("money.importOutcomeRunningHint 7")).toBeInTheDocument();
+
+      batchResult = { data: makeBatch({ status: "completed" }), error: null };
+      await vi.advanceTimersByTimeAsync(3100);
+
+      await waitFor(() =>
+        expect(screen.getByTestId("money-import-outcome")).toHaveAttribute(
+          "data-outcome",
+          "applied",
+        ),
+      );
+      expect(screen.queryByText("common.loading")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("virtualizes long report lists and updates scroll position", async () => {
     batchResult = { data: makeBatch({ parsed_transactions_count: 65 }), error: null };
     rowsResult = {

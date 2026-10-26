@@ -23,6 +23,7 @@ import type {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { MoneyImportOutcome } from "@/components/money/import-outcome";
 import {
   Dialog,
   DialogContent,
@@ -46,7 +47,11 @@ const BATCH_STATUS_KEYS: Record<string, string> = {
   completed: "money.importBatchStatusCompleted",
   failed: "money.importBatchStatusFailed",
   discarded: "money.importBatchStatusDiscarded",
+  rolled_back: "money.importBatchStatusRolledBack",
 };
+
+/** How often a batch still being read is asked again, so the page follows the import live. */
+const RUNNING_REFRESH_MS = 3000;
 
 function normalizeId(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -264,7 +269,9 @@ export default function MoneyImportReportPage() {
   const [brandResolutionPendingId, setBrandResolutionPendingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [reviewActionPending, setReviewActionPending] = useState<"apply" | "discard" | null>(null);
+  const [reviewActionPending, setReviewActionPending] = useState<
+    "apply" | "discard" | "rollback" | null
+  >(null);
   const [refreshTick, setRefreshTick] = useState(0);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
@@ -282,6 +289,9 @@ export default function MoneyImportReportPage() {
     json: "",
   });
   const listRef = useRef<HTMLDivElement | null>(null);
+  // A refresh of a page already on screen (a running import polled, an action finished) keeps the
+  // page up instead of blanking it to "Loading".
+  const loadedOnceRef = useRef(false);
   const rowRefs = useRef<Record<string, HTMLElement | null>>({});
 
   useEffect(() => {
@@ -294,7 +304,7 @@ export default function MoneyImportReportPage() {
     let cancelled = false;
 
     const run = async () => {
-      setLoading(true);
+      if (!loadedOnceRef.current) setLoading(true);
       setError(null);
       const supabase = createClient();
 
@@ -482,6 +492,7 @@ export default function MoneyImportReportPage() {
         setBatch(batchData as MoneyImportBatch);
         setRows(reportRows);
         setLoading(false);
+        loadedOnceRef.current = true;
       }
     };
 
@@ -490,6 +501,13 @@ export default function MoneyImportReportPage() {
       cancelled = true;
     };
   }, [batchId, refreshTick, t]);
+
+  const batchStatus = batch?.status;
+  useEffect(() => {
+    if (batchStatus !== "running") return;
+    const timer = setTimeout(() => setRefreshTick((current) => current + 1), RUNNING_REFRESH_MS);
+    return () => clearTimeout(timer);
+  }, [batchStatus, refreshTick]);
 
   useEffect(() => {
     const node = listRef.current;
@@ -791,6 +809,25 @@ export default function MoneyImportReportPage() {
     }
   };
 
+  const handleRollbackBatch = async () => {
+    if (!batchId) return;
+    setReviewActionPending("rollback");
+    try {
+      const { error: rollbackError } = await createClient().rpc("money_rollback_import_batch", {
+        p_batch_id: batchId,
+      });
+      if (rollbackError) throw new Error(rollbackError.message);
+      toast.success(t("money.importRollbackDone"));
+      setRefreshTick((current) => current + 1);
+    } catch (rollbackError) {
+      toast.error(
+        rollbackError instanceof Error ? rollbackError.message : t("money.importRollbackFailed"),
+      );
+    } finally {
+      setReviewActionPending(null);
+    }
+  };
+
   const handleSaveBrandResolution = async (resolution: EditableBrandResolution) => {
     if (!resolution.id) return;
     if (
@@ -878,16 +915,18 @@ export default function MoneyImportReportPage() {
         </div>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">
-            {t("money.importResultsSummary", {
-              inserted: batch.inserted_count,
-              skipped: batch.skipped_count,
-            })}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-1 text-sm text-muted-foreground sm:grid-cols-2">
+      <MoneyImportOutcome
+        t={t}
+        batch={batch}
+        rollbackPending={reviewActionPending === "rollback"}
+        onRollback={() => void handleRollbackBatch()}
+      />
+
+      <details className="rounded-lg border bg-card text-card-foreground">
+        <summary className="cursor-pointer px-5 py-3 text-sm font-medium">
+          {t("money.importReportDetails")}
+        </summary>
+        <div className="grid gap-1 px-5 pb-4 text-sm text-muted-foreground sm:grid-cols-2">
           <div>{t("money.importReportSummaryBatch", { value: batch.id })}</div>
           <div>{t("money.importReportSummarySource", { value: batch.source })}</div>
           <div>{t("money.importReportSummaryStatus", { value: batchStatusLabel })}</div>
@@ -915,13 +954,12 @@ export default function MoneyImportReportPage() {
               })}
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </details>
 
       {isPendingReview && (
         <Card className="border-amber-300 bg-amber-50">
           <CardContent className="flex flex-col gap-3 p-4">
-            <p className="text-sm text-amber-950">{t("money.importPendingReviewBanner")}</p>
             <div className="flex flex-wrap gap-2">
               <Button
                 type="button"
@@ -1162,14 +1200,6 @@ export default function MoneyImportReportPage() {
                 )}
               </div>
             )}
-          </CardContent>
-        </Card>
-      )}
-
-      {isDiscarded && (
-        <Card className="border-slate-300 bg-slate-50">
-          <CardContent className="p-4 text-sm text-slate-700">
-            {t("money.importDiscardedBanner")}
           </CardContent>
         </Card>
       )}

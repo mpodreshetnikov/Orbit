@@ -105,6 +105,7 @@ BEGIN;
 \i functions/money_list_transactions_feed.sql
 \i functions/money_transaction_feed_summary.sql
 \i functions/money_update_transaction_with_lines.sql
+\i functions/money_rollback_import_batch.sql
 \i functions/money_write_transaction_edit_audit.sql
 \i functions/money_upsert_transactions_batch.sql
 \i functions/money_reassign_card_account.sql

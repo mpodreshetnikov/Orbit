@@ -1,5 +1,6 @@
 import React from "react";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import MoneyImportHistoryPage from "./page";
 
@@ -19,7 +20,7 @@ vi.mock("next-intl", () => ({
     if (key === "money.importHistoryResultsSummary" && values) {
       return `${values.inserted}/${values.skipped}/${values.errors}`;
     }
-    return key;
+    return values ? `${key} ${Object.values(values).join(" ")}` : key;
   },
 }));
 
@@ -173,6 +174,7 @@ describe("MoneyImportHistoryPage", () => {
         makeBatch({ id: "batch-completed", status: "completed" }),
         makeBatch({ id: "batch-failed", status: "failed" }),
         makeBatch({ id: "batch-discarded", status: "discarded" }),
+        makeBatch({ id: "batch-rolled-back", status: "rolled_back" }),
       ],
       error: null,
     };
@@ -184,6 +186,53 @@ describe("MoneyImportHistoryPage", () => {
     expect(screen.getByText("money.importBatchStatusCompleted")).toBeInTheDocument();
     expect(screen.getByText("money.importBatchStatusFailed")).toBeInTheDocument();
     expect(screen.getByText("money.importBatchStatusDiscarded")).toBeInTheDocument();
+    expect(screen.getByText("money.importBatchStatusRolledBack")).toBeInTheDocument();
+  });
+
+  it("reviews the imports of the last week, a custom period, or all time", async () => {
+    const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString();
+    batchesResult = {
+      data: [
+        makeBatch({ id: "batch-recent", created_at: daysAgo(2), inserted_count: 5 }),
+        makeBatch({ id: "batch-undone", created_at: daysAgo(3), status: "rolled_back" }),
+        makeBatch({ id: "batch-old", created_at: daysAgo(20), inserted_count: 40 }),
+      ],
+      error: null,
+    };
+
+    render(<MoneyImportHistoryPage />);
+
+    const summary = await screen.findByTestId("import-review-summary");
+    expect(summary).toHaveTextContent("money.importReviewSummary 3 45 2 0");
+    expect(screen.queryByRole("link", { name: "money.importReviewOpenFeed" })).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: "money.importReviewPeriodWeek" }));
+    expect(summary).toHaveTextContent("money.importReviewSummary 2 5 1 0");
+    expect(summary).toHaveTextContent("money.importReviewRolledBack 1");
+    expect(within(screen.getByTestId("import-history-table")).getAllByRole("row")).toHaveLength(3);
+    expect(screen.getByRole("link", { name: "money.importReviewOpenFeed" })).toHaveAttribute(
+      "href",
+      "/money/transactions?preset=7d",
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "money.importReviewPeriodCustom" }));
+    const day = (offset: number) => daysAgo(offset).slice(0, 10);
+    fireEvent.change(screen.getByLabelText("money.importReviewFrom"), {
+      target: { value: day(25) },
+    });
+    fireEvent.change(screen.getByLabelText("money.importReviewTo"), {
+      target: { value: day(15) },
+    });
+    expect(summary).toHaveTextContent("money.importReviewSummary 1 40 1 0");
+    expect(screen.getByRole("link", { name: "money.importReviewOpenFeed" })).toHaveAttribute(
+      "href",
+      `/money/transactions?preset=custom&from=${day(25)}&to=${day(15)}`,
+    );
+
+    fireEvent.change(screen.getByLabelText("money.importReviewTo"), {
+      target: { value: day(24) },
+    });
+    expect(summary).toHaveTextContent("money.importReviewEmpty");
   });
 
   it("labels an import nobody started, and shows the window each batch covered", async () => {
