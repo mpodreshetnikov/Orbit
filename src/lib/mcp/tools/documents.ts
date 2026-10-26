@@ -402,8 +402,8 @@ export function registerDocumentTools(server: McpToolServer): void {
       const review = reviewUrl(auth, record.id);
       lines.push(
         review
-          ? `Next: give the owner this link to review the draft in the app, where they can approve it or delete it: ${review}. Or call activate_medical_record once they agree with it here.`
-          : `Next: activate_medical_record approves it, or leave it for the owner to review in the app.`,
+          ? `Next: call show_record_draft so the owner approves or declines the draft on its card in this chat. If the card does not show, give them this link to review it in the app: ${review}. Call activate_medical_record yourself only when they agree in words.`
+          : `Next: call show_record_draft so the owner approves or declines the draft on its card in this chat. Call activate_medical_record yourself only when they agree in words.`,
       );
 
       return ok(lines.join("\n"), {

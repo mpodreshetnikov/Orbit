@@ -328,6 +328,34 @@ export async function dismissConditionClosure(
   return { status: "dismissed" };
 }
 
+/**
+ * Decline a record nobody has approved, as the app's Remove does: the record is set aside, not
+ * erased, so it can still be restored from the app. An approved record is refused -- taking a
+ * record off the chart is a decision for the app, not for a card in a chat.
+ */
+export async function removeRecordDraft(
+  supabase: SupabaseClient<Database>,
+  recordId: string,
+): Promise<{ status: "removed" | "not_found" | "not_a_draft"; recordStatus?: string }> {
+  const { data, error } = await supabase
+    .from("medical_records")
+    .select("id, status")
+    .eq("id", recordId)
+    .maybeSingle();
+  if (error) throw new Error(`Failed to load the record: ${error.message}`);
+  if (!data) return { status: "not_found" };
+  if (!INGESTABLE_STATUSES.has(data.status)) {
+    return { status: "not_a_draft", recordStatus: data.status };
+  }
+
+  const { error: updateError } = await supabase
+    .from("medical_records")
+    .update({ status: "removed", removed_at: new Date().toISOString() })
+    .eq("id", recordId);
+  if (updateError) throw new Error(`Failed to remove the record: ${updateError.message}`);
+  return { status: "removed" };
+}
+
 export interface ActivationOutcome {
   droppedUnmatchedObservations: number;
   proposalsMaterialized: number;

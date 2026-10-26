@@ -4,6 +4,7 @@ import {
   createDraftRecord,
   dismissConditionClosure,
   findMissingPages,
+  removeRecordDraft,
   storagePathForPage,
 } from "./documents";
 import { createSupabaseStub, type StubResult } from "./test-support";
@@ -259,5 +260,33 @@ describe("activateMedicalRecord", () => {
     expect(stub.argsFor("condition_records", "update")).toEqual([]);
     expect(outcome.closuresLeftPending).toBe(1);
     expect(outcome.mentionsConfirmed).toBe(0);
+  });
+});
+
+describe("removeRecordDraft", () => {
+  it("sets a record in review aside, as the app's Remove does", async () => {
+    const stub = createSupabaseStub({
+      medical_records: [{ data: { id: "r-1", status: "structure_review" } }, { data: null }],
+    });
+    expect(await removeRecordDraft(stub.client, "r-1")).toEqual({ status: "removed" });
+    const [[update]] = stub.argsFor("medical_records", "update") as [[Record<string, unknown>]];
+    expect(update.status).toBe("removed");
+    expect(typeof update.removed_at).toBe("string");
+  });
+
+  it("refuses an approved record and touches nothing", async () => {
+    const stub = createSupabaseStub({
+      medical_records: [{ data: { id: "r-1", status: "active" } }],
+    });
+    expect(await removeRecordDraft(stub.client, "r-1")).toEqual({
+      status: "not_a_draft",
+      recordStatus: "active",
+    });
+    expect(stub.argsFor("medical_records", "update")).toEqual([]);
+  });
+
+  it("reports a record that is not there", async () => {
+    const stub = createSupabaseStub({ medical_records: [{ data: null }] });
+    expect(await removeRecordDraft(stub.client, "r-1")).toEqual({ status: "not_found" });
   });
 });
