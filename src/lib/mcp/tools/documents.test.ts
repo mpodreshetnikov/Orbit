@@ -24,6 +24,7 @@ const documents = vi.hoisted(() => ({
   getRecordExtractionIssues: vi.fn(),
   isIngestableStatus: vi.fn((status: string) => status !== "active"),
   signPageUploads: vi.fn(),
+  suggestReconciliation: vi.fn(),
 }));
 const records = vi.hoisted(() => ({
   getRecordConditions: vi.fn(),
@@ -94,6 +95,20 @@ const SUBMISSION = {
     keywords: [],
   },
   extraction: { observations: [], findings: [], conditions: [], asserted_absences: [] },
+  reconciliation: { nothing_to_reconcile: true },
+};
+
+const B12_CONDITION = {
+  kind: "condition",
+  id: "33333333-3333-3333-3333-333333333333",
+  label: "Недостаточность витамина B12 [E53.8] (active)",
+  reason: "this document measures vitamin B12, which decides it",
+};
+const ULTRASOUND = {
+  kind: "checkup",
+  id: "44444444-4444-4444-4444-444444444444",
+  label: "УЗИ брюшной полости (imaging), due 2026-03-01",
+  reason: "due in the period this document dates from",
 };
 
 async function handlers(): Promise<Map<string, Handler>> {
@@ -113,6 +128,7 @@ beforeEach(() => {
   documents.getIngestableRecord.mockResolvedValue(RECORD);
   documents.findMissingPages.mockResolvedValue([]);
   documents.getRecordExtractionIssues.mockResolvedValue([]);
+  documents.suggestReconciliation.mockResolvedValue({ suggestions: [], alsoDue: [] });
   records.getRecordObservations.mockResolvedValue([]);
   records.getRecordFindings.mockResolvedValue([]);
   records.getRecordConditions.mockResolvedValue([]);
@@ -162,6 +178,96 @@ describe("ingest_medical_document", () => {
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("is active");
     expect(userClient.invokeEdgeFunctionAsUser).not.toHaveBeenCalled();
+  });
+
+  it("refuses a submission that has not decided what the document closes, storing nothing", async () => {
+    documents.suggestReconciliation.mockResolvedValue({
+      suggestions: [B12_CONDITION],
+      alsoDue: [ULTRASOUND],
+    });
+    const { reconciliation: _omitted, ...undecided } = SUBMISSION;
+    void _omitted;
+    const result = await (await handlers()).get("ingest_medical_document")!(undecided, ctx);
+    const text = result.content[0].text;
+
+    expect(result.isError).toBe(true);
+    expect(text).toContain("Not ingested: decide what this document closes first");
+    expect(text).toContain(`condition_id ${B12_CONDITION.id}`);
+    expect(text).toContain(`checkup_item_id ${ULTRASOUND.id}`);
+    expect(text).toContain("nothing_to_reconcile: true");
+    expect(text).toContain("extraction.conditions");
+    expect(userClient.invokeEdgeFunctionAsUser).not.toHaveBeenCalled();
+    expect(documents.suggestReconciliation).toHaveBeenCalledWith(expect.anything(), "p-1", {
+      recordDate: "2025-10-27",
+      sourceText: SUBMISSION.source_text,
+      observationLabels: [],
+    });
+  });
+
+  it("refuses the flag when it leaves a suggestion unruled", async () => {
+    documents.suggestReconciliation.mockResolvedValue({
+      suggestions: [B12_CONDITION],
+      alsoDue: [],
+    });
+    const result = await (await handlers()).get("ingest_medical_document")!(SUBMISSION, ctx);
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("reconciliation does not rule on them");
+    expect(userClient.invokeEdgeFunctionAsUser).not.toHaveBeenCalled();
+  });
+
+  it("refuses an empty decision that does not say nothing applies", async () => {
+    const result = await (await handlers()).get("ingest_medical_document")!(
+      { ...SUBMISSION, reconciliation: {} },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("does not say that nothing applies");
+    expect(userClient.invokeEdgeFunctionAsUser).not.toHaveBeenCalled();
+  });
+
+  it("passes the closures on and keeps its own rulings out of the edge call", async () => {
+    documents.suggestReconciliation.mockResolvedValue({
+      suggestions: [B12_CONDITION],
+      alsoDue: [],
+    });
+    userClient.invokeEdgeFunctionAsUser.mockResolvedValue({
+      status: 200,
+      payload: { success: true },
+    });
+    const closure = {
+      condition_id: B12_CONDITION.id,
+      supporting_obs_code: "vitamin_b12",
+      reason: "B12 704 in range",
+      source_anchor: "Витамин В12 704",
+    };
+    const result = await (await handlers()).get("ingest_medical_document")!(
+      {
+        ...SUBMISSION,
+        reconciliation: {
+          conditions_to_resolve: [closure],
+          not_applicable: [{ id: ULTRASOUND.id, reason: "a lab cannot complete an ultrasound" }],
+        },
+      },
+      ctx,
+    );
+
+    expect(result.isError).toBeUndefined();
+    expect(userClient.invokeEdgeFunctionAsUser).toHaveBeenCalledWith(
+      expect.anything(),
+      "health-ingest",
+      expect.objectContaining({
+        reconciliation: {
+          conditions_to_resolve: [closure],
+          findings_to_resolve: [],
+          checkups_to_complete: [],
+        },
+      }),
+    );
+    expect(result.content[0].text).toContain(
+      `Ruled out by you: ${ULTRASOUND.id} (a lab cannot complete an ultrasound).`,
+    );
   });
 
   it("hands out fresh links for pages that never arrived, without calling the server", async () => {

@@ -6,6 +6,7 @@ import {
   findMissingPages,
   removeRecordDraft,
   storagePathForPage,
+  suggestReconciliation,
 } from "./documents";
 import { createSupabaseStub, type StubResult } from "./test-support";
 
@@ -156,6 +157,72 @@ describe("findMissingPages", () => {
     });
     expect(missing.map((page) => page.original_filename)).toEqual(["b.png"]);
     expect(stub.list).toHaveBeenCalledWith("p-1/rec-1", { limit: 1000 });
+  });
+});
+
+describe("suggestReconciliation", () => {
+  it("leaves a checkup completed after the document out, by its latest completion", async () => {
+    const checkup = (id: string, title: string) => ({
+      id,
+      title,
+      category: "lab",
+      schedule: { type: "interval", every: 1, unit: "year" },
+      next_due_at: "2026-03-01",
+    });
+    const stub = createSupabaseStub({
+      conditions: [
+        {
+          data: [
+            { id: "c-d", name: "Дефицит витамина D", code: "E55.9", current_status: "active" },
+          ],
+        },
+      ],
+      checkup_items: [{ data: [checkup("k-d", "Витамин D"), checkup("k-b12", "Витамин B12")] }],
+      checkup_completions: [
+        {
+          data: [
+            { checkup_item_id: "k-b12", done_at: "2026-03-10" },
+            { checkup_item_id: "k-b12", done_at: "2025-03-01" },
+          ],
+        },
+      ],
+    });
+
+    const context = await suggestReconciliation(stub.client, "p-1", {
+      recordDate: "2026-03-06",
+      sourceText: "Витамин D (25-OH) 31.08 нг/мл; Витамин B12 704 пг/мл",
+      observationLabels: [],
+    });
+
+    expect(context.suggestions.map((s) => s.id)).toEqual(["c-d", "k-d"]);
+    expect(stub.argsFor("checkup_completions", "in")).toEqual([
+      ["checkup_item_id", ["k-d", "k-b12"]],
+    ]);
+  });
+
+  it("does not ask for completions when no checkup is due", async () => {
+    const stub = createSupabaseStub({ conditions: [{ data: [] }], checkup_items: [{ data: [] }] });
+    const context = await suggestReconciliation(stub.client, "p-1", {
+      recordDate: "2026-03-06",
+      sourceText: "",
+      observationLabels: [],
+    });
+    expect(context).toEqual({ suggestions: [], alsoDue: [] });
+    expect(stub.argsFor("checkup_completions", "select")).toEqual([]);
+  });
+
+  it("fails loudly when the conditions cannot be read", async () => {
+    const stub = createSupabaseStub({
+      conditions: [{ error: { message: "boom" } }],
+      checkup_items: [{ data: [] }],
+    });
+    await expect(
+      suggestReconciliation(stub.client, "p-1", {
+        recordDate: null,
+        sourceText: "",
+        observationLabels: [],
+      }),
+    ).rejects.toThrow("boom");
   });
 });
 
