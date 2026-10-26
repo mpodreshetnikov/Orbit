@@ -16,6 +16,7 @@ const documents = vi.hoisted(() => ({
   getPendingCompletions: vi.fn(),
   applyRecordProposals: vi.fn(),
   dismissRecordProposals: vi.fn(),
+  signRecordPageLinks: vi.fn(),
 }));
 const persons = vi.hoisted(() => ({
   name: "Максим" as string | null,
@@ -67,16 +68,30 @@ const ctx = {
 
 function register() {
   const tools = new Map<string, Registered>();
-  const resources = new Map<string, { uri: string; config: Record<string, unknown> }>();
+  const resources = new Map<
+    string,
+    {
+      uri: string;
+      config: Record<string, unknown>;
+      read: (uri: URL) => Promise<{ contents: Array<Record<string, unknown>> }>;
+    }
+  >();
   registerRecordDraftApp({
     registerTool: vi.fn((name: string, config: Record<string, unknown>, handler: Handler) => {
       tools.set(name, { config, handler });
       return {} as never;
     }),
-    registerResource: vi.fn((name: string, uri: string, config: Record<string, unknown>) => {
-      resources.set(name, { uri, config });
-      return {} as never;
-    }),
+    registerResource: vi.fn(
+      (
+        name: string,
+        uri: string,
+        config: Record<string, unknown>,
+        read: (uri: URL) => Promise<{ contents: Array<Record<string, unknown>> }>,
+      ) => {
+        resources.set(name, { uri, config, read });
+        return {} as never;
+      },
+    ),
   } as never);
   return { tools, resources };
 }
@@ -291,6 +306,7 @@ describe("registerRecordDraftApp", () => {
     records.getRecordFindings.mockResolvedValue(FINDINGS);
     records.getRecordConditions.mockResolvedValue(CONDITIONS);
     documents.getPendingCompletions.mockResolvedValue([]);
+    documents.signRecordPageLinks.mockResolvedValue([]);
   });
 
   it("links show_record_draft to the card and keeps decline away from the model", () => {
@@ -373,6 +389,32 @@ describe("registerRecordDraftApp", () => {
       person_name: "Максим",
       review_url: `https://orbit.test/health/records/${RECORD_ID}`,
     });
+  });
+
+  it("hands the card the document's pages, and lets the host load them from storage", async () => {
+    const page = {
+      name: "scan-1.jpg",
+      mime_type: "image/jpeg",
+      url: "https://orbit.test/storage/v1/object/sign/medical-attachments/p/r/1-scan-1.jpg?token=t",
+    };
+    documents.signRecordPageLinks.mockResolvedValue([page]);
+    const { tools, resources } = register();
+    const result = await tools.get("show_record_draft")!.handler({ record_id: RECORD_ID }, ctx);
+
+    expect(documents.signRecordPageLinks).toHaveBeenCalledWith(expect.anything(), RECORD_ID);
+    expect(result.structuredContent?.draft).toMatchObject({ pages: [page] });
+
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://orbit.test");
+    try {
+      const read = await resources
+        .get("orbit-record-draft")!
+        .read(new URL(RECORD_DRAFT_RESOURCE_URI));
+      expect(read.contents[0]._meta).toEqual({
+        ui: { csp: { resourceDomains: ["https://orbit.test"] } },
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("queues further drafts on the same card, leaving out ones already decided", async () => {

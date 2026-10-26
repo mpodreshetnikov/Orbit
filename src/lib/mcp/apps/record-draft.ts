@@ -8,6 +8,8 @@ import {
   dismissRecordProposals,
   getPendingCompletions,
   removeRecordDraft,
+  signRecordPageLinks,
+  type RecordPageLink,
 } from "../health/documents";
 import {
   getMedicalRecord,
@@ -15,6 +17,7 @@ import {
   getRecordFindings,
   getRecordObservations,
 } from "../health/records";
+import { getSupabaseUrl } from "../config";
 import { uuidSchema } from "../schemas/common";
 import { withUserClient } from "../tool-context";
 import { fail, ok } from "../tool-result";
@@ -94,6 +97,8 @@ export interface DraftView {
   person_name: string | null;
   summary: string | null;
   review_url: string | null;
+  /** The document's own pages, with an hour-long link to each file. */
+  pages: RecordPageLink[];
   observations: DraftObservation[];
   findings: DraftFinding[];
   conditions: DraftCondition[];
@@ -130,6 +135,7 @@ export function buildDraftView(input: {
   findings: Array<Record<string, unknown>>;
   conditions: Array<Record<string, unknown>>;
   completions?: Array<{ title: string; done_at: string; reason: string }>;
+  pages?: RecordPageLink[];
   reviewUrl: string | null;
 }): DraftView {
   const { record } = input;
@@ -212,6 +218,7 @@ export function buildDraftView(input: {
     person_name: input.personName,
     summary: text(record.llm_summary) ?? text(record.notes),
     review_url: input.reviewUrl,
+    pages: input.pages ?? [],
     observations,
     findings,
     conditions,
@@ -259,6 +266,15 @@ async function loadDraftQueue(
   return [head, ...rest];
 }
 
+/** Where signed links to a record's files point: the Supabase URL the server signs them with. */
+function storageOrigins(): string[] {
+  try {
+    return [new URL(getSupabaseUrl()).origin];
+  } catch {
+    return [];
+  }
+}
+
 export function registerRecordDraftApp(
   server: Pick<McpServer, "registerTool" | "registerResource">,
 ) {
@@ -271,7 +287,16 @@ export function registerRecordDraftApp(
       mimeType: MCP_APP_MIME_TYPE,
     },
     async (uri) => ({
-      contents: [{ uri: uri.href, mimeType: MCP_APP_MIME_TYPE, text: RECORD_DRAFT_HTML }],
+      contents: [
+        {
+          uri: uri.href,
+          mimeType: MCP_APP_MIME_TYPE,
+          text: RECORD_DRAFT_HTML,
+          // The page thumbnails load from storage's signed links, which the host's sandbox blocks
+          // unless the origin is declared.
+          _meta: { ui: { csp: { resourceDomains: storageOrigins() } } },
+        },
+      ],
     }),
   );
 
@@ -308,12 +333,13 @@ export function registerRecordDraftApp(
           );
         }
 
-        const [observations, findings, conditions, completions, person] = await Promise.all([
+        const [observations, findings, conditions, completions, person, pages] = await Promise.all([
           getRecordObservations(supabase, args.record_id),
           getRecordFindings(supabase, args.record_id),
           getRecordConditions(supabase, args.record_id),
           status === "removed" ? [] : getPendingCompletions(supabase, args.record_id),
           supabase.from("persons").select("name").eq("id", String(record.person_id)).maybeSingle(),
+          signRecordPageLinks(supabase, args.record_id),
         ]);
         const view = buildDraftView({
           record,
@@ -322,6 +348,7 @@ export function registerRecordDraftApp(
           findings,
           conditions,
           completions,
+          pages,
           reviewUrl: reviewUrl(auth, args.record_id),
         });
 
