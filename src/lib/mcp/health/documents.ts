@@ -10,6 +10,12 @@ import {
   type PersistedObservation,
 } from "@/lib/conditions/resolution-proposal";
 import { isConfirmedByRecordApproval, isUnverifiedClosure } from "@/types/condition-closure";
+import {
+  pickReconciliationSuggestions,
+  type GateCheckup,
+  type GateCondition,
+  type ReconciliationContext,
+} from "./reconciliation-gate";
 
 /**
  * Bringing a document in over MCP (ADR-261021-z02, T-260914-6n1).
@@ -283,6 +289,63 @@ export async function getIngestCandidates(
     findings: openFindings,
     checkups: (checkups.data ?? []) as IngestCandidates["checkups"],
   };
+}
+
+/**
+ * What this document looks able to close, from the person's conditions and checkups as they stand
+ * (`reconciliation-gate.ts` decides; this only reads). A hint the agent must rule on before
+ * `health-ingest` is called, never a closure.
+ */
+export async function suggestReconciliation(
+  supabase: SupabaseClient<Database>,
+  personId: string,
+  document: { recordDate: string | null; sourceText: string; observationLabels: string[] },
+): Promise<ReconciliationContext> {
+  const [conditions, checkups] = await Promise.all([
+    supabase
+      .from("conditions")
+      .select("id, name, code, current_status")
+      .eq("person_id", personId)
+      .is("deleted_at", null),
+    supabase
+      .from("checkup_items")
+      .select("id, title, category, schedule, next_due_at")
+      .eq("person_id", personId)
+      .eq("status", "active")
+      .not("next_due_at", "is", null)
+      .order("next_due_at", { ascending: true }),
+  ]);
+  for (const result of [conditions, checkups]) {
+    if (result.error) {
+      throw new Error(`Failed to load what the document could close: ${result.error.message}`);
+    }
+  }
+
+  const items = (checkups.data ?? []) as Array<Omit<GateCheckup, "last_done_at">>;
+  const lastDone = new Map<string, string>();
+  if (items.length > 0) {
+    const { data, error } = await supabase
+      .from("checkup_completions")
+      .select("checkup_item_id, done_at")
+      .in(
+        "checkup_item_id",
+        items.map((item) => item.id),
+      )
+      .order("done_at", { ascending: false });
+    if (error) throw new Error(`Failed to load checkup completions: ${error.message}`);
+    for (const row of (data ?? []) as Array<{ checkup_item_id: string; done_at: string }>) {
+      if (!lastDone.has(row.checkup_item_id)) lastDone.set(row.checkup_item_id, row.done_at);
+    }
+  }
+
+  return pickReconciliationSuggestions({
+    conditions: (conditions.data ?? []) as GateCondition[],
+    checkups: items.map((item) => ({ ...item, last_done_at: lastDone.get(item.id) ?? null })),
+    recordDate: document.recordDate,
+    sourceText: document.sourceText,
+    observationLabels: document.observationLabels,
+    today: new Date().toISOString().slice(0, 10),
+  });
 }
 
 export async function getRecordExtractionIssues(

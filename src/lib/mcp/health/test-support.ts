@@ -70,6 +70,7 @@ export function createSupabaseStub(
       eq: record("eq"),
       neq: record("neq"),
       is: record("is"),
+      not: record("not"),
       gt: record("gt"),
       gte: record("gte"),
       lt: record("lt"),

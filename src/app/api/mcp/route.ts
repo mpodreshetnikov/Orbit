@@ -34,7 +34,7 @@ const handler = createMcpHandler(
       "Most tools are scoped to a person (family members and pets are tracked separately).",
       "Call list_persons first when you do not know which person a request refers to, and ask the user rather than guessing.",
       "Two different things are called measurements here: `measurements` are manually recorded body metrics (weight, height, circumferences), while observations are lab values extracted from uploaded medical documents. Pick the right one for the question.",
-      "To bring in a medical document you have read yourself: create_medical_record, upload its pages, get_ingest_candidates when it may close something, ingest_medical_document, then show_record_draft so the user approves or declines the draft on its card (activate_medical_record only when they agree in words instead).",
+      "To bring in a medical document you have read yourself: create_medical_record, upload its pages, get_ingest_candidates, ingest_medical_document with its reconciliation decided in the same call, then show_record_draft so the user approves or declines the draft on its card (activate_medical_record only when they agree in words instead).",
     ].join(" "),
   },
 );
