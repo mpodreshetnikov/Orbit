@@ -17,7 +17,10 @@ const documents = vi.hoisted(() => ({
   applyRecordProposals: vi.fn(),
   dismissRecordProposals: vi.fn(),
 }));
-const persons = vi.hoisted(() => ({ name: "Максим" as string | null }));
+const persons = vi.hoisted(() => ({
+  name: "Максим" as string | null,
+  queued: [] as Array<{ id: string; title: string | null; status: string }>,
+}));
 
 vi.mock("../health/records", () => records);
 vi.mock("../health/documents", () => documents);
@@ -28,6 +31,7 @@ vi.mock("../supabase-user-client", () => ({
         eq: () => ({
           maybeSingle: async () => ({ data: persons.name ? { name: persons.name } : null }),
         }),
+        in: async () => ({ data: persons.queued, error: null }),
       }),
     }),
   })),
@@ -371,6 +375,25 @@ describe("registerRecordDraftApp", () => {
     });
   });
 
+  it("queues further drafts on the same card, leaving out ones already decided", async () => {
+    const second = "22222222-2222-4222-8222-222222222222";
+    const decided = "33333333-3333-4333-8333-333333333333";
+    persons.queued = [
+      { id: decided, title: "УЗИ", status: "active" },
+      { id: second, title: "Биохимия", status: "structure_review" },
+    ];
+    const result = await register()
+      .tools.get("show_record_draft")!
+      .handler({ record_id: RECORD_ID, then_record_ids: [second, decided, RECORD_ID] }, ctx);
+
+    expect(result.structuredContent?.queue).toEqual([
+      { record_id: RECORD_ID, title: "Общий анализ крови" },
+      { record_id: second, title: "Биохимия" },
+    ]);
+    expect(result.content[0].text).toContain('goes through 1 more draft(s): "Биохимия"');
+    persons.queued = [];
+  });
+
   it("refuses a record that has not been ingested yet", async () => {
     records.getMedicalRecord.mockResolvedValue({ ...RECORD, status: "draft" });
     const result = await register()
@@ -424,6 +447,12 @@ describe("RECORD_DRAFT_HTML", () => {
     ]) {
       expect(RECORD_DRAFT_HTML).toContain(line);
     }
+  });
+
+  it("holds the chat message for a queue until the owner is through it", () => {
+    expect(RECORD_DRAFT_HTML).toContain("Разобрал записи в карточке: ");
+    expect(RECORD_DRAFT_HTML).toContain('if (!noteOutcome("approved")) tellChat(');
+    expect(RECORD_DRAFT_HTML).toContain('" из " + queue.length');
   });
 
   it("ships a script that parses", () => {
