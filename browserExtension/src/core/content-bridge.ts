@@ -1,5 +1,6 @@
 const WEBAPP_SOURCE = "orbit-webapp";
 const BRIDGE_SOURCE = "orbit-extension";
+export const CONTENT_BRIDGE_PROBE = "ORBIT_CONTENT_BRIDGE_PROBE";
 
 type RuntimeSendMessage = (
   message: Record<string, unknown>,
@@ -232,8 +233,16 @@ export function createContentBridge(deps: ContentBridgeDeps) {
 
   function handleRuntimeMessage(
     message: (Record<string, unknown> & { type?: string }) | null,
+    _sender?: unknown,
+    sendResponse?: (response: unknown) => void,
   ): void {
     if (!message || typeof message !== "object") return;
+    // The background asks before it injects this script into an open tab, so a tab that already
+    // has a live bridge -- Firefox injects on install by itself -- never gets a second one.
+    if (message.type === CONTENT_BRIDGE_PROBE) {
+      sendResponse?.({ alive: true });
+      return;
+    }
     if (
       ![
         "MONEY_IMPORT_PROGRESS",

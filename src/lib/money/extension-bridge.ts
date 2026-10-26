@@ -24,6 +24,10 @@ function newRequestId(): string {
  * tab is from before an extension update and has no extension behind it any more; only a
  * reload of the page gets the script the new version injects. `silent`: no answer at all --
  * no extension, or one still waking up.
+ *
+ * A tab can hold both: since 0.1.30 an update injects a new script beside the orphaned one, and
+ * the orphan's stale notice arrives first because it needs no round trip. So a stale notice
+ * only decides the verdict when no live answer has come by the timeout.
  */
 export type ExtensionProbe = "alive" | "stale" | "silent";
 
@@ -34,12 +38,13 @@ export function probeExtension(timeoutMs: number = PING_TIMEOUT_MS): Promise<Ext
       window.removeEventListener("message", onMessage);
       resolve(verdict);
     };
-    const timeout = window.setTimeout(() => finish("silent"), timeoutMs);
+    let heardStale = false;
+    const timeout = window.setTimeout(() => finish(heardStale ? "stale" : "silent"), timeoutMs);
     const onMessage = (event: MessageEvent) => {
       const data = event.data as Record<string, unknown> | null;
       if (!data || data.source !== EXTENSION_BRIDGE_SOURCE) return;
       if (data.type === "MONEY_IMPORT_PONG") finish("alive");
-      else if (data.type === "MONEY_IMPORT_BRIDGE_STALE") finish("stale");
+      else if (data.type === "MONEY_IMPORT_BRIDGE_STALE") heardStale = true;
     };
     window.addEventListener("message", onMessage);
     window.postMessage(
@@ -108,8 +113,9 @@ export function reloadPage(): void {
 }
 
 /**
- * Sends one request and resolves with the reply that echoes its id, or null on timeout -- or
- * null at once when the bridge answers that it is stale, which `onBridgeStale` hears as well.
+ * Sends one request and resolves with the reply that echoes its id, or null on timeout. A stale
+ * notice does not end the wait: a live bridge injected beside the orphan may still answer (see
+ * `probeExtension`); `onBridgeStale` hears the notice either way.
  */
 export function requestFromExtension<T>(input: {
   type: string;
@@ -129,10 +135,6 @@ export function requestFromExtension<T>(input: {
     const onMessage = (event: MessageEvent) => {
       const data = event.data as Record<string, unknown> | null;
       if (!data || data.source !== EXTENSION_BRIDGE_SOURCE) return;
-      if (data.type === "MONEY_IMPORT_BRIDGE_STALE") {
-        finish(null);
-        return;
-      }
       if (data.type !== input.replyType || data.request_id !== requestId) return;
       finish(input.read(data));
     };

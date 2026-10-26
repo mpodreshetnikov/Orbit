@@ -15,6 +15,7 @@ import { createAttentionRefresher, type RefreshOptions } from "./core/attention-
 import { runScheduledImport, tryCompleteSessionAsFailed } from "./core/import-runner.js";
 import { activeImportRuns } from "./core/active-runs.js";
 import { keepWorkerAliveDuringRuns } from "./core/keepalive.js";
+import { reconnectAppTabs } from "./core/app-tab-bridge.js";
 import { createSessionJanitor } from "./core/session-janitor.js";
 import { needsRearmAtStart, sweepAlarmSchedule } from "./core/auto-import-alarm.js";
 import { chooseReplacementTab, shouldAdoptRequestTab } from "./core/attention-policy.js";
@@ -737,6 +738,23 @@ chrome.runtime.onInstalled?.addListener((details) => {
   void refreshAttention("install", { mayOpenPage: false });
   // A new version has reason to run soon, forgiven failures or not.
   void rearmAutoImportAlarmAtStart();
+});
+
+// An Orbit tab open across an install or an update has no bridge of this version: without one
+// the page cannot hear the extension until it is reloaded. Firefox's own injection is left alone.
+chrome.runtime.onInstalled?.addListener((details) => {
+  if (details.reason !== "install" && details.reason !== "update") return;
+  if (!Array.isArray(APP_ORIGIN_PATTERNS) || APP_ORIGIN_PATTERNS.length === 0) return;
+  void reconnectAppTabs({
+    queryAppTabs: () => chrome.tabs.query({ url: APP_ORIGIN_PATTERNS }),
+    sendToTab: (tabId, message) => chrome.tabs.sendMessage(tabId, message),
+    injectContentScript: async (tabId) => {
+      await chrome.scripting.executeScript({ target: { tabId }, files: ["content-script.js"] });
+    },
+  }).then((injected) => {
+    if (injected.length === 0) return;
+    telemetry.info("app_tabs_reconnected", { reason: details.reason, tabs: injected.length });
+  });
 });
 
 // The browser's start is the one moment a page opening by itself reads as a reminder rather
