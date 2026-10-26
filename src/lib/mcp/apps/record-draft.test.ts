@@ -363,7 +363,7 @@ describe("registerRecordDraftApp", () => {
 
     expect(result.isError).toBeUndefined();
     expect(result.content[0].text).toContain('Showing the draft of "Общий анализ крови"');
-    expect(result.content[0].text).toContain("wait for them");
+    expect(result.content[0].text).toContain("posts a short message from them in the chat");
     expect(result.structuredContent?.draft).toMatchObject({
       record_id: RECORD_ID,
       person_name: "Максим",
@@ -412,6 +412,20 @@ describe("registerRecordDraftApp", () => {
 });
 
 describe("RECORD_DRAFT_HTML", () => {
+  it("starts the model's turn with a chat message after a decision", () => {
+    // Model context alone does not start a turn, so each outcome also posts a line in the chat.
+    expect(RECORD_DRAFT_HTML).toContain('request("ui/message", { role: "user"');
+    for (const line of [
+      "Одобрил запись «",
+      "Отклонил запись «",
+      "Подтвердил сверку",
+      "Отклонил сверку: «",
+      "Добавил в расписание: ",
+    ]) {
+      expect(RECORD_DRAFT_HTML).toContain(line);
+    }
+  });
+
   it("ships a script that parses", () => {
     // The page is a template literal, so one wrong escape breaks the whole card with no other sign.
     const start = RECORD_DRAFT_HTML.indexOf("<script>") + "<script>".length;

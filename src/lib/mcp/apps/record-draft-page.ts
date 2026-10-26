@@ -417,6 +417,13 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
     if (!hostCaps.updateModelContext) return;
     request("ui/update-model-context", { content: [{ type: "text", text: textValue }] }, 10000).catch(function () {});
   }
+  // Model context alone does not start a turn: on 2026-10-26 the owner approved on the card and
+  // then had to type "Дальше" before Claude moved on. A short line in the owner's voice does, and
+  // it reaches the chat after the context that explains it.
+  function tellChat(textValue) {
+    if (!hostCaps.message) return;
+    request("ui/message", { role: "user", content: [{ type: "text", text: textValue }] }, 30000).catch(function () {});
+  }
 
   function settle(action, result) {
     busy = null;
@@ -431,9 +438,11 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
       var left = confirmed.closuresLeftPending || 0;
       decision = { kind: "confirmed", partial: left > 0, details: lines.join(" ") || null };
       tellModel("The owner confirmed the proposed closures and checkup completions for \\"" + draft.title + "\\" (record_id " + draft.record_id + ") on the Orbit card: " + (confirmed.mentionsConfirmed || 0) + " closure(s) and " + (confirmed.checkupsCompleted || 0) + " checkup completion(s) are on the chart now." + (left ? " " + left + " closure(s) did NOT reach the chart: the measurement they cite is no longer in range on this record, so they still await confirmation and the condition keeps its status." : ""));
+      tellChat((left ? "Подтвердил сверку частично: " : "Подтвердил сверку: ") + "«" + draft.title + "».");
     } else if (action === "dismiss") {
       decision = { kind: "dismissed" };
       tellModel("The owner declined the proposed closures and checkup completions for \\"" + draft.title + "\\" (record_id " + draft.record_id + ") on the Orbit card; nothing changed. Do not propose them again unless the owner asks.");
+      tellChat("Отклонил сверку: «" + draft.title + "».");
     } else if (action === "approve") {
       var outcome = (result && result.structuredContent) || {};
       var notes = [];
@@ -443,9 +452,11 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
       if (outcome.closuresLeftPending) notes.push("Закрытий осталось на подтверждении: " + outcome.closuresLeftPending + ".");
       decision = { kind: "approved", details: notes.join(" ") || null };
       tellModel("The owner approved the record draft \\"" + draft.title + "\\" (record_id " + draft.record_id + ") on the Orbit card; it is on the chart now. Do not call activate_medical_record again.");
+      tellChat("Одобрил запись «" + draft.title + "».");
     } else {
       decision = { kind: "declined" };
       tellModel("The owner declined the record draft \\"" + draft.title + "\\" (record_id " + draft.record_id + ") on the Orbit card; it was set aside. Do not approve it.");
+      tellChat("Отклонил запись «" + draft.title + "».");
     }
     render();
   }
@@ -540,6 +551,7 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
     if (busy) return;
     decision = { kind: "skipped" };
     tellModel("The owner chose not to add the proposed checkup(s) " + checkupTitles() + " on the Orbit card. Do not schedule them.");
+    tellChat("Не стал добавлять чекапы.");
     render();
   }
   // The server's reasons are for the model; the owner reads the gist.
@@ -569,6 +581,7 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
         ? "The owner pressed Add on the Orbit card; scheduled now: " + added.map(function (t) { return "\\"" + t + "\\""; }).join(", ") + "." +
           (refused.length ? " Not added: " + refused.map(function (r) { return "\\"" + r.title + "\\" (" + r.reason + ")"; }).join(", ") + "; those are NOT scheduled." : "")
         : "The owner pressed Add on the Orbit card, but nothing was scheduled: " + refused.map(function (r) { return "\\"" + r.title + "\\" (" + r.reason + ")"; }).join(", ") + ".");
+      tellChat(added.length ? "Добавил в расписание: " + added.join(", ") + "." : "Чекапы не добавились.");
     }
     render();
   }
@@ -619,7 +632,7 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
       request("tools/call", { name: "show_record_draft", arguments: { record_id: recordId } }, 30000, function (late) {
         if (!draft && late.result) takeResult(late.result);
       }).then(takeResult, function () {});
-    }, 6000);
+    }, 2000);
   }, function () {
     document.getElementById("card").textContent = "";
     document.getElementById("card").appendChild(el("p", "placeholder", "Карточка не смогла связаться с Claude. Черновик можно открыть в Orbit."));

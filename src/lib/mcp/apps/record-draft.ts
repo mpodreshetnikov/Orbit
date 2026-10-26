@@ -283,9 +283,9 @@ export function registerRecordDraftApp(
       const counts = `${view.observations.length} lab value(s), ${view.findings.length} finding(s), ${view.conditions.length} diagnosis mention(s), ${view.closures.length} closure(s) awaiting confirmation, ${view.completions.length} checkup completion(s) awaiting confirmation`;
       const next =
         status === "structure_review"
-          ? "The owner approves or declines it on the card; wait for them. If the card does not show, give them the review link instead."
+          ? "The owner approves or declines it on the card; end your turn and wait: when they press a button the card posts a short message from them in the chat, and the outcome is in your context. If the card does not show, give them the review link instead."
           : view.has_proposals
-            ? "It is approved; the owner confirms or declines the proposed closures and completions on the card. Nothing has changed on the chart until they confirm; wait for them."
+            ? "It is approved; the owner confirms or declines the proposed closures and completions on the card. Nothing has changed on the chart until they confirm; end your turn and wait: when they press a button the card posts a short message from them in the chat, and the outcome is in your context."
             : status === "active"
               ? "It is already approved."
               : "It was declined and set aside.";
