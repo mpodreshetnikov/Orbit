@@ -116,6 +116,8 @@ const FINDINGS = [
     count: 1,
     severity: "mild",
     laterality: "left",
+    description: "Ровные края, однородный цвет",
+    histology: "Пограничный невус",
   },
   { finding_type_text: "пятно", body_site_text: "плечо", finding_code: "spot", site_code: null },
 ];
@@ -191,8 +193,22 @@ describe("buildDraftView", () => {
 
   it("describes findings in words, and an uncoded site as not recognised", () => {
     expect(view.findings).toEqual([
-      { name: "Невус", site: "Спина", details: "4 мм, лёгкая, слева", recognised: true },
-      { name: "пятно", site: "плечо", details: null, recognised: false },
+      {
+        name: "Невус",
+        site: "Спина",
+        details: "4 мм, лёгкая, слева",
+        description: "Ровные края, однородный цвет",
+        histology: "Пограничный невус",
+        recognised: true,
+      },
+      {
+        name: "пятно",
+        site: "плечо",
+        details: null,
+        description: null,
+        histology: null,
+        recognised: false,
+      },
     ]);
   });
 
@@ -200,7 +216,23 @@ describe("buildDraftView", () => {
     expect(view.conditions).toEqual([
       { name: "Железодефицит", code: "D50", status: "активный", proposed: true },
     ]);
-    expect(view.closures).toEqual([{ name: "Дефицит B12", evidence: "vitamin_b12" }]);
+    expect(view.closures).toEqual([
+      { name: "Дефицит B12", status: "разрешён", evidence: "vitamin_b12" },
+    ]);
+  });
+
+  it("says what a closure sets the diagnosis to, history apart from resolved", () => {
+    const history = buildDraftView({
+      record: RECORD,
+      personName: null,
+      observations: [],
+      findings: [],
+      conditions: [
+        { condition_name: "Ветрянка", status_in_record: "history", awaiting_confirmation: true },
+      ],
+      reviewUrl: null,
+    });
+    expect(history.closures).toEqual([{ name: "Ветрянка", status: "в анамнезе", evidence: null }]);
   });
 
   it("names the measurement a closure cites when the record carries it", () => {
@@ -219,7 +251,9 @@ describe("buildDraftView", () => {
       conditions: CONDITIONS,
       reviewUrl: null,
     });
-    expect(cited.closures).toEqual([{ name: "Дефицит B12", evidence: "Витамин B12" }]);
+    expect(cited.closures).toEqual([
+      { name: "Дефицит B12", status: "разрешён", evidence: "Витамин B12" },
+    ]);
   });
 });
 
@@ -322,6 +356,11 @@ describe("RECORD_DRAFT_HTML", () => {
 
   it("asks before declining", () => {
     expect(RECORD_DRAFT_HTML).toContain("Да, отклонить");
+  });
+
+  it("hands only a failed approve to Claude, which cannot decline", () => {
+    expect(RECORD_DRAFT_HTML).toContain('decision.action === "approve")');
+    expect(RECORD_DRAFT_HTML).not.toContain("Отклони черновик");
   });
 
   it("reports its height to the host and clears the full-screen header", () => {

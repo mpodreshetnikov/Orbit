@@ -36,7 +36,8 @@ export const ALLOWED_PAGE_MIME_TYPES = [
 export const MAX_PAGE_BYTES = 20 * 1024 * 1024;
 
 /** Statuses a document may be ingested from: never one a person has already approved. */
-const INGESTABLE_STATUSES = new Set(["draft", "ocr_failed", "ocr_review", "structure_review"]);
+const INGESTABLE = ["draft", "ocr_failed", "ocr_review", "structure_review"] as const;
+const INGESTABLE_STATUSES = new Set<string>(INGESTABLE);
 
 const OBSERVATION_RECHECK_COLUMNS =
   "obs_code, is_applied, value_numeric, value_canonical, ref_range_low, ref_range_high, ref_range_low_canonical, ref_range_high_canonical, status";
@@ -348,11 +349,23 @@ export async function removeRecordDraft(
     return { status: "not_a_draft", recordStatus: data.status };
   }
 
-  const { error: updateError } = await supabase
+  // Guarded by status too: approved in the app between the read and this write, the record stays.
+  const { data: updated, error: updateError } = await supabase
     .from("medical_records")
     .update({ status: "removed", removed_at: new Date().toISOString() })
-    .eq("id", recordId);
+    .eq("id", recordId)
+    .in("status", INGESTABLE)
+    .select("id");
   if (updateError) throw new Error(`Failed to remove the record: ${updateError.message}`);
+  if (!updated || updated.length === 0) {
+    const { data: now } = await supabase
+      .from("medical_records")
+      .select("status")
+      .eq("id", recordId)
+      .maybeSingle();
+    if (!now) return { status: "not_found" };
+    return { status: "not_a_draft", recordStatus: now.status };
+  }
   return { status: "removed" };
 }
 

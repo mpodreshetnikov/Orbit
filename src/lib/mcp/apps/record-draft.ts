@@ -57,6 +57,8 @@ export interface DraftFinding {
   name: string;
   site: string | null;
   details: string | null;
+  description: string | null;
+  histology: string | null;
   recognised: boolean;
 }
 export interface DraftCondition {
@@ -67,6 +69,8 @@ export interface DraftCondition {
 }
 export interface DraftClosure {
   name: string;
+  /** What approval sets it to: resolved and history are different chart statuses. */
+  status: string;
   evidence: string | null;
 }
 export interface DraftView {
@@ -142,6 +146,8 @@ export function buildDraftView(input: {
       name: text(row.catalog_finding_name_ru) ?? text(row.finding_type_text) ?? "Находка",
       site: text(row.catalog_site_name_ru) ?? siteText,
       details: details.length > 0 ? details.join(", ") : null,
+      description: text(row.description),
+      histology: text(row.histology),
       recognised: Boolean(row.finding_code) && (!siteText || Boolean(row.site_code)),
     };
   });
@@ -152,16 +158,20 @@ export function buildDraftView(input: {
     const name =
       text(row.condition_name) ?? text(row.condition_icd_name_ru) ?? text(row.condition_code);
     if (!name) continue;
+    const status = String(row.status_in_record ?? "");
     if (row.awaiting_confirmation === true) {
       const code = text(row.supporting_obs_code);
       const cited = input.observations.find((obs) => code && obs.obs_code === code);
       const citedName = cited ? (text(cited.catalog_name_ru) ?? text(cited.obs_name)) : null;
-      closures.push({ name, evidence: citedName ?? code });
+      closures.push({
+        name,
+        status: CONDITION_STATUS_LABELS[status] ?? status,
+        evidence: citedName ?? code,
+      });
       continue;
     }
     // A closure a person already dismissed changes nothing, so it is not news on the card.
     if (row.not_applied_reason) continue;
-    const status = String(row.status_in_record ?? "");
     conditions.push({
       name,
       code: text(row.condition_code),

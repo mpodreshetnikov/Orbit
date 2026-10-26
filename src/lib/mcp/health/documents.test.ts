@@ -266,12 +266,32 @@ describe("activateMedicalRecord", () => {
 describe("removeRecordDraft", () => {
   it("sets a record in review aside, as the app's Remove does", async () => {
     const stub = createSupabaseStub({
-      medical_records: [{ data: { id: "r-1", status: "structure_review" } }, { data: null }],
+      medical_records: [
+        { data: { id: "r-1", status: "structure_review" } },
+        { data: [{ id: "r-1" }] },
+      ],
     });
     expect(await removeRecordDraft(stub.client, "r-1")).toEqual({ status: "removed" });
     const [[update]] = stub.argsFor("medical_records", "update") as [[Record<string, unknown>]];
     expect(update.status).toBe("removed");
     expect(typeof update.removed_at).toBe("string");
+    const [[column, statuses]] = stub.argsFor("medical_records", "in") as [[string, string[]]];
+    expect(column).toBe("status");
+    expect(statuses).not.toContain("active");
+  });
+
+  it("leaves a record approved between the read and the write alone", async () => {
+    const stub = createSupabaseStub({
+      medical_records: [
+        { data: { id: "r-1", status: "structure_review" } },
+        { data: [] },
+        { data: { status: "active" } },
+      ],
+    });
+    expect(await removeRecordDraft(stub.client, "r-1")).toEqual({
+      status: "not_a_draft",
+      recordStatus: "active",
+    });
   });
 
   it("refuses an approved record and touches nothing", async () => {

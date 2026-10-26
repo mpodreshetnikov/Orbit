@@ -248,7 +248,9 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
     var name = el("div", null, mainText);
     if (tagText) name.appendChild(el("span", "tag", tagText));
     main.appendChild(name);
-    if (subText) main.appendChild(el("div", "sub", subText));
+    [].concat(subText || []).forEach(function (line) {
+      if (line) main.appendChild(el("div", "sub", line));
+    });
     node.appendChild(main);
     if (endNode) node.appendChild(endNode);
     return node;
@@ -286,14 +288,15 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
       }, flagged ? flagged + " вне нормы" : null),
       section("Находки", draft.findings, function (f) {
         var sub = [f.site, f.details].filter(Boolean).join(" · ");
-        return row(f.name, sub || null, null, false, f.recognised ? null : "нет в каталоге");
+        var lines = [sub, f.description, f.histology ? "Гистология: " + f.histology : null];
+        return row(f.name, lines, null, false, f.recognised ? null : "нет в каталоге");
       }),
       section("Диагнозы", draft.conditions, function (c) {
         var end = el("div", "end sub", c.status);
         return row(c.name, [c.code, c.proposed ? "новый диагноз" : null].filter(Boolean).join(" · ") || null, end);
       }),
       section("Закроется при одобрении", draft.closures, function (c) {
-        return row(c.name, c.evidence ? "по анализу " + c.evidence : null, el("div", "end sub", "→ разрешён"));
+        return row(c.name, c.evidence ? "по анализу " + c.evidence : null, el("div", "end sub", "→ " + c.status));
       })
     ];
     parts.forEach(function (part) { if (part) card.appendChild(part); });
@@ -358,12 +361,13 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
       open.addEventListener("click", function () { request("ui/open-link", { url: draft.review_url }, 10000).catch(function () {}); });
       links.appendChild(open);
     }
-    if (withChatFallback && hostCaps.message && decision && decision.action) {
+    // Only approve can be handed to Claude: decline is the card's alone, so a failed one is retried
+    // here or done in Orbit.
+    if (withChatFallback && hostCaps.message && decision && decision.action === "approve") {
       var say = el("button", "link", "Попросить Claude");
       say.type = "button";
       say.addEventListener("click", function () {
-        var verb = decision.action === "approve" ? "Одобри" : "Отклони";
-        request("ui/message", { role: "user", content: [{ type: "text", text: verb + " черновик записи «" + draft.title + "» (record_id " + draft.record_id + ")." }] }, 30000).catch(function () {});
+        request("ui/message", { role: "user", content: [{ type: "text", text: "Одобри черновик записи «" + draft.title + "» (record_id " + draft.record_id + ")." }] }, 30000).catch(function () {});
       });
       links.appendChild(say);
     }
