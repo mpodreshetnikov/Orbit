@@ -1153,6 +1153,15 @@ function extractOperationsInPage(input: {
   // the parse checks the mark at every pause and stops, rather than fetching on for nobody.
   const cancelToken =
     typeof input.cancelToken === "string" && input.cancelToken ? input.cancelToken : null;
+  // The bank's API, asked as the page asks it. Chrome runs a content script's fetch as the
+  // page's own; Firefox runs it as the extension's, which the bank's API need not answer the
+  // same way, and offers the page's fetch as `content.fetch` for exactly this.
+  const pageFetch: typeof fetch =
+    typeof (globalThis as { content?: { fetch?: unknown } }).content?.fetch === "function"
+      ? (globalThis as unknown as { content: { fetch: typeof fetch } }).content.fetch.bind(
+          (globalThis as unknown as { content: object }).content,
+        )
+      : fetch;
   if (reportToken) {
     // Chrome ends an extension service worker whose single API call is still open after five
     // minutes, and executeScript is one call. The parse below, with its pauses for the bank's
@@ -1587,7 +1596,7 @@ function extractOperationsInPage(input: {
 
       for (const [index, range] of ranges.entries()) {
         const rangeUrl = buildRangeUrl(operationsApiUrl, range.start, range.end);
-        const response = await fetch(rangeUrl, {
+        const response = await pageFetch(rangeUrl, {
           credentials: "include",
         });
         const attempt = {
@@ -2229,7 +2238,7 @@ function extractOperationsInPage(input: {
       await awaitReceiptWindowCapacity();
       receiptState.hasRequestedReceipt = true;
       receiptState.requestStartedAtMs.push(Date.now());
-      const response = await fetch(url.toString(), {
+      const response = await pageFetch(url.toString(), {
         credentials: "include",
       });
       if (!response.ok) {
@@ -2363,7 +2372,7 @@ function extractOperationsInPage(input: {
 
     url.searchParams.set("operationId", operationId);
     url.searchParams.set("sessionid", sessionId);
-    const response = await fetch(url.toString(), {
+    const response = await pageFetch(url.toString(), {
       credentials: "include",
     });
     if (!response.ok) return null;
@@ -2432,7 +2441,7 @@ function extractOperationsInPage(input: {
       url.searchParams.set("wuid", baseParams.wuid);
     }
 
-    const response = await fetch(url.toString(), {
+    const response = await pageFetch(url.toString(), {
       credentials: "include",
     });
     if (!response.ok) return null;
