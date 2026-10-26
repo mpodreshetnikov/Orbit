@@ -107,10 +107,18 @@ export function feedQueryForReviewPeriod(
   if (period === "week") return "preset=7d";
   if (period === "month") return "preset=30d";
   if (period === "custom") {
-    if (!parseDay(custom.from, "start") || !parseDay(custom.to, "end")) return null;
-    return `preset=custom&from=${custom.from}&to=${custom.to}`;
+    const from = parseDay(custom.from, "start");
+    const to = parseDay(custom.to, "end");
+    if (!from || !to) return null;
+    // Rebuilt from the parsed dates, not the typed text, so nothing typed reaches the URL as is.
+    return `preset=custom&from=${formatDay(from)}&to=${formatDay(to)}`;
   }
   return null;
+}
+
+function formatDay(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
 /** What an import's page leads with: still reading, landed, undone, or broken. */
