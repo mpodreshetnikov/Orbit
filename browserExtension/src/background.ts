@@ -824,6 +824,7 @@ chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendRe
   const answersAtOnce =
     message.type === "MONEY_IMPORT_RUN" && message.origin === "source_page_overlay";
   if (answersAtOnce) sendResponse({ ok: true, accepted: true });
+  let answered = answersAtOnce;
   void (async () => {
     try {
       const response = await routeBackgroundMessage(
@@ -870,7 +871,12 @@ chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendRe
         },
       );
 
+      // The page waits on this answer to say the handoff worked. The session is stored by now;
+      // the widget sync below waits for the bank tab the page just opened to finish loading,
+      // which outlasted the page's wait and sent it down a dead fallback (2026-10-25).
       if (message.type === "MONEY_IMPORT_START_SESSION") {
+        sendResponse(response);
+        answered = true;
         const session =
           message.session && typeof message.session === "object"
             ? (message.session as Record<string, unknown>)
@@ -900,7 +906,7 @@ chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendRe
         await refreshAttention("message", { mayOpenPage: false });
       }
 
-      if (!answersAtOnce) sendResponse(response);
+      if (!answered) sendResponse(response);
     } catch (error) {
       const messageText = error instanceof Error ? error.message : "Unknown extension error";
       const diagnostics = extractErrorDiagnostics(error);
@@ -929,7 +935,7 @@ chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendRe
           diagnostics,
         });
       }
-      if (!answersAtOnce) sendResponse({ ok: false, error: messageText, diagnostics });
+      if (!answered) sendResponse({ ok: false, error: messageText, diagnostics });
     }
   })();
 

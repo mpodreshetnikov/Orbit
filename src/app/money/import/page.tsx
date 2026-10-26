@@ -64,6 +64,12 @@ const EXTENSION_BRIDGE_SOURCE = "orbit-extension";
 const DEFAULT_ACCOUNT_STORAGE_PREFIX = "money-import-default-account";
 const DEFAULT_TBANK_PARSE_STRATEGY: MoneyImportParseStrategy = "full";
 const EXTENSION_PING_TIMEOUT_MS = 500;
+// The ping is answered by the service worker, which may be asleep; one 500 ms miss is a slow
+// wake as often as a missing extension, so the start asks a few times before giving up.
+const START_PROBE_OFFSETS_MS: readonly number[] = [0, 500, 1500, 3000];
+// Before 0.1.30 the extension acknowledged a session only after the bank tab the page had just
+// opened finished loading -- often longer than the old three seconds, while the import worked.
+const SESSION_HANDOFF_TIMEOUT_MS = 15_000;
 const CONNECTOR_ACCOUNT_SOURCE_BY_SOURCE_ID: Record<string, MoneyAccountSource> = {
   tbank_web: "tbank",
   alfa_web: "alfa",
@@ -106,7 +112,7 @@ import {
   getFunctionUrl,
 } from "./money-import-client";
 import { getAppEnvironmentKind } from "./extension-release-client";
-import { probeExtension, reloadPage } from "@/lib/money/extension-bridge";
+import { probeExtensionUntilHeard, reloadPage } from "@/lib/money/extension-bridge";
 import type {
   MoneyImportRangePresetKey,
   MoneyImportRangeSelectionMeta,
@@ -911,7 +917,7 @@ export default function MoneyImportPage() {
         const timeout = window.setTimeout(() => {
           window.removeEventListener("message", onMessage);
           resolve(false);
-        }, 3000);
+        }, SESSION_HANDOFF_TIMEOUT_MS);
 
         const onMessage = (event: MessageEvent) => {
           const data = event.data as Record<string, unknown> | null;
@@ -982,7 +988,10 @@ export default function MoneyImportPage() {
     try {
       // The extension can stop answering after the page loaded -- reloaded, updated, disabled --
       // so ask again before a session is created and the bank is opened for nothing.
-      const probe = await probeExtension();
+      const probe = await probeExtensionUntilHeard(
+        START_PROBE_OFFSETS_MS,
+        EXTENSION_PING_TIMEOUT_MS,
+      );
       if (probe !== "alive") {
         setExtensionActive(false);
         setInstalledExtensionVersion(null);

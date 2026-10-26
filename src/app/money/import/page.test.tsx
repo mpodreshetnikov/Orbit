@@ -1,5 +1,5 @@
 import React from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MoneyImportSessionStatus } from "@/types";
@@ -1208,11 +1208,33 @@ describe("MoneyImportPage", () => {
       }
     });
 
+    // The session's progress is polled while the page waits; a quiet answer keeps it on screen.
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({}) } as Response);
+    // The page waits fifteen seconds for the ack; the clock is moved past it rather than waited out.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       render(<MoneyImportPage />);
-      const user = userEvent.setup();
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
       await user.click(screen.getByRole("button", { name: /TBank extension/ }));
-      await user.click(await screen.findByRole("button", { name: "money.importStartImport" }));
+      const startImportButton = await screen.findByRole("button", {
+        name: "money.importStartImport",
+      });
+      await waitFor(() => {
+        expect(startImportButton).toBeEnabled();
+      });
+      await user.click(startImportButton);
+      await waitFor(
+        () => {
+          expect(postMessageSpy).toHaveBeenCalledWith(
+            expect.objectContaining({ type: "MONEY_IMPORT_START_SESSION" }),
+            "*",
+          );
+        },
+        { timeout: 5000 },
+      );
+      await act(async () => {
+        vi.advanceTimersByTime(16_000);
+      });
 
       expect(
         await screen.findByText("money.importExtensionHandoffFailed", {}, { timeout: 5000 }),
@@ -1220,6 +1242,7 @@ describe("MoneyImportPage", () => {
       // The session token never goes into a URL: nothing but the bank site may be opened.
       expect(openSpy).not.toHaveBeenCalled();
     } finally {
+      vi.useRealTimers();
       postMessageSpy.mockRestore();
       openSpy.mockRestore();
     }
@@ -1278,7 +1301,7 @@ describe("MoneyImportPage", () => {
       await user.click(startImportButton);
 
       expect(
-        await screen.findByText("money.importExtensionNotAnswering", {}, { timeout: 5000 }),
+        await screen.findByText("money.importExtensionNotAnswering", {}, { timeout: 8000 }),
       ).toBeInTheDocument();
       expect(screen.getByText("money.importExtensionInactive")).toBeInTheDocument();
       expect(openSpy).not.toHaveBeenCalled();
@@ -1356,7 +1379,7 @@ describe("MoneyImportPage", () => {
       await user.click(startImportButton);
 
       expect(
-        await screen.findByText("money.importExtensionStaleReload", {}, { timeout: 5000 }),
+        await screen.findByText("money.importExtensionStaleReload", {}, { timeout: 8000 }),
       ).toBeInTheDocument();
       expect(screen.getByText("money.importExtensionInactive")).toBeInTheDocument();
       expect(
