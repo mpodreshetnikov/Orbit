@@ -1,4 +1,4 @@
-import { createContentBridge } from "./core/content-bridge";
+import { claimContentBridge, createContentBridge } from "./core/content-bridge";
 
 const bridge = createContentBridge({
   runtimeSendMessage: (message, callback) => {
@@ -25,5 +25,7 @@ const bridge = createContentBridge({
   },
 });
 
-window.addEventListener("message", bridge.handleWindowMessage);
-chrome.runtime.onMessage.addListener(bridge.handleRuntimeMessage);
+if (claimContentBridge(globalThis as unknown as Record<string, unknown>)) {
+  window.addEventListener("message", bridge.handleWindowMessage);
+  chrome.runtime.onMessage.addListener(bridge.handleRuntimeMessage);
+}

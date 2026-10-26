@@ -61,10 +61,15 @@ const TBANK_ICON_URL =
 
 const EXTENSION_WEBAPP_SOURCE = "orbit-webapp";
 const EXTENSION_BRIDGE_SOURCE = "orbit-extension";
-const EXTENSION_ID = process.env.NEXT_PUBLIC_EXTENSION_ID ?? "";
 const DEFAULT_ACCOUNT_STORAGE_PREFIX = "money-import-default-account";
 const DEFAULT_TBANK_PARSE_STRATEGY: MoneyImportParseStrategy = "full";
 const EXTENSION_PING_TIMEOUT_MS = 500;
+// The ping is answered by the service worker, which may be asleep; one 500 ms miss is a slow
+// wake as often as a missing extension, so the start asks a few times before giving up.
+const START_PROBE_OFFSETS_MS: readonly number[] = [0, 500, 1500, 3000];
+// Before 0.1.30 the extension acknowledged a session only after the bank tab the page had just
+// opened finished loading -- often longer than the old three seconds, while the import worked.
+const SESSION_HANDOFF_TIMEOUT_MS = 15_000;
 const CONNECTOR_ACCOUNT_SOURCE_BY_SOURCE_ID: Record<string, MoneyAccountSource> = {
   tbank_web: "tbank",
   alfa_web: "alfa",
@@ -107,6 +112,7 @@ import {
   getFunctionUrl,
 } from "./money-import-client";
 import { getAppEnvironmentKind } from "./extension-release-client";
+import { probeExtensionUntilHeard, reloadPage } from "@/lib/money/extension-bridge";
 import type {
   MoneyImportRangePresetKey,
   MoneyImportRangeSelectionMeta,
@@ -261,7 +267,6 @@ export default function MoneyImportPage() {
     status: ExtensionAutoStatus | null;
   }>({ state: "loading", status: null });
   const [extensionStatusMessage, setExtensionStatusMessage] = useState<string | null>(null);
-  const [installedExtensionId, setInstalledExtensionId] = useState<string | null>(null);
   const [installedExtensionVersion, setInstalledExtensionVersion] = useState<string | null>(null);
   const [latestExtensionRelease, setLatestExtensionRelease] = useState<ExtensionRelease | null>(
     null,
@@ -735,11 +740,9 @@ export default function MoneyImportPage() {
 
   const checkExtension = useCallback(async () => {
     setExtensionActive(null);
-    setInstalledExtensionId(null);
     setInstalledExtensionVersion(null);
     const pingResult = await pingExtension();
     setExtensionActive(pingResult.active);
-    setInstalledExtensionId(pingResult.extensionId);
     setInstalledExtensionVersion(pingResult.extensionVersion);
     setExtensionStatusMessage(null);
     void refreshExtensionAutoStatus();
@@ -914,7 +917,7 @@ export default function MoneyImportPage() {
         const timeout = window.setTimeout(() => {
           window.removeEventListener("message", onMessage);
           resolve(false);
-        }, 3000);
+        }, SESSION_HANDOFF_TIMEOUT_MS);
 
         const onMessage = (event: MessageEvent) => {
           const data = event.data as Record<string, unknown> | null;
@@ -960,44 +963,6 @@ export default function MoneyImportPage() {
     [locale],
   );
 
-  const launchExtensionFallback = useCallback(
-    (
-      payload: MoneyImportSessionCreateResult,
-      defaultExtensionAccountId: string | null,
-    ): boolean => {
-      // Firefox gives every install its own moz-extension:// host, which no page can know.
-      if (extensionBrowser === "firefox") return false;
-      const resolvedExtensionId =
-        installedExtensionId ?? latestExtensionRelease?.extensionId ?? EXTENSION_ID;
-      if (!resolvedExtensionId) return false;
-      const launchUrl =
-        `chrome-extension://${resolvedExtensionId}/popup.html` +
-        `?session_token=${encodeURIComponent(payload.session_token)}` +
-        `&session_id=${encodeURIComponent(payload.session_id)}` +
-        `&batch_id=${encodeURIComponent(payload.batch_id)}` +
-        `&source=${encodeURIComponent(payload.source)}` +
-        `&function_url=${encodeURIComponent(getFunctionUrl("money-import"))}` +
-        `&payer_person_id=${encodeURIComponent(payload.payer_person_id)}` +
-        `&expires_at=${encodeURIComponent(payload.expires_at)}` +
-        `&last_imported_at=${encodeURIComponent(payload.last_imported_at ?? "")}` +
-        `&window_from=${encodeURIComponent(payload.window_from ?? "")}` +
-        `&window_to=${encodeURIComponent(payload.window_to ?? "")}` +
-        `&parse_strategy=${encodeURIComponent(payload.parse_strategy ?? "")}` +
-        `&show_source_page_widget=${encodeURIComponent("1")}` +
-        `&range_selection_meta=${encodeURIComponent(
-          JSON.stringify(payload.range_selection_meta ?? null),
-        )}` +
-        `&default_account_id=${encodeURIComponent(defaultExtensionAccountId ?? "")}` +
-        // The same field the postMessage path sends; the popup seeds a session from this URL
-        // and the widget would otherwise fall back to the browser's language on this path.
-        `&locale=${encodeURIComponent(locale)}`;
-
-      window.open(launchUrl, "_blank", "noopener,noreferrer");
-      return true;
-    },
-    [extensionBrowser, installedExtensionId, latestExtensionRelease?.extensionId, locale],
-  );
-
   const handleStartExtensionImport = useCallback(async () => {
     if (!selectedPersonId || !selectedConnector || selectedConnector.kind !== "extension") return;
     if (sourceAccounts.length === 0) {
@@ -1021,6 +986,26 @@ export default function MoneyImportPage() {
     setExtensionStatusMessage(null);
 
     try {
+      // The extension can stop answering after the page loaded -- reloaded, updated, disabled --
+      // so ask again before a session is created and the bank is opened for nothing.
+      const probe = await probeExtensionUntilHeard(
+        START_PROBE_OFFSETS_MS,
+        EXTENSION_PING_TIMEOUT_MS,
+      );
+      if (probe !== "alive") {
+        setExtensionActive(false);
+        setInstalledExtensionVersion(null);
+        // A stale bridge is the extension updated under this tab: only a reload brings it back.
+        setExtensionStatusMessage(
+          t(
+            probe === "stale"
+              ? "money.importExtensionStaleReload"
+              : "money.importExtensionNotAnswering",
+          ),
+        );
+        return;
+      }
+
       const importContext = extensionImportContext ?? (await loadExtensionImportContext());
       if (!importContext) {
         throw new Error(t("money.importContextUnavailable"));
@@ -1065,12 +1050,7 @@ export default function MoneyImportPage() {
         return;
       }
 
-      const launched = launchExtensionFallback(session, selectedDefaultExtensionAccountId);
-      if (launched) {
-        setExtensionStatusMessage(t("money.importExtensionSessionCreated"));
-      } else {
-        setExtensionStatusMessage(t("money.importExtensionOpenPopupManual"));
-      }
+      setExtensionStatusMessage(t("money.importExtensionHandoffFailed"));
     } catch (error) {
       setExtensionStatusMessage(
         error instanceof Error ? error.message : t("money.importStartFailed"),
@@ -1081,7 +1061,6 @@ export default function MoneyImportPage() {
   }, [
     customRangeFrom,
     customRangeTo,
-    launchExtensionFallback,
     defaultAccountId,
     extensionImportContext,
     extensionParseStrategy,
@@ -1154,7 +1133,6 @@ export default function MoneyImportPage() {
                 setDefaultAccountId("");
                 setExtensionActive(null);
                 setExtensionStatusMessage(null);
-                setInstalledExtensionId(null);
                 setInstalledExtensionVersion(null);
                 setLatestExtensionRelease(null);
                 setExtensionImportContext(null);
@@ -1696,8 +1674,23 @@ export default function MoneyImportPage() {
               <Badge variant="destructive">{t("money.importExtensionInactive")}</Badge>
             )}
 
-            {extensionStatusMessage && extensionActive === true && (
-              <p className="text-sm text-muted-foreground">{extensionStatusMessage}</p>
+            {extensionStatusMessage && extensionActive !== null && (
+              <p
+                role="status"
+                className={
+                  extensionActive
+                    ? "text-sm text-muted-foreground"
+                    : "text-sm font-medium text-destructive"
+                }
+              >
+                {extensionStatusMessage}
+              </p>
+            )}
+
+            {extensionStatusMessage && extensionActive === false && (
+              <Button type="button" size="sm" onClick={() => reloadPage()}>
+                {t("money.importAttentionReload")}
+              </Button>
             )}
 
             {activeSessionId && (
