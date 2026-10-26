@@ -16,6 +16,7 @@ interface SessionRepoState {
   createdBatchPayloads: Record<string, unknown>[];
   sessionUpdates: Array<{ sessionId: string; patch: Record<string, unknown> }>;
   batchUpdates: Array<{ batchId: string; patch: Record<string, unknown> }>;
+  notifications: Record<string, unknown>[];
 }
 
 function createRepositoryMock(
@@ -32,6 +33,7 @@ function createRepositoryMock(
     createdBatchPayloads: [],
     sessionUpdates: [],
     batchUpdates: [],
+    notifications: [],
   };
 
   const repository: MoneyImportRepository = {
@@ -62,6 +64,9 @@ function createRepositoryMock(
     },
     updateImportSession: async (sessionId, patch) => {
       state.sessionUpdates.push({ sessionId, patch });
+    },
+    enqueueNotification: async (row) => {
+      state.notifications.push(row);
     },
     createImportBatch: async (payload) => {
       state.createdBatchPayloads.push(payload);
@@ -515,6 +520,81 @@ Deno.test("completeSessionAction supports session auth and failed status", async
   assertEquals(state.sessionUpdates[0].patch.status, "failed");
   assertEquals(state.batchUpdates[0].patch.status, "failed");
 });
+
+function unattendedSessionAuth(meta: Record<string, unknown> = {}): AuthContext {
+  return {
+    mode: "session",
+    token: "session-token",
+    session: {
+      id: "session-3",
+      batch_id: "batch-3",
+      status: "running",
+      source: "tbank_web",
+      created_by_auth_user_id: "user-1",
+      meta: { unattended: true, run_origin: "auto", window_kind: "incremental", ...meta },
+    },
+  };
+}
+
+Deno.test("completeSessionAction queues a push when an automatic run fails", async () => {
+  const { repository, state } = createRepositoryMock({
+    batchById: { id: "batch-3", status: "running" },
+  });
+
+  await assertJsonResponse(
+    await completeSessionAction({ status: "failed" }, unattendedSessionAuth(), {
+      repository,
+      now: () => new Date("2026-10-26T06:00:00.000Z"),
+    }),
+    200,
+  );
+
+  assertEquals(state.notifications.length, 1);
+  assertEquals(state.notifications[0].type, "money_import_failed");
+  assertEquals(state.notifications[0].auth_user_id, "user-1");
+  assertEquals(state.notifications[0].scheduled_at, "2026-10-26T06:00:00.000Z");
+});
+
+Deno.test("completeSessionAction sends no push for a run that did not fail", async () => {
+  const cases: Array<[string, Record<string, unknown>, AuthContext, string]> = [
+    ["completed", {}, unattendedSessionAuth(), "running"],
+    ["given back", { status: "failed", reason: "superseded" }, unattendedSessionAuth(), "running"],
+    [
+      "history slice",
+      { status: "failed" },
+      unattendedSessionAuth({ window_kind: "backfill" }),
+      "running",
+    ],
+    ["already applied", { status: "failed" }, unattendedSessionAuth(), "completed"],
+  ];
+  for (const [label, body, auth, batchStatus] of cases) {
+    const { repository, state } = createRepositoryMock({
+      batchById: { id: "batch-3", status: batchStatus },
+    });
+    await assertJsonResponse(await completeSessionAction(body, auth, { repository }), 200);
+    assertEquals(state.notifications.length, 0, label);
+  }
+});
+
+Deno.test(
+  "completeSessionAction closes the session even when the push cannot be queued",
+  async () => {
+    const { repository, state } = createRepositoryMock({
+      batchById: { id: "batch-3", status: "running" },
+    });
+    repository.enqueueNotification = async () => {
+      throw new Error("insert failed");
+    };
+
+    const payload = await assertJsonResponse<{ status: string }>(
+      await completeSessionAction({ status: "failed" }, unattendedSessionAuth(), { repository }),
+      200,
+    );
+
+    assertEquals(payload.status, "failed");
+    assertEquals(state.sessionUpdates[0].patch.status, "failed");
+  },
+);
 
 Deno.test(
   "completeSessionAction validates missing session id and fallbacks for session auth",

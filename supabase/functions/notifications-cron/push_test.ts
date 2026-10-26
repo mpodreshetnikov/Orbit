@@ -152,3 +152,19 @@ Deno.test("buildPushPayload includes dose_event_ids only when available", () => 
   assertEquals(withDose.dose_event_ids, ["dose-1"]);
   assertEquals(withoutDose.dose_event_ids, undefined);
 });
+
+Deno.test("buildPushPayload carries the source of a money import failure", () => {
+  const payload = buildPushPayload([
+    {
+      id: "dig-3",
+      type: "money_import_failed",
+      title: "Automatic import failed",
+      body: "T-Bank: the import did not go through.",
+      url: "/money/import",
+      scheduledAt: "2026-10-26T06:00:00.000Z",
+      personId: null,
+      source: "tbank_web",
+    },
+  ]);
+  assertEquals((payload[0] as { source?: string }).source, "tbank_web");
+});

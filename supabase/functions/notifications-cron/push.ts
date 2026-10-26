@@ -107,6 +107,7 @@ export function buildPushPayload(notifications: NotificationItem[]): unknown[] {
       ...(item.dose_event_id != null
         ? { dose_event_id: item.dose_event_id, dose_event_ids: [item.dose_event_id] }
         : {}),
+      ...(item.source != null ? { source: item.source } : {}),
     }));
 
   return [...aggregatedMeds, ...nonMedication];

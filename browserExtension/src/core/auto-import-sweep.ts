@@ -183,8 +183,8 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
       succeeded = true;
     } catch (error) {
       // A signed-out bank is the ordinary failure here, not an emergency. It is recorded so the
-      // backoff widens and the attempts stop after a few, and the person is told nothing: they
-      // did not ask for this run and there is nothing for them to do about it.
+      // backoff widens and the attempts stop after a few. The person hears of it from the
+      // server, not from here: the failed `complete_session` of the run's window queues a push.
       const errorMessage = error instanceof Error ? error.message : String(error);
       deps.onWarning("money_import_auto_run_failed", {
         source_id: source.sourceId,

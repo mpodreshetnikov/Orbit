@@ -151,6 +151,8 @@ export interface MoneyImportRepository {
   /** Writes the patch to the batch only while it is still `created` or `running`; true when written. */
   closeOpenBatch?(batchId: string, patch: Record<string, unknown>): Promise<boolean>;
   updateImportSession(sessionId: string, patch: Record<string, unknown>): Promise<void>;
+  /** Queues a row in `notification_digests`; `notifications-cron` sends it on its next tick. */
+  enqueueNotification?(row: Record<string, unknown>): Promise<void>;
   createImportBatch(payload: Record<string, unknown>): Promise<string>;
   getImportBatch(batchId: string): Promise<Record<string, unknown> | null>;
   updateImportBatch(batchId: string, patch: Record<string, unknown>): Promise<void>;
@@ -599,6 +601,14 @@ export function createSupabaseMoneyImportRepository(
       .from("money_import_sessions")
       .update(patch as Database["public"]["Tables"]["money_import_sessions"]["Update"])
       .eq("id", sessionId);
+
+    if (error) throw new Error(error.message);
+  }
+
+  async function enqueueNotification(row: Record<string, unknown>): Promise<void> {
+    const { error } = await getAdminClient()
+      .from("notification_digests")
+      .insert(row as Database["public"]["Tables"]["notification_digests"]["Insert"]);
 
     if (error) throw new Error(error.message);
   }
@@ -1975,6 +1985,7 @@ export function createSupabaseMoneyImportRepository(
     closeExpiredOpenSession,
     closeOpenBatch,
     updateImportSession,
+    enqueueNotification,
     createImportBatch,
     getImportBatch,
     updateImportBatch,

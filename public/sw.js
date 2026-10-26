@@ -193,7 +193,46 @@ function getTypeHandler(type) {
   return NOTIFICATION_TYPE_HANDLERS[type] || null;
 }
 
+var MONEY_IMPORT_SOURCE_LABELS = {
+  ru: { tbank_web: "Т-Банка", alfa_web: "Альфа-Банка" },
+  en: { tbank_web: "T-Bank", alfa_web: "Alfa-Bank" },
+};
+
+var MONEY_IMPORT_FAILED_TEXT = {
+  ru: {
+    title: function (label) {
+      return label ? "Автоимпорт " + label + " не удался" : "Автоимпорт не удался";
+    },
+    body: "Выгрузка не прошла. Возможно, нужно войти в банк. Нажмите, чтобы открыть импорт.",
+  },
+  en: {
+    title: function (label) {
+      return label ? "Automatic " + label + " import failed" : "Automatic import failed";
+    },
+    body: "The import did not go through. You may need to sign in to the bank. Tap to open import.",
+  },
+};
+
+function getMoneyImportSourceLabel(source, lang) {
+  var labels = MONEY_IMPORT_SOURCE_LABELS[lang] || MONEY_IMPORT_SOURCE_LABELS.en;
+  return (source && labels[source]) || null;
+}
+
 var NOTIFICATION_TYPE_HANDLERS = {
+  // An automatic money import that failed. One per bank: a later failure replaces the earlier.
+  money_import_failed: {
+    tag: function (n) {
+      return "money-import-failed-" + (n.source || "unknown");
+    },
+    renotify: true,
+    getTitle: function (n, lang) {
+      var text = MONEY_IMPORT_FAILED_TEXT[lang] || MONEY_IMPORT_FAILED_TEXT.en;
+      return text.title(getMoneyImportSourceLabel(n.source, lang));
+    },
+    getBody: function (_n, lang) {
+      return (MONEY_IMPORT_FAILED_TEXT[lang] || MONEY_IMPORT_FAILED_TEXT.en).body;
+    },
+  },
   medication: {
     icon: "/icons/icon-512x512.png",
     badge: "/icons/pills-128x128.png",

@@ -6,6 +6,8 @@ import { describe, expect, it, vi } from "vitest";
 interface ServiceWorkerHarness {
   dispatchPush: (notifications: Record<string, unknown>[]) => Promise<void>;
   getActiveNotificationTags: () => string[];
+  getShownTitles: () => string[];
+  getActiveNotificationBodies: () => string[];
 }
 
 function buildMedicationNotification(
@@ -34,6 +36,7 @@ function buildMedicationNotification(
 
 function createServiceWorkerHarness(options?: {
   forceEmptyGetNotifications?: boolean;
+  language?: string;
 }): ServiceWorkerHarness {
   const source = readFileSync(path.join(process.cwd(), "public", "sw.js"), "utf8");
   const listeners = new Map<string, (event: unknown) => void>();
@@ -75,7 +78,7 @@ function createServiceWorkerHarness(options?: {
 
   const selfObject = {
     location: { origin: "https://example.test" },
-    navigator: { language: "en-US" },
+    navigator: { language: options?.language ?? "en-US" },
     registration,
     Notification: { maxActions: 2 },
     clients: {
@@ -127,6 +130,8 @@ function createServiceWorkerHarness(options?: {
       activeNotifications
         .map((item) => item.options.tag)
         .filter((tag): tag is string => typeof tag === "string"),
+    getShownTitles: () => registration.showNotification.mock.calls.map((call) => call[0]),
+    getActiveNotificationBodies: () => activeNotifications.map((item) => item.options.body ?? ""),
   };
 }
 
@@ -175,5 +180,45 @@ describe("service worker medication notification replacement", () => {
     ]);
 
     expect(harness.getActiveNotificationTags()).toEqual(["medication-person-1"]);
+  });
+});
+
+describe("service worker money import failure notification", () => {
+  const failure = (overrides: Partial<Record<string, unknown>> = {}) => ({
+    id: "digest-9",
+    type: "money_import_failed",
+    title: "Automatic import failed",
+    body: "T-Bank: the import did not go through.",
+    url: "/money/import",
+    scheduledAt: new Date().toISOString(),
+    person_id: null,
+    source: "tbank_web",
+    ...overrides,
+  });
+
+  it("names the bank in the app's language", async () => {
+    const harness = createServiceWorkerHarness({
+      forceEmptyGetNotifications: true,
+      language: "ru-RU",
+    });
+
+    await harness.dispatchPush([failure()]);
+
+    expect(harness.getShownTitles()).toEqual(["Автоимпорт Т-Банка не удался"]);
+    expect(harness.getActiveNotificationBodies()[0]).toContain("войти в банк");
+  });
+
+  it("keeps one notification per bank, the latest replacing the earlier", async () => {
+    const harness = createServiceWorkerHarness({ forceEmptyGetNotifications: true });
+
+    await harness.dispatchPush([failure({ id: "digest-1" })]);
+    await harness.dispatchPush([failure({ id: "digest-2" })]);
+    await harness.dispatchPush([failure({ id: "digest-3", source: "alfa_web" })]);
+
+    expect(harness.getActiveNotificationTags()).toEqual([
+      "money-import-failed-tbank_web",
+      "money-import-failed-alfa_web",
+    ]);
+    expect(harness.getShownTitles().at(-1)).toBe("Automatic Alfa-Bank import failed");
   });
 });
