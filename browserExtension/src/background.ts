@@ -19,6 +19,11 @@ import { createSessionJanitor } from "./core/session-janitor.js";
 import { needsRearmAtStart, sweepAlarmSchedule } from "./core/auto-import-alarm.js";
 import { chooseReplacementTab, shouldAdoptRequestTab } from "./core/attention-policy.js";
 import {
+  createPreferredSiteOriginStore,
+  createSlowLoadFallback,
+  toPreferredSiteUrl,
+} from "./core/slow-load-fallback.js";
+import {
   createSelfUpdater,
   NATIVE_HOST_NAME,
   parseReleaseInfo,
@@ -340,6 +345,7 @@ const grantStore = createGrantStore(chrome.storage.local);
 const backfillStore = createBackfillStore(chrome.storage.local);
 const autoRunStore = createAutoRunStore(chrome.storage.local);
 const attentionStore = createAttentionStore(chrome.storage.local);
+const preferredSiteOrigins = createPreferredSiteOriginStore(chrome.storage.local);
 const debugStore = createImportDebugStore();
 const telemetry = createExtensionLogger("background");
 telemetry.info("extension_background_initialized", {
@@ -457,7 +463,9 @@ const AUTO_IMPORT_ALARM = "money-import-auto";
  */
 const VISIT_SWEEP_ALARM_PREFIX = "money-import-visit:";
 const VISIT_SWEEP_DELAY_MINUTES = 1;
-const AUTO_IMPORT_TAB_LOAD_TIMEOUT_MS = 30_000;
+// Room for a slow first site and its mirror after it: the slow-load fallback moves the tab after
+// `SLOW_LOAD_FALLBACK_MS`, and the mirror then needs time of its own.
+const AUTO_IMPORT_TAB_LOAD_TIMEOUT_MS = 60_000;
 const AUTO_IMPORT_TAB_POLL_INTERVAL_MS = 500;
 
 function listAutoImportSourceTargets(): Array<{ sourceId: string; targetUrl: string }> {
@@ -507,7 +515,8 @@ const autoImportSweep = createAutoImportSweep({
   autoRunStore,
   isRunRequested: (scope, nowMs) => attentionStore.isRunRequested(scope, nowMs),
   clearRunRequest: (scope) => attentionStore.clearRunRequest(scope),
-  openTab: async (url) => {
+  openTab: async (targetUrl) => {
+    const url = await toPreferredSiteUrl(preferredSiteOrigins, targetUrl);
     // Out of the person's sight: a minimized window of its own. A background tab in their
     // window appeared in their tab strip and read as the bank opening by itself (2026-09-07);
     // the owner's word is that only the app's own pages open in front of them. The window
@@ -639,7 +648,77 @@ async function adoptRequestTabIfDue(sourceId: string, tabId: number, nowMs: numb
   }
 }
 
+/**
+ * A bank tab an import depends on -- the sweep's own, the one Update opened, any tab of that bank
+ * while a session for it is stored -- that is still loading after a while, or could not reach the
+ * bank at all, is moved to the bank's mirror. See `createSlowLoadFallback`.
+ */
+const slowLoadFallback = createSlowLoadFallback({
+  store: preferredSiteOrigins,
+  isWatchedTab: async (tabId, sourceId) => {
+    if (autoImportSweep.ownsTab(tabId)) return true;
+    const session = await sessionStore.getSession();
+    if (session && resolveSourceId(session) === sourceId) return true;
+    const request = await attentionStore.findRequestForTab(tabId, Date.now());
+    return Boolean(request && request.sourceId === sourceId);
+  },
+  // A first load that has not answered yet is only in `pendingUrl`; `url` is still blank.
+  getTab: async (tabId) => {
+    const tab = await chrome.tabs.get(tabId);
+    return { url: tab.pendingUrl || tab.url, status: tab.status };
+  },
+  // Scripting is refused on the browser's error page and nowhere else the bank's sites lead, so
+  // the refusal is the signal; no extra permission is asked for it.
+  isErrorPage: async (tabId) => {
+    try {
+      await chrome.scripting.executeScript({ target: { tabId }, func: () => true });
+      return false;
+    } catch (error) {
+      return /error page/i.test(error instanceof Error ? error.message : String(error));
+    }
+  },
+  navigate: async (tabId, url) => {
+    await chrome.tabs.update(tabId, { url });
+  },
+  setTimer: (callback, delayMs) => setTimeout(callback, delayMs),
+  clearTimer: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+  onSwitched: (attrs) => telemetry.info("money_import_bank_mirror_switched", attrs),
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => slowLoadFallback.onTabRemoved(tabId));
+// A new tab whose first page has not answered sends no update until it does, which is the very
+// wait this is for: its creation, and a look a moment later, are what name where it is going.
+// The look is for `window.open` -- how the import page opens the bank -- whose tab is created
+// blank and only then given its address.
+const NEW_TAB_RECHECK_MS = 1_000;
+
+function watchNewTabLoad(tab: chrome.tabs.Tab): void {
+  if (typeof tab.id !== "number" || tab.status !== "loading") return;
+  void slowLoadFallback
+    .onTabUpdated(tab.id, "loading", tab.pendingUrl || tab.url)
+    .catch(() => undefined);
+}
+
+chrome.tabs.onCreated.addListener((tab) => {
+  watchNewTabLoad(tab);
+  const tabId = tab.id;
+  if (typeof tabId !== "number") return;
+  setTimeout(() => {
+    void chrome.tabs
+      .get(tabId)
+      .then(watchNewTabLoad)
+      .catch(() => undefined);
+  }, NEW_TAB_RECHECK_MS);
+});
+
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  void slowLoadFallback
+    .onTabUpdated(
+      tabId,
+      changeInfo.status,
+      changeInfo.status === "loading" ? tab.pendingUrl || changeInfo.url || tab.url : tab.url,
+    )
+    .catch(() => undefined);
   const nextUrl = typeof changeInfo.url === "string" ? changeInfo.url : tab.url;
   if (!nextUrl) return;
   const isComplete = changeInfo.status === "complete";
@@ -822,7 +901,8 @@ chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendRe
           resolveSourceTargetUrl: (sourceId) =>
             listAutoImportSourceTargets().find((source) => source.sourceId === sourceId)
               ?.targetUrl ?? null,
-          openSourceTab: async (url) => {
+          openSourceTab: async (targetUrl) => {
+            const url = await toPreferredSiteUrl(preferredSiteOrigins, targetUrl);
             // For the person, so in front of them -- the sweep's own tab stays in the background.
             const created = await chrome.tabs.create({ url, active: true });
             return typeof created.id === "number" ? created.id : null;

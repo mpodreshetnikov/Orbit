@@ -9,6 +9,7 @@ import type {
 } from "./types.js";
 
 const OPERATIONS_PAGE_URL = "https://www.tbank.ru/mybank/operations/";
+const OPERATIONS_PAGE_PATH = new URL(OPERATIONS_PAGE_URL).pathname;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_LOOKBACK_DAYS = 30;
 const EXTRACTION_ATTEMPTS = 2;
@@ -671,7 +672,9 @@ const connector: Connector = {
     await emitProgress("parse_preparing_tab", 5);
 
     if (!isTbankUrl(activeTab.url)) {
-      throw new Error("Active tab is not a T-Bank page. Open https://www.tbank.ru/ and try again.");
+      throw new Error(
+        "Active tab is not a T-Bank page. Open https://www.tbank.ru/ or https://www.tbank-online.com/ and try again.",
+      );
     }
 
     await emitProgress("parse_loading_operations_page", 10);
@@ -844,7 +847,9 @@ async function prepareOperationsTab(tab: chrome.tabs.Tab): Promise<chrome.tabs.T
   }
   const tabId = tab.id;
   if (!isTbankUrl(tab.url)) {
-    throw new Error("Active tab is not a T-Bank page. Open https://www.tbank.ru/ and try again.");
+    throw new Error(
+      "Active tab is not a T-Bank page. Open https://www.tbank.ru/ or https://www.tbank-online.com/ and try again.",
+    );
   }
 
   const initialBlockedReason = detectBlockedReasonFromTabUrl(tab.url);
@@ -859,7 +864,9 @@ async function prepareOperationsTab(tab: chrome.tabs.Tab): Promise<chrome.tabs.T
   const shouldWaitForLoad = currentTab.status === "loading";
 
   if (!isOperationsPageUrl(currentTab.url)) {
-    await chrome.tabs.update(tabId, { url: OPERATIONS_PAGE_URL });
+    // On the site the tab is on: the mirror has a sign-in of its own, so moving a tab signed in
+    // there back to tbank.ru would land it on the login screen.
+    await chrome.tabs.update(tabId, { url: operationsPageUrlFor(currentTab.url) });
     currentTab = (await waitForTabLoad(tabId)) ?? currentTab;
   } else if (shouldWaitForLoad) {
     currentTab = (await waitForTabLoad(tabId)) ?? currentTab;
@@ -1438,7 +1445,7 @@ function extractOperationsInPage(input: {
   function findLatestResourceUrlByPath(
     resourceUrls: string[],
     exactPath: string,
-    baseOrigin = "https://www.tbank.ru",
+    baseOrigin = window.location.origin,
   ): string | null {
     for (let index = resourceUrls.length - 1; index >= 0; index -= 1) {
       const candidate = resourceUrls[index];
@@ -1558,7 +1565,7 @@ function extractOperationsInPage(input: {
     const apiStartedMs = Date.now();
     try {
       const operationsApiUrl =
-        discoverOperationsApiUrl() || "https://www.tbank.ru/api/common/v1/operations";
+        discoverOperationsApiUrl() || `${window.location.origin}/api/common/v1/operations`;
       const detailApiUrl = discoverOperationDetailApiUrl();
       const trancheOffersApiUrl = discoverTrancheOffersApiUrl();
       debugMeta.discovered_endpoints.operations_api = operationsApiUrl;
@@ -2177,7 +2184,7 @@ function extractOperationsInPage(input: {
       };
     }
 
-    const url = new URL("https://www.tbank.ru/api/common/v1/shopping_receipt");
+    const url = new URL("/api/common/v1/shopping_receipt", window.location.origin);
     url.searchParams.set("operationId", receiptRequestKey);
     url.searchParams.set("sessionid", sessionId);
 
@@ -2621,7 +2628,16 @@ function extractOperationsInPage(input: {
 }
 
 function isTbankUrl(url: unknown): url is string {
-  return typeof url === "string" && /^https:\/\/(?:[\w-]+\.)?tbank\.ru\//i.test(url);
+  return (
+    typeof url === "string" && /^https:\/\/(?:[\w-]+\.)?tbank(?:\.ru|-online\.com)\//i.test(url)
+  );
+}
+
+/** The operations page on the site the tab is on: tbank.ru, or its mirror tbank-online.com. */
+function operationsPageUrlFor(tabUrl: unknown): string {
+  const onMirror =
+    typeof tabUrl === "string" && /^https:\/\/(?:[\w-]+\.)?tbank-online\.com\//i.test(tabUrl);
+  return onMirror ? `https://www.tbank-online.com${OPERATIONS_PAGE_PATH}` : OPERATIONS_PAGE_URL;
 }
 
 function isOperationsPageUrl(url: unknown): boolean {
@@ -2629,7 +2645,7 @@ function isOperationsPageUrl(url: unknown): boolean {
   try {
     // The bank redirects to a versioned page beneath this one (`/mybank/operations/v8/` as of
     // 2026-09) and adds a tracking query. Either is the operations page.
-    return isPathUnder(new URL(url).pathname, new URL(OPERATIONS_PAGE_URL).pathname);
+    return isPathUnder(new URL(url).pathname, OPERATIONS_PAGE_PATH);
   } catch {
     return false;
   }
