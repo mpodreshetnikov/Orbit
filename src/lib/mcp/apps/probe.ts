@@ -225,6 +225,11 @@ export const PROBE_HTML = `<!doctype html>
       role: "user",
       content: [{ type: "text", text: "Проверка карточки Orbit: эту строку написала кнопка «Написать в чат». Ответь одним словом «получил»." }]
     }, 30000).then(function (answer) {
+      // Like a tool result, a refused message is a normal result marked isError.
+      if (answer.result && answer.result.isError) {
+        show("message", "клиент отказал (" + answer.seconds + " с)", "bad");
+        return;
+      }
       show("message", "работает, " + answer.seconds + " с", "ok");
     }, function (error) {
       show("message", "не работает: " + error.message, "bad");

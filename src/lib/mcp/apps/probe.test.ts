@@ -79,5 +79,6 @@ describe("registerAppProbe", () => {
 
     expect(content.text).toContain('request("ui/message", {');
     expect(content.text).toContain('role: "user"');
+    expect(content.text).toContain("клиент отказал");
   });
 });
