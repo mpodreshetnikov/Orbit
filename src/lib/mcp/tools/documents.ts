@@ -751,10 +751,11 @@ export function registerDocumentTools(server: McpToolServer): void {
     {
       title: "Approve medical record",
       description:
-        "Approve an ingested record, as the owner's Approve button in the app does: unrecognised observations are dropped, proposed diagnoses become conditions, the record's data goes on the chart, closures awaiting confirmation are confirmed unless the measurement they cite no longer holds, and suggested checkup completions are recorded. Only after the owner has agreed to what the record says.",
+        "Approve an ingested record, as the owner's Approve button in the app does: unrecognised observations stay on the record but outside every history, proposed diagnoses become conditions, the record's data goes on the chart, closures awaiting confirmation are confirmed unless the measurement they cite no longer holds, and suggested checkup completions are recorded. Only after the owner has agreed to what the record says.",
       inputSchema: z.object({ record_id: uuidSchema }),
-      // Approval deletes the observations nobody matched and cannot be undone here, so a client
-      // asks before it runs rather than letting an agent approve on its own initiative.
+      // Approval creates and closes conditions and puts the record on the chart, none of which
+      // this surface can undo, so a client asks before it runs rather than letting an agent
+      // approve on its own initiative.
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
     },
     withUserClient<{ record_id: string }>(async (supabase, args, auth) => {
