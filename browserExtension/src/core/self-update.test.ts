@@ -5,6 +5,7 @@ import {
   createSelfUpdater,
   isHostMissingError,
   parseReleaseInfo,
+  SELF_UPDATE_TIMEOUTS_MS,
   type NativeHostReply,
   type ReleaseInfo,
   type SelfUpdaterDeps,
@@ -189,6 +190,52 @@ describe("createSelfUpdater", () => {
     expect(reload).toHaveBeenCalledOnce();
   });
 
+  it("stages again before retrying an apply that timed out but finished late", async () => {
+    vi.useFakeTimers();
+    try {
+      // Like both hosts: a successful apply removes the staged copy it mirrored from.
+      const onHost = new Set<string>();
+      let applies = 0;
+      const actions: string[] = [];
+      const { updater, registry, reload } = setup({
+        sendNative: (message) => {
+          const version = String(message.version);
+          actions.push(String(message.action));
+          if (message.action === "stage") {
+            onHost.add(version);
+            return Promise.resolve({ ok: true });
+          }
+          if (!onHost.has(version)) {
+            return Promise.resolve({ ok: false, error: `Version ${version} is not staged.` });
+          }
+          applies += 1;
+          if (applies === 1) {
+            // Answers after the extension gave up on it.
+            return new Promise((resolve) =>
+              setTimeout(() => {
+                onHost.delete(version);
+                resolve({ ok: true });
+              }, SELF_UPDATE_TIMEOUTS_MS.apply + 1_000),
+            );
+          }
+          onHost.delete(version);
+          return Promise.resolve({ ok: true });
+        },
+      });
+      const first = updater.check("manual");
+      await vi.advanceTimersByTimeAsync(SELF_UPDATE_TIMEOUTS_MS.apply + 2_000);
+      expect((await first).phase).toBe("error");
+      expect(registry.begin("run-1")).toBe(false);
+
+      await updater.check("manual");
+      expect(actions).toEqual(["stage", "apply", "stage", "apply"]);
+      expect(reload).toHaveBeenCalledOnce();
+      expect(registry.isHeldForUpdate()).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("holds the reload when a session was stored while the files were replaced", async () => {
     const { updater, reload } = setup({ busy: [false, true] });
     expect((await updater.check("alarm")).phase).toBe("reload_pending");
@@ -284,6 +331,37 @@ describe("createSelfUpdater", () => {
     await updater.check("alarm");
     await vi.waitFor(() => expect(reload).toHaveBeenCalledOnce());
     expect(calls.map((call) => call.action)).toEqual(["stage", "apply"]);
+  });
+
+  it("gives up on a release check that never answers", async () => {
+    vi.useFakeTimers();
+    try {
+      const { updater } = setup({ fetchLatest: () => new Promise(() => undefined) });
+      const status = updater.check("manual");
+      await vi.advanceTimersByTimeAsync(SELF_UPDATE_TIMEOUTS_MS.fetch);
+      expect(await status).toMatchObject({ phase: "error" });
+      expect((await status).error).toContain("did not answer");
+      // The pass is over, so the next check is a new one rather than the stuck one.
+      expect(updater.status().phase).toBe("error");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("gives up on a host that never replies, and keeps runs out if it was applying", async () => {
+    vi.useFakeTimers();
+    try {
+      const { updater, registry } = setup({
+        sendNative: (message) =>
+          message.action === "apply" ? new Promise(() => undefined) : Promise.resolve({ ok: true }),
+      });
+      const status = updater.check("manual");
+      await vi.advanceTimersByTimeAsync(SELF_UPDATE_TIMEOUTS_MS.apply);
+      expect(await status).toMatchObject({ phase: "error" });
+      expect(registry.isHeldForUpdate()).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("reports when nothing is published", async () => {

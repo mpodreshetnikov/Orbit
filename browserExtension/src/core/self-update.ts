@@ -152,12 +152,40 @@ export function parseReleaseInfo(payload: unknown): ReleaseInfo | null {
  * not list this extension ("Access to the specified native messaging host is forbidden.").
  * Either way the person has to run the installer.
  */
+/**
+ * How long each outside call may take. A call that never answers -- a fetch the browser leaves
+ * pending, a host stuck before its reply -- held the one pass every check shares, and the popup
+ * said "Checking..." for good (Max, 2026-10-25). `stage` covers the host's lock wait and its
+ * five-minute download; `apply` its lock wait and the mirror.
+ */
+export const SELF_UPDATE_TIMEOUTS_MS = {
+  fetch: 30_000,
+  stage: 11 * 60_000,
+  apply: 6 * 60_000,
+};
+
+function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${what} did not answer in ${ms / 1000} s.`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 export function isHostMissingError(message: string): boolean {
   return /native messaging host.*(not found|is not registered|forbidden)/i.test(message);
 }
 
 export function createSelfUpdater(deps: SelfUpdaterDeps): SelfUpdater {
   const now = deps.now ?? Date.now;
+  const fetchLatest = () =>
+    withTimeout(deps.fetchLatest(), SELF_UPDATE_TIMEOUTS_MS.fetch, "The release check");
+  const sendNative = (message: Record<string, unknown>) =>
+    withTimeout(
+      deps.sendNative(message),
+      message.action === "stage" ? SELF_UPDATE_TIMEOUTS_MS.stage : SELF_UPDATE_TIMEOUTS_MS.apply,
+      "The updater",
+    );
   let state: SelfUpdateStatus = {
     phase: deps.supported ? "idle" : "unsupported",
     current_version: deps.currentVersion(),
@@ -229,20 +257,39 @@ export function createSelfUpdater(deps: SelfUpdaterDeps): SelfUpdater {
       return "reloaded";
     });
 
+  /**
+   * Keeps runs out after an apply that may have left the folder broken. What the host staged is
+   * forgotten too: an apply that did finish late, or got far, has used the staged copy up, so
+   * the retry stages again -- harmless -- rather than asking for a version the host no longer has.
+   */
+  const keepBroken = (releaseHold: () => void) => {
+    brokenTreeHold = releaseHold;
+    staged = null;
+    return "kept" as const;
+  };
+
   const applyWhenIdle = async () => {
     const release = staged;
     if (!release) return;
     await whenIdle("waiting_for_import", async (releaseHold) => {
       set({ phase: "applying" });
-      const reply = await deps.sendNative({ action: "apply", version: release.version });
+      let reply: NativeHostReply;
+      try {
+        reply = await sendNative({ action: "apply", version: release.version });
+      } catch (error) {
+        fail(error);
+        // A host Chrome could not start touched nothing. Any other failure -- one that never
+        // answered -- may be mirroring still, so the folder is treated as broken.
+        if (isHostMissingError(state.error ?? "")) return "done";
+        return keepBroken(releaseHold);
+      }
       if (!reply?.ok) {
         fail(new Error(reply?.error || "The updater could not apply the release."));
         if (reply?.restored) {
           brokenTreeHold = null;
           return "done";
         }
-        brokenTreeHold = releaseHold;
-        return "kept";
+        return keepBroken(releaseHold);
       }
       staged = null;
       brokenTreeHold = null;
@@ -273,7 +320,7 @@ export function createSelfUpdater(deps: SelfUpdaterDeps): SelfUpdater {
       set({ phase: "idle" });
       return;
     }
-    const latest = await deps.fetchLatest();
+    const latest = await fetchLatest();
     set({ checked_at: new Date(now()).toISOString(), latest_version: latest?.version ?? null });
     if (!latest) {
       set({ phase: "error", error: "No published release was found." });
@@ -290,7 +337,7 @@ export function createSelfUpdater(deps: SelfUpdaterDeps): SelfUpdater {
         await runBrowserManaged(origin);
         return { ...state };
       }
-      const latest = await deps.fetchLatest();
+      const latest = await fetchLatest();
       set({ checked_at: new Date(now()).toISOString() });
       if (!latest) {
         set({ phase: "error", error: "No published release was found." });
@@ -315,7 +362,7 @@ export function createSelfUpdater(deps: SelfUpdaterDeps): SelfUpdater {
       });
       if (staged?.version !== latest.version) {
         set({ phase: "staging" });
-        const reply = await deps.sendNative({
+        const reply = await sendNative({
           action: "stage",
           version: latest.version,
           sha256: latest.sha256,
@@ -338,8 +385,8 @@ export function createSelfUpdater(deps: SelfUpdaterDeps): SelfUpdater {
         await reloadWhenIdle();
         return { ...state };
       }
-      // A kept hold means the folder is broken: repair it with the staged release first.
-      if ((state.phase === "waiting_for_import" || brokenTreeHold) && staged) {
+      // A kept hold is repaired by a full pass, which stages the release again under it.
+      if (state.phase === "waiting_for_import" && staged) {
         await applyWhenIdle();
         return { ...state };
       }
