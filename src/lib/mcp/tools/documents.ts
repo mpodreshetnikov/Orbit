@@ -679,11 +679,25 @@ export function registerDocumentTools(server: McpToolServer): void {
       description:
         "Approve an ingested record, as the owner's Approve button in the app does: unrecognised observations are dropped, proposed diagnoses become conditions, the record's data goes on the chart, closures awaiting confirmation are confirmed unless the measurement they cite no longer holds, and suggested checkup completions are recorded. Only after the owner has agreed to what the record says.",
       inputSchema: z.object({ record_id: uuidSchema }),
-      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+      // Approval deletes the observations nobody matched and cannot be undone here, so a client
+      // asks before it runs rather than letting an agent approve on its own initiative.
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
     },
     withUserClient<{ record_id: string }>(async (supabase, args, auth) => {
       const record = await getIngestableRecord(supabase, args.record_id);
       if (!record) return fail(`No medical record with id ${args.record_id}.`);
+      if (record.status === "active") {
+        // Usually the owner already pressed Approve on the card; that is not an error to retry.
+        const full = await getMedicalRecord(supabase, args.record_id);
+        const when =
+          typeof full?.updated_at === "string"
+            ? full.updated_at.slice(0, 16).replace("T", " ")
+            : null;
+        return ok(
+          `"${record.title}" is already approved${when ? ` (last changed ${when} UTC)` : ""}; nothing to do. Do not call activate_medical_record for it again.`,
+          { record_id: record.id, status: "active", already: true },
+        );
+      }
       if (record.status !== "structure_review") {
         return fail(
           `Record ${args.record_id} is ${record.status}; only a record in review can be approved. Ingest it first.`,

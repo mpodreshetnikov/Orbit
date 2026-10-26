@@ -6,6 +6,8 @@ import {
   getRecordConditions,
   getRecordFindings,
   getRecordObservations,
+  listPendingRecords,
+  PENDING_RECORD_STATUSES,
   searchMedicalRecords,
 } from "./records";
 import { createSupabaseStub } from "./test-support";
@@ -19,6 +21,20 @@ describe("searchMedicalRecords", () => {
       "search_medical_records",
       expect.objectContaining({ p_statuses: ACTIVE_RECORD_STATUSES }),
     );
+  });
+
+  it("leaves the OCR text out of what it returns", async () => {
+    const stub = createSupabaseStub(
+      {},
+      {
+        search_medical_records: {
+          data: [{ id: "r-1", title: "ОАК", status: "active", ocr_text: "x".repeat(76000) }],
+        },
+      },
+    );
+    const [row] = await searchMedicalRecords(stub.client, { limit: 20, offset: 0 });
+    expect(row).not.toHaveProperty("ocr_text");
+    expect(row).toMatchObject({ id: "r-1", title: "ОАК", status: "active" });
   });
 
   it("can widen to in-progress documents", async () => {
@@ -173,5 +189,20 @@ describe("getRecordConditions and pending closures", () => {
     const rows = await getRecordConditions(stub.client, "r-1");
 
     expect(rows.map((r) => r.awaiting_confirmation)).toEqual([false, false, false]);
+  });
+});
+
+describe("listPendingRecords", () => {
+  it("lists every status but active, newest activity first, for one person", async () => {
+    const stub = createSupabaseStub({ medical_records: [{ data: [] }] });
+    await listPendingRecords(stub.client, { personId: "p-1", limit: 20 });
+
+    expect(stub.argsFor("medical_records", "in")).toEqual([["status", PENDING_RECORD_STATUSES]]);
+    expect(PENDING_RECORD_STATUSES).not.toContain("active");
+    expect(PENDING_RECORD_STATUSES).toContain("structure_review");
+    expect(stub.argsFor("medical_records", "order")).toEqual([
+      ["updated_at", { ascending: false }],
+    ]);
+    expect(stub.argsFor("medical_records", "eq")).toEqual([["person_id", "p-1"]]);
   });
 });

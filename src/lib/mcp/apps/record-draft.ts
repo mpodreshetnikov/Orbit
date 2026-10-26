@@ -22,6 +22,7 @@ import { uuidSchema } from "../schemas/common";
 import { withUserClient } from "../tool-context";
 import { fail, ok } from "../tool-result";
 import { WRITE_SCOPE } from "../tools/scopes";
+import { withStrictInputs } from "../tools/strict";
 import type { McpAuthExtra } from "../verify-token";
 import { MCP_APP_MIME_TYPE } from "./probe";
 import { RECORD_DRAFT_HTML } from "./record-draft-page";
@@ -300,7 +301,7 @@ export function registerRecordDraftApp(
     }),
   );
 
-  server.registerTool(
+  withStrictInputs(server).registerTool(
     "show_record_draft",
     {
       title: "Show record draft",

@@ -423,6 +423,20 @@ describe("activate_medical_record", () => {
     expect(documents.activateMedicalRecord).not.toHaveBeenCalled();
   });
 
+  it("answers an already approved record without an error and without approving again", async () => {
+    documents.getIngestableRecord.mockResolvedValue({ ...RECORD, status: "active" });
+    records.getMedicalRecord.mockResolvedValue({ updated_at: "2026-10-26T10:12:32.024Z" });
+    const result = await (await handlers()).get("activate_medical_record")!(
+      { record_id: RECORD_ID },
+      ctx,
+    );
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0].text).toContain(
+      "is already approved (last changed 2026-10-26 10:12 UTC)",
+    );
+    expect(documents.activateMedicalRecord).not.toHaveBeenCalled();
+  });
+
   it("reports closures it left pending", async () => {
     documents.getIngestableRecord.mockResolvedValue({ ...RECORD, status: "structure_review" });
     documents.activateMedicalRecord.mockResolvedValue({

@@ -60,6 +60,7 @@ describe("registerHealthTools", () => {
         "list_measurements",
         "list_medication_doses",
         "list_medications",
+        "list_pending_records",
         "list_persons",
         "log_dose",
         "search_catalog_entries",
@@ -123,16 +124,15 @@ describe("registerHealthTools", () => {
     }
   });
 
-  it("marks write tools as mutating but not destructive", () => {
+  it("marks write tools as mutating, and destructive only where they delete", () => {
     for (const name of WRITE_TOOLS) {
       const tool = byName.get(name);
       expect(tool, `${name} should be registered`).toBeDefined();
       expect(tool!.config.annotations?.readOnlyHint, `${name} must not claim to be read-only`).toBe(
         false,
       );
-      // Nothing in this surface deletes data; the client should not warn as if
-      // it might.
-      expect(tool!.config.annotations?.destructiveHint).toBe(false);
+      // Only approval deletes data (the observations nobody matched), so only it warns.
+      expect(tool!.config.annotations?.destructiveHint).toBe(name === "activate_medical_record");
     }
   });
 
@@ -244,6 +244,16 @@ describe("registerHealthTools", () => {
     expect(
       schema.safeParse({ ...base, schedule: { mode: "daily_times", times: ["8am"] } }).success,
     ).toBe(false);
+  });
+
+  it("refuses an argument a tool does not declare", () => {
+    // `status` and `include_drafts` were accepted and ignored, and the agent took the default
+    // answer for the one it asked.
+    const schema = byName.get("search_medical_records")?.config.inputSchema as z.ZodTypeAny;
+    expect(schema.safeParse({ include_incomplete: true }).success).toBe(true);
+    const refused = schema.safeParse({ status: "draft" });
+    expect(refused.success).toBe(false);
+    expect(JSON.stringify(refused.error?.issues)).toContain("status");
   });
 
   it("takes an observation's unit conversions as factors only", () => {
