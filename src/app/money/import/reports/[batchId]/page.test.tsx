@@ -629,7 +629,7 @@ describe("MoneyImportReportPage", () => {
     };
     rowsResult = { data: [], error: null };
 
-    render(<MoneyImportReportPage />);
+    renderPage();
 
     expect(await screen.findByText(/money\.importReportFailureReason/)).toBeInTheDocument();
   });
