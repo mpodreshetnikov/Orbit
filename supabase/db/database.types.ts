@@ -3130,6 +3130,10 @@ export type Database = {
           rate: number
         }[]
       }
+      money_rollback_import_batch: {
+        Args: { p_batch_id: string }
+        Returns: Json
+      }
       money_run_category_rule_pipeline_internal: {
         Args: {
           p_force_overwrite_locked?: boolean

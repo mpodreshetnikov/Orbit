@@ -61,6 +61,15 @@ export async function fetchImportBatches(personId: string): Promise<MoneyImportB
   return (data ?? []) as MoneyImportBatch[];
 }
 
+/**
+ * Undo an applied import: what it added is deleted and the batch is marked rolled back, in one
+ * database transaction (`money_rollback_import_batch`).
+ */
+export async function rollbackImportBatch(id: string): Promise<void> {
+  const { error } = await supabase.rpc("money_rollback_import_batch", { p_batch_id: id });
+  if (error) throw new Error(error.message);
+}
+
 /** How many report rows one read asks for: the API's own cap on a response. */
 export const REPORT_PAGE = 1000;
 

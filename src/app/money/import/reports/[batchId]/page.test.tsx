@@ -1,10 +1,22 @@
 import React from "react";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import MoneyImportReportPage from "./page";
 import { REPORT_ROW_SELECT } from "@/lib/money/import-report-rows";
 import { projectReportRows } from "../../../../../../test/utils/web/import-report-rows";
+
+let queryClient: QueryClient;
+
+function renderPage() {
+  queryClient = new QueryClient();
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MoneyImportReportPage />
+    </QueryClientProvider>,
+  );
+}
 
 const importActionMock = vi.fn();
 
@@ -290,19 +302,19 @@ describe("MoneyImportReportPage", () => {
 
   it("shows missing batch id error", async () => {
     paramsState = {};
-    render(<MoneyImportReportPage />);
+    renderPage();
 
     expect(await screen.findByText("money.importReportBatchIdMissing")).toBeInTheDocument();
   });
 
   it("shows batch fetch error and rows fetch error states", async () => {
     batchResult = { data: null, error: { message: "Batch not found from db" } };
-    render(<MoneyImportReportPage />);
+    renderPage();
     expect(await screen.findByText("Batch not found from db")).toBeInTheDocument();
 
     batchResult = { data: makeBatch(), error: null };
     rowsResult = { data: null, error: { message: "Rows fetch failed" } };
-    render(<MoneyImportReportPage />);
+    renderPage();
     expect(await screen.findByText("Rows fetch failed")).toBeInTheDocument();
   });
 
@@ -325,7 +337,7 @@ describe("MoneyImportReportPage", () => {
       error: null,
     };
 
-    render(<MoneyImportReportPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText("money.importResultsTitle")).toBeInTheDocument();
@@ -417,7 +429,7 @@ describe("MoneyImportReportPage", () => {
     batchResult = { data: makeBatch(), error: null };
     rowsResult = { data: makeRows(), error: null };
 
-    render(<MoneyImportReportPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText("money.importResultsTitle")).toBeInTheDocument();
@@ -468,7 +480,7 @@ describe("MoneyImportReportPage", () => {
       error: null,
     };
 
-    render(<MoneyImportReportPage />);
+    renderPage();
 
     expect(await screen.findByText("money.importReportDomFallbackWarning")).toBeInTheDocument();
   });
@@ -523,7 +535,7 @@ describe("MoneyImportReportPage", () => {
       error: null,
     };
 
-    render(<MoneyImportReportPage />);
+    renderPage();
 
     expect(
       await screen.findByText("money.importReportSummaryWithoutDetails 2"),
@@ -573,7 +585,7 @@ describe("MoneyImportReportPage", () => {
       error: null,
     };
 
-    const { container } = render(<MoneyImportReportPage />);
+    const { container } = renderPage();
 
     await waitFor(() => {
       expect(screen.getByText("Older store")).toBeInTheDocument();
@@ -605,7 +617,7 @@ describe("MoneyImportReportPage", () => {
     batchResult = { data: makeBatch({ completed_at: null }), error: null };
     rowsResult = { data: [], error: null };
 
-    render(<MoneyImportReportPage />);
+    renderPage();
 
     expect(await screen.findByText("money.importReportNoRows")).toBeInTheDocument();
   });
@@ -617,7 +629,7 @@ describe("MoneyImportReportPage", () => {
     };
     rowsResult = { data: [], error: null };
 
-    render(<MoneyImportReportPage />);
+    renderPage();
 
     expect(await screen.findByText(/money\.importReportFailureReason/)).toBeInTheDocument();
   });
@@ -655,7 +667,7 @@ describe("MoneyImportReportPage", () => {
       row_results: [],
     });
 
-    render(<MoneyImportReportPage />);
+    renderPage();
 
     expect(await screen.findByText("money.importPendingReviewBanner")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "money.importApplyBatch" })).toBeInTheDocument();
@@ -721,7 +733,7 @@ describe("MoneyImportReportPage", () => {
       ok: true,
     });
 
-    render(<MoneyImportReportPage />);
+    renderPage();
 
     expect(await screen.findByText("money.importReportBrandReview")).toBeInTheDocument();
     expect(await screen.findByText("money.importReportBrandConfidence 90")).toBeInTheDocument();
@@ -808,7 +820,7 @@ describe("MoneyImportReportPage", () => {
       error: null,
     };
 
-    render(<MoneyImportReportPage />);
+    renderPage();
 
     expect(await screen.findByText("money.importReportBrandReview")).toBeInTheDocument();
     expect(screen.getByText("money.importReportBrandConfidence 90")).toBeInTheDocument();
@@ -837,7 +849,7 @@ describe("MoneyImportReportPage", () => {
     };
     rowsResult = { data: makeRows(), error: null };
 
-    render(<MoneyImportReportPage />);
+    renderPage();
 
     expect(await screen.findByText("money.importDiscardedBanner")).toBeInTheDocument();
     expect(
@@ -846,6 +858,126 @@ describe("MoneyImportReportPage", () => {
     expect(
       screen.queryByRole("button", { name: "money.importDiscardBatch" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("leads an applied import with its result and rolls it back after a confirmation", async () => {
+    batchResult = { data: makeBatch({ status: "completed", error_count: 1 }), error: null };
+    rowsResult = { data: makeRows(), error: null };
+    rpcMock.mockResolvedValue({ data: { status: "rolled_back" }, error: null });
+
+    renderPage();
+
+    const outcome = await screen.findByTestId("money-import-outcome");
+    expect(outcome).toHaveAttribute("data-outcome", "applied");
+    expect(within(outcome).getByText("money.importOutcomeAppliedTitle 1 1")).toBeInTheDocument();
+    expect(within(outcome).getByText("money.importOutcomeAppliedHint")).toBeInTheDocument();
+    expect(within(outcome).getByText("money.importOutcomeErrors 1")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "money.importApplyBatch" })).toBeNull();
+
+    await userEvent.click(within(outcome).getByRole("button", { name: "money.importRollback" }));
+    expect(rpcMock).not.toHaveBeenCalled();
+    expect(await screen.findByText("money.importRollbackConfirmBody 1")).toBeInTheDocument();
+
+    batchResult = {
+      data: makeBatch({ status: "rolled_back", meta: { rolled_back_transactions: 1 } }),
+      error: null,
+    };
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    await userEvent.click(screen.getByRole("button", { name: "money.importRollback" }));
+
+    expect(rpcMock).toHaveBeenCalledWith("money_rollback_import_batch", { p_batch_id: "batch-1" });
+    await waitFor(() =>
+      expect(screen.getByTestId("money-import-outcome")).toHaveAttribute(
+        "data-outcome",
+        "rolled_back",
+      ),
+    );
+    expect(screen.getByText("money.importOutcomeRolledBackHint 1")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "money.importRollback" })).toBeNull();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["money-transaction-feed"] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["money-transaction-feed-summary"] });
+  });
+
+  it("keeps the page up when a rollback is refused", async () => {
+    batchResult = { data: makeBatch({ status: "completed" }), error: null };
+    rowsResult = { data: makeRows(), error: null };
+    rpcMock.mockResolvedValue({ data: null, error: { message: "only a completed batch" } });
+
+    renderPage();
+
+    await userEvent.click(await screen.findByRole("button", { name: "money.importRollback" }));
+    await userEvent.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "money.importRollback",
+      }),
+    );
+
+    await waitFor(() => expect(rpcMock).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId("money-import-outcome")).toHaveAttribute("data-outcome", "applied");
+  });
+
+  it("follows a running import until it lands, without blanking the page", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      batchResult = {
+        data: makeBatch({ status: "running", parsed_transactions_count: 7 }),
+        error: null,
+      };
+      rowsResult = { data: makeRows(), error: null };
+
+      renderPage();
+
+      const outcome = await screen.findByTestId("money-import-outcome");
+      expect(outcome).toHaveAttribute("data-outcome", "running");
+      expect(within(outcome).getByText("money.importOutcomeRunningHint 7")).toBeInTheDocument();
+
+      batchResult = { data: makeBatch({ status: "completed" }), error: null };
+      await vi.advanceTimersByTimeAsync(3100);
+
+      await waitFor(() =>
+        expect(screen.getByTestId("money-import-outcome")).toHaveAttribute(
+          "data-outcome",
+          "applied",
+        ),
+      );
+      expect(screen.queryByText("common.loading")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps following a fresh extension batch while it applies on its own", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      batchResult = {
+        data: makeBatch({
+          status: "pending",
+          import_type: "web_export",
+          created_at: new Date().toISOString(),
+        }),
+        error: null,
+      };
+      rowsResult = { data: makeRows(), error: null };
+
+      renderPage();
+
+      expect(await screen.findByTestId("money-import-outcome")).toHaveAttribute(
+        "data-outcome",
+        "awaiting",
+      );
+
+      batchResult = { data: makeBatch({ status: "completed" }), error: null };
+      await vi.advanceTimersByTimeAsync(3100);
+
+      await waitFor(() =>
+        expect(screen.getByTestId("money-import-outcome")).toHaveAttribute(
+          "data-outcome",
+          "applied",
+        ),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("virtualizes long report lists and updates scroll position", async () => {
@@ -871,7 +1003,7 @@ describe("MoneyImportReportPage", () => {
       error: null,
     };
 
-    render(<MoneyImportReportPage />);
+    renderPage();
 
     expect(await screen.findByText("Store 1")).toBeInTheDocument();
 
@@ -932,7 +1064,7 @@ describe("MoneyImportReportPage", () => {
     };
 
     const user = userEvent.setup();
-    render(<MoneyImportReportPage />);
+    renderPage();
 
     expect(await screen.findByTestId("report-table-scroll-body")).toBeInTheDocument();
 
@@ -1016,7 +1148,7 @@ describe("MoneyImportReportPage", () => {
     });
 
     try {
-      render(<MoneyImportReportPage />);
+      renderPage();
 
       expect(await screen.findByText("Store 1")).toBeInTheDocument();
 
@@ -1080,7 +1212,7 @@ describe("MoneyImportReportPage", () => {
       error: null,
     });
 
-    render(<MoneyImportReportPage />);
+    renderPage();
 
     expect(await screen.findByText("money.importReportCardMapping")).toBeInTheDocument();
     expect(screen.getByText("Travel card")).toBeInTheDocument();

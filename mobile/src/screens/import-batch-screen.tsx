@@ -1,12 +1,13 @@
-import type { MoneyImportBatchRow } from "@orbit-types/import";
+import type { MoneyImportBatch, MoneyImportBatchRow } from "@orbit-types/import";
 import { formatMoney } from "@orbit-types/money-feed";
+import { importOutcome } from "@orbit-types/money-import-review";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { Alert, RefreshControl, ScrollView, View } from "react-native";
 import { Section } from "@/components/form";
 import { BatchStatus, importDateTime } from "@/components/import-status";
 import { Badge, Button, Card, Placeholder, Text } from "@/components/ui";
 import { t } from "@/lib/i18n";
-import { useImportBatch, useReviewImportBatch } from "@/lib/queries";
+import { useImportBatch, useReviewImportBatch, useRollbackImportBatch } from "@/lib/queries";
 import { space, usePalette } from "@/theme";
 
 const ROW_STATUS = {
@@ -16,14 +17,16 @@ const ROW_STATUS = {
 } as const;
 
 /**
- * An import's report — the web's batch report: what the batch read and what became of each
- * operation, and, while it is still a preview, applying it to the transactions or not.
+ * An import's page — the web's batch report: how the import went, with the way to undo it once
+ * it landed (every extension import applies on its own, T-261026-2ew), and what became of each
+ * operation. A file preview from before that is still applied or not from here.
  */
 export default function ImportBatchScreen() {
   const palette = usePalette();
   const { batch: id } = useLocalSearchParams<{ batch: string }>();
   const report = useImportBatch(id);
   const review = useReviewImportBatch();
+  const rollback = useRollbackImportBatch();
   const header = (
     <Stack.Screen options={{ title: t("money.importResultsTitle"), headerLargeTitle: false }} />
   );
@@ -49,6 +52,22 @@ export default function ImportBatchScreen() {
       { id: batch.id, apply },
       { onError: (error) => Alert.alert(t("common.error"), error.message) },
     );
+  const confirmRollback = () =>
+    Alert.alert(
+      t("money.importRollbackConfirmTitle"),
+      t("money.importRollbackConfirmBody", { count: batch.inserted_count }),
+      [
+        { text: t("common.cancel"), style: "cancel" },
+        {
+          text: t("money.importRollback"),
+          style: "destructive",
+          onPress: () =>
+            rollback.mutate(batch.id, {
+              onError: (error) => Alert.alert(t("money.importRollbackFailed"), error.message),
+            }),
+        },
+      ],
+    );
   return (
     <>
       {header}
@@ -63,13 +82,20 @@ export default function ImportBatchScreen() {
           />
         }
       >
+        <Outcome batch={batch} />
+        {batch.status === "completed" ? (
+          <Button
+            variant="outline"
+            label={t("money.importRollback")}
+            busy={rollback.isPending}
+            onPress={confirmRollback}
+          />
+        ) : null}
+
         <Card style={{ padding: space.lg, gap: space.xs }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
             <Text weight="semibold" style={{ flex: 1 }}>
-              {t("money.importResultsSummary", {
-                inserted: batch.inserted_count,
-                skipped: batch.skipped_count,
-              })}
+              {t("money.importReportDetails")}
             </Text>
             <BatchStatus status={batch.status} />
           </View>
@@ -98,7 +124,6 @@ export default function ImportBatchScreen() {
 
         {batch.status === "pending" ? (
           <Card style={{ padding: space.lg, gap: space.md }}>
-            <Text size="sm">{t("money.importPendingReviewBanner")}</Text>
             <View style={{ flexDirection: "row", gap: space.sm }}>
               <View style={{ flex: 1 }}>
                 <Button
@@ -130,6 +155,62 @@ export default function ImportBatchScreen() {
         </Section>
       </ScrollView>
     </>
+  );
+}
+
+/** How the import went, in the words the web's import page leads with. */
+function Outcome({ batch }: { batch: MoneyImportBatch }) {
+  const outcome = importOutcome(batch.status);
+  const lines: { text: string; tone?: "mutedForeground" | "destructive" }[] = [];
+  if (outcome === "running") {
+    lines.push({ text: t("money.importOutcomeRunningTitle") });
+    lines.push({
+      text: t("money.importOutcomeRunningHint", { count: batch.parsed_transactions_count }),
+      tone: "mutedForeground",
+    });
+  } else if (outcome === "applied") {
+    lines.push({
+      text: t("money.importOutcomeAppliedTitle", {
+        inserted: batch.inserted_count,
+        skipped: batch.skipped_count,
+      }),
+    });
+    lines.push({ text: t("money.importOutcomeAppliedHint"), tone: "mutedForeground" });
+    if (batch.error_count > 0) {
+      lines.push({
+        text: t("money.importOutcomeErrors", { count: batch.error_count }),
+        tone: "destructive",
+      });
+    }
+  } else if (outcome === "rolled_back") {
+    const removed = Number(batch.meta?.rolled_back_transactions ?? batch.inserted_count) || 0;
+    lines.push({ text: t("money.importOutcomeRolledBackTitle") });
+    lines.push({
+      text: t("money.importOutcomeRolledBackHint", { count: removed }),
+      tone: "mutedForeground",
+    });
+  } else if (outcome === "failed") {
+    lines.push({ text: t("money.importOutcomeFailedTitle") });
+    lines.push({ text: t("money.importOutcomeFailedHint"), tone: "mutedForeground" });
+  } else if (outcome === "awaiting") {
+    lines.push({ text: t("money.importOutcomeAwaitingTitle") });
+    lines.push({ text: t("money.importPendingReviewBanner"), tone: "mutedForeground" });
+  } else {
+    lines.push({ text: t("money.importDiscardedBanner"), tone: "mutedForeground" });
+  }
+  return (
+    <Card style={{ padding: space.lg, gap: space.xs }}>
+      {lines.map((line, index) => (
+        <Text
+          key={line.text}
+          size={index === 0 ? "base" : "sm"}
+          weight={index === 0 && !line.tone ? "semibold" : undefined}
+          tone={line.tone}
+        >
+          {line.text}
+        </Text>
+      ))}
+    </Card>
   );
 }
 
