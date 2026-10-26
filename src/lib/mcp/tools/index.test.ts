@@ -54,6 +54,7 @@ describe("registerHealthTools", () => {
         "get_medication",
         "get_observation_history",
         "get_person",
+        "get_upload_links",
         "list_catalog_entries",
         "list_checkups",
         "list_conditions",
@@ -71,6 +72,7 @@ describe("registerHealthTools", () => {
         "get_ingest_candidates",
         "ingest_medical_document",
         "propose_reconciliation",
+        "remove_medical_record",
         "search_medical_records",
         "search_observations",
         "upsert_catalog_entry",
@@ -110,9 +112,11 @@ describe("registerHealthTools", () => {
     "add_medication",
     "create_medical_record",
     "dismiss_condition_closure",
+    "get_upload_links",
     "ingest_medical_document",
     "log_dose",
     "propose_reconciliation",
+    "remove_medical_record",
     "update_medication",
     "upsert_catalog_entry",
   ];
@@ -179,7 +183,9 @@ describe("registerHealthTools", () => {
   });
 
   it("does not expose any deletion tool", () => {
-    for (const tool of tools) {
+    // remove_medical_record is the app's own Remove: it sets an unapproved record aside, and the
+    // owner can restore it. Nothing here erases a row.
+    for (const tool of tools.filter((t) => t.name !== "remove_medical_record")) {
       expect(tool.name).not.toMatch(/delete|remove|destroy/);
     }
   });
@@ -218,6 +224,31 @@ describe("registerHealthTools", () => {
     expect(
       schema.safeParse({ code: "weight", value: 78.4, measured_at: "not-a-date" }).success,
     ).toBe(false);
+  });
+
+  it("requires a confidence on every extracted row, so a left-out one is not stored as zero", () => {
+    const schema = byName.get("ingest_medical_document")?.config.inputSchema as z.ZodTypeAny;
+    const observation = {
+      obs_name_text: "Витамин В12",
+      value: "704",
+      source_anchor: "Витамин В12 704",
+    };
+    const call = (row: Record<string, unknown>) => ({
+      record_id: "5f0c3a52-2b8e-4c1d-9a7f-3e6b1d2c4a90",
+      source_text: "Витамин В12 704 пг/мл",
+      classification: {
+        record_type: "lab",
+        title: "Витамины",
+        record_date: "2025-10-27",
+        summary: "",
+        keywords: [],
+      },
+      extraction: { observations: [row], findings: [], conditions: [], asserted_absences: [] },
+      reconciliation: { nothing_to_reconcile: true },
+    });
+
+    expect(schema.safeParse(call({ ...observation, confidence: 0.9 })).success).toBe(true);
+    expect(schema.safeParse(call(observation)).success).toBe(false);
   });
 
   it("validates a medication's schedule against the real union", () => {

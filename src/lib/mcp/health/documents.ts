@@ -223,6 +223,7 @@ export interface IngestableRecord {
     original_filename: string;
     storage_path: string;
     mime_type: string;
+    file_size?: number | null;
   }>;
 }
 
@@ -233,7 +234,7 @@ export async function getIngestableRecord(
   const { data, error } = await supabase
     .from("medical_records")
     .select(
-      "id, person_id, status, title, attachments:record_attachments ( id, original_filename, storage_path, mime_type )",
+      "id, person_id, status, title, attachments:record_attachments ( id, original_filename, storage_path, mime_type, file_size )",
     )
     .eq("id", recordId)
     .maybeSingle();
@@ -245,18 +246,52 @@ export function isIngestableStatus(status: string): boolean {
   return INGESTABLE_STATUSES.has(status);
 }
 
-/** The pages of a record whose file is not in storage yet. */
-export async function findMissingPages(
+/** The files in a record's folder, by storage path, with the size storage reports for each. */
+async function listUploadedPages(
   supabase: SupabaseClient<Database>,
   record: IngestableRecord,
-): Promise<IngestableRecord["attachments"]> {
+): Promise<Map<string, number | null>> {
   const folder = `${record.person_id}/${record.id}`;
   const { data, error } = await supabase.storage
     .from(ATTACHMENT_BUCKET)
     .list(folder, { limit: 1000 });
   if (error) throw new Error(`Failed to check the uploaded pages: ${error.message}`);
-  const present = new Set((data ?? []).map((file) => `${folder}/${file.name}`));
+  return new Map(
+    (data ?? []).map((file) => {
+      const size = (file.metadata as { size?: unknown } | null)?.size;
+      return [`${folder}/${file.name}`, typeof size === "number" ? size : null];
+    }),
+  );
+}
+
+/** The pages of a record whose file is not in storage yet. */
+export async function findMissingPages(
+  supabase: SupabaseClient<Database>,
+  record: IngestableRecord,
+): Promise<IngestableRecord["attachments"]> {
+  const present = await listUploadedPages(supabase, record);
   return record.attachments.filter((attachment) => !present.has(attachment.storage_path));
+}
+
+/**
+ * Write each uploaded page's size onto its attachment row. The file arrives by the client's own
+ * PUT, after the row was written, so nothing else ever fills `file_size` for a page brought in
+ * over MCP.
+ */
+export async function recordPageSizes(
+  supabase: SupabaseClient<Database>,
+  record: IngestableRecord,
+): Promise<void> {
+  const present = await listUploadedPages(supabase, record);
+  for (const attachment of record.attachments) {
+    const size = present.get(attachment.storage_path);
+    if (size == null || attachment.file_size === size) continue;
+    const { error } = await supabase
+      .from("record_attachments")
+      .update({ file_size: size })
+      .eq("id", attachment.id);
+    if (error) throw new Error(`Failed to record the page sizes: ${error.message}`);
+  }
 }
 
 export interface IngestCandidates {

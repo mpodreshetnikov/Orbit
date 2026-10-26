@@ -24,6 +24,8 @@ const documents = vi.hoisted(() => ({
   getRecordExtractionIssues: vi.fn(),
   isIngestableStatus: vi.fn((status: string) => status !== "active"),
   proposeRecordReconciliation: vi.fn(),
+  recordPageSizes: vi.fn(),
+  removeRecordDraft: vi.fn(),
   signPageUploads: vi.fn(),
   suggestReconciliation: vi.fn(),
 }));
@@ -291,6 +293,16 @@ describe("ingest_medical_document", () => {
     expect(userClient.invokeEdgeFunctionAsUser).not.toHaveBeenCalled();
   });
 
+  it("records the uploaded pages' sizes before handing the document to the server", async () => {
+    userClient.invokeEdgeFunctionAsUser.mockResolvedValue({
+      status: 200,
+      payload: { success: true, rejected: [] },
+    });
+    await (await handlers()).get("ingest_medical_document")!(SUBMISSION, ctx);
+
+    expect(documents.recordPageSizes).toHaveBeenCalledWith(expect.anything(), RECORD);
+  });
+
   it("says in the text block what was stored, refused, unrecognised and pending", async () => {
     userClient.invokeEdgeFunctionAsUser.mockResolvedValue({
       status: 200,
@@ -540,5 +552,69 @@ describe("propose_reconciliation", () => {
     );
     expect(result.isError).toBe(true);
     expect(records.getMedicalRecord).not.toHaveBeenCalled();
+  });
+});
+
+describe("get_upload_links", () => {
+  it("signs fresh links for the pages still missing, on the same record", async () => {
+    documents.findMissingPages.mockResolvedValue(RECORD.attachments);
+    documents.signPageUploads.mockResolvedValue([
+      {
+        attachment_id: "a-1",
+        filename: "page1.jpg",
+        mime_type: "image/jpeg",
+        storage_path: "p-1/r/1-page1.jpg",
+        upload_url: "https://orbit.test/fresh",
+      },
+    ]);
+    const result = await (await handlers()).get("get_upload_links")!({ record_id: RECORD.id }, ctx);
+
+    expect(result.isError).toBeFalsy();
+    expect(documents.signPageUploads).toHaveBeenCalledWith(expect.anything(), RECORD.attachments);
+    expect(result.content[0].text).toContain("https://orbit.test/fresh");
+    expect(result.content[0].text).toContain(`record_id ${RECORD.id}`);
+  });
+
+  it("says to ingest when every page is already there", async () => {
+    const result = await (await handlers()).get("get_upload_links")!({ record_id: RECORD.id }, ctx);
+
+    expect(result.isError).toBeFalsy();
+    expect(documents.signPageUploads).not.toHaveBeenCalled();
+    expect(result.content[0].text).toContain("are uploaded. Call ingest_medical_document");
+  });
+
+  it("refuses an approved record", async () => {
+    documents.getIngestableRecord.mockResolvedValue({ ...RECORD, status: "active" });
+    const result = await (await handlers()).get("get_upload_links")!({ record_id: RECORD.id }, ctx);
+
+    expect(result.isError).toBe(true);
+    expect(documents.findMissingPages).not.toHaveBeenCalled();
+  });
+});
+
+describe("remove_medical_record", () => {
+  it("sets an unapproved record aside, restorable in the app", async () => {
+    documents.removeRecordDraft.mockResolvedValue({ status: "removed" });
+    const result = await (await handlers()).get("remove_medical_record")!(
+      { record_id: RECORD.id },
+      ctx,
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toContain("can be restored in the app");
+  });
+
+  it("refuses an approved record and says where it is taken off the chart", async () => {
+    documents.removeRecordDraft.mockResolvedValue({
+      status: "not_a_draft",
+      recordStatus: "active",
+    });
+    const result = await (await handlers()).get("remove_medical_record")!(
+      { record_id: RECORD.id },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("is active");
   });
 });

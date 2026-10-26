@@ -21,6 +21,7 @@ function createSupabaseStub(options: {
   const inserted: Record<string, unknown>[] = [];
   const updated: Array<{ id: unknown; patch: Record<string, unknown> }> = [];
   const statusUpdates: Array<Record<string, unknown>> = [];
+  const codeFills: Array<{ id: unknown; patch: Record<string, unknown>; guard: unknown[] }> = [];
   const lookups: string[] = [];
   const recomputeFilters: string[] = [];
 
@@ -53,10 +54,21 @@ function createSupabaseStub(options: {
             }),
           }),
           update: (patch: Record<string, unknown>) => ({
-            eq: async () => {
-              statusUpdates.push(patch);
-              return { error: null };
-            },
+            eq: (_column: string, id: unknown) =>
+              // A status recompute is awaited straight after `eq`; filling a missing code adds
+              // `.is("code", null)` so it never overwrites one.
+              Object.assign(
+                Promise.resolve().then(() => {
+                  if (!("code" in patch)) statusUpdates.push(patch);
+                  return { error: null };
+                }),
+                {
+                  is: async (column: string, value: unknown) => {
+                    codeFills.push({ id, patch, guard: [column, value] });
+                    return { error: null };
+                  },
+                },
+              ),
           }),
           insert: (payload: Record<string, unknown>) => {
             inserted.push(payload);
@@ -104,8 +116,16 @@ function createSupabaseStub(options: {
     },
   };
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return { client: client as any, inserted, updated, statusUpdates, lookups, recomputeFilters };
+  return {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    client: client as any,
+    inserted,
+    updated,
+    statusUpdates,
+    codeFills,
+    lookups,
+    recomputeFilters,
+  };
 }
 
 function proposal(overrides: Partial<ConditionRecordWithDetails> = {}): ConditionRecordWithDetails {
@@ -194,6 +214,26 @@ describe("materializeConditionProposals", () => {
 
     expect(stub.updated[0].patch.condition_id).toBe("cond-by-name");
     expect(stub.inserted).toHaveLength(0);
+    expect(stub.codeFills).toHaveLength(0);
+  });
+
+  it("gives a condition found by name the verified code it lacks, and never replaces one", async () => {
+    const stub = createSupabaseStub({ byName: { id: "cond-by-name" } });
+
+    await materializeConditionProposals([proposal({ condition_code: "L01.0" })], {
+      supabase: stub.client,
+      personId: "person-1",
+      lookupIcd: foundIcd,
+    });
+
+    expect(stub.updated[0].patch.condition_id).toBe("cond-by-name");
+    expect(stub.codeFills).toEqual([
+      {
+        id: "cond-by-name",
+        patch: { code: "L01.0", icd_name_en: "EN", icd_name_ru: "RU" },
+        guard: ["code", null],
+      },
+    ]);
   });
 
   it("leaves mentions that are already materialised alone", async () => {

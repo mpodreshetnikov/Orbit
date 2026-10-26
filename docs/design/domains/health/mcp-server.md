@@ -272,7 +272,11 @@ Conventions that matter:
   forever and being offered as a current course by the duplicate guard.
 
 - **No deletion tools exist.** Catalog rows are foreign-key targets of live data, and regimens and
-  conditions use soft deletion with app-level semantics.
+  conditions use soft deletion with app-level semantics. The one removal is
+  `remove_medical_record`, which is the app's own Remove: it sets aside a record nobody has
+  approved, and the owner can restore it. It exists because an agent whose upload failed had no
+  way to clear the half-uploaded draft it left, and created a second record beside it
+  (T-261026-dku). An approved record is refused; taking one off the chart stays in the app.
 - **A medication a person is currently on is never created twice.** `add_medication` refuses when a
   regimen of the same person is still running under the same name — trimmed and lower-cased, the
   matcher `src/components/medications/medication-form.tsx` uses — and returns every match, finished
