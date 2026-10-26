@@ -274,8 +274,9 @@ describe("createCatalogEntries", () => {
     });
 
     expect(stub.argsFor("observation_catalog", "in")).toEqual([["obs_code", ["alt", "wbc"]]]);
+    // A field one entry leaves out takes its column default, not NULL.
     expect(stub.argsFor("observation_catalog", "insert")).toEqual([
-      [[{ obs_code: "wbc", name_ru: "Лейкоциты" }]],
+      [[{ obs_code: "wbc", name_ru: "Лейкоциты" }], { defaultToNull: false }],
     ]);
     expect(result).toEqual({ created: [{ obs_code: "wbc" }], existing: ["alt"] });
   });
@@ -347,6 +348,25 @@ describe("addCatalogSynonyms", () => {
       },
       { code: "ldl_c", missing: true, added: [], already_present: [], refused: [] },
     ]);
+  });
+
+  it("keeps every addition when one code comes twice in a batch", async () => {
+    const stub = createSupabaseStub({
+      observation_catalog: [{ data: rows }, { data: null }, { data: null }],
+    });
+    const changes = await addCatalogSynonyms(stub.client, {
+      kind: "observation",
+      items: [
+        { code: "alt", synonyms_ru: ["first"] },
+        { code: "alt", synonyms_ru: ["second"] },
+      ],
+    });
+
+    expect(stub.argsFor("observation_catalog", "update")).toEqual([
+      [{ synonyms_ru: ["алт", "first"], synonyms_en: ["alt"] }],
+      [{ synonyms_ru: ["алт", "first", "second"], synonyms_en: ["alt"] }],
+    ]);
+    expect(changes.map((change) => change.added)).toEqual([["first"], ["second"]]);
   });
 
   it("folds punctuation and ё when it compares wordings", async () => {

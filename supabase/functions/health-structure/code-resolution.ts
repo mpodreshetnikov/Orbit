@@ -337,7 +337,37 @@ function resolveByAbbreviationGloss<T>(
   const abbreviationNamesIt = [head, gloss].some(
     (part) => isAbbreviation(part) && exactOwners(part, views)[0] === winner,
   );
-  return abbreviationNamesIt ? winner : null;
+  if (!abbreviationNamesIt) return null;
+  // A long part no entry owns outright is not agreement either: `Билирубин прямой в сыворотке
+  // (BIL)` owns nothing, yet `прямой` is direct bilirubin's word, not total bilirubin's.
+  const contradicted = [head, gloss].some(
+    (part) => exactOwners(part, views).length === 0 && namesAnotherEntry(part, winner, views),
+  );
+  return contradicted ? null : winner;
+}
+
+/**
+ * True when a word of the text, which the winner cannot account for, is another entry's own word.
+ *
+ * Another entry has to carry the word exactly. Near misses are everywhere among long analyte names:
+ * `аланинаминотрансфераза` is a near miss of AST's `аспартатаминотрансфераза`, and that says nothing
+ * against the ALT the abbreviation names.
+ */
+function namesAnotherEntry<T>(
+  text: string,
+  winner: CatalogView<T>,
+  views: CatalogView<T>[],
+): boolean {
+  const winnerVocabulary = vocabularyTokens(winner);
+  return tokensOf(normalize(text)).some((token) => {
+    if (token.length < DISCRIMINATING_TOKEN_MIN_LENGTH || SPECIMEN_TOKENS.has(token)) return false;
+    if (isTokenExplained(token, winnerVocabulary)) return false;
+    const folded = foldHomoglyphs(token);
+    return views.some(
+      (view) =>
+        view !== winner && vocabularyTokens(view).some((word) => foldHomoglyphs(word) === folded),
+    );
+  });
 }
 
 function resolveWithViews<T>(
@@ -348,7 +378,9 @@ function resolveWithViews<T>(
 ): CodeResolution<T> {
   if (modelCode) {
     const byCode = views.find((view) => view.code === modelCode);
-    if (byCode) return { kind: "resolved", entry: byCode.entry, via: "code", score: 1 };
+    if (byCode) {
+      return { kind: "resolved", entry: byCode.entry, via: "code", score: 1 };
+    }
   }
 
   if (!nameText) {
@@ -376,10 +408,14 @@ function resolveWithViews<T>(
   }
 
   const byGloss = resolveByAbbreviationGloss(nameText, views);
-  if (byGloss) return { kind: "resolved", entry: byGloss.entry, via: "synonym", score: 1 };
+  if (byGloss) {
+    return { kind: "resolved", entry: byGloss.entry, via: "synonym", score: 1 };
+  }
 
   const byToken = resolveByDiscriminatingToken(normalizedName, views, qualifiersChangeIdentity);
-  if (byToken) return { kind: "resolved", entry: byToken.entry, via: "synonym", score: 1 };
+  if (byToken) {
+    return { kind: "resolved", entry: byToken.entry, via: "synonym", score: 1 };
+  }
 
   let best: { view: CatalogView<T>; score: number } | null = null;
   for (const view of views) {
@@ -391,10 +427,18 @@ function resolveWithViews<T>(
   }
 
   if (best && best.score >= FUZZY_THRESHOLD) {
-    return { kind: "resolved", entry: best.view.entry, via: "fuzzy", score: best.score };
+    return {
+      kind: "resolved",
+      entry: best.view.entry,
+      via: "fuzzy",
+      score: best.score,
+    };
   }
 
-  return { kind: "unresolved", reason: "no catalogue entry above similarity threshold" };
+  return {
+    kind: "unresolved",
+    reason: "no catalogue entry above similarity threshold",
+  };
 }
 
 /** How many entries a printed unit may rule out before the label is reported as unmatched. */
@@ -417,7 +461,9 @@ export function resolveObservationCode(
   // qualifier the entry cannot account for means this is not that entry, and the row stays
   // uncoded rather than joining another analyte's history.
   const first = resolveWithViews(modelCode, nameText, views, true);
-  if (first.kind !== "resolved" || unitFitsEntry(first.entry, unit)) return first;
+  if (first.kind !== "resolved" || unitFitsEntry(first.entry, unit)) {
+    return first;
+  }
 
   // The label named an entry the value cannot belong to: `PDW` printed in fL against the entry
   // kept in %. Another entry the label also answers to may take that unit (`PDW, fL`), so the one
@@ -429,7 +475,9 @@ export function resolveObservationCode(
     const ruledOut = candidate.entry;
     views = views.filter((view) => view.entry !== ruledOut);
     candidate = resolveWithViews(modelCode, nameText, views, true);
-    if (candidate.kind === "resolved" && unitFitsEntry(candidate.entry, unit)) return candidate;
+    if (candidate.kind === "resolved" && unitFitsEntry(candidate.entry, unit)) {
+      return candidate;
+    }
   }
   return {
     kind: "unresolved",

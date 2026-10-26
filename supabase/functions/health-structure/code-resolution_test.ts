@@ -133,7 +133,9 @@ Deno.test("resolveFindingTypeCode matches names and synonyms", () => {
 Deno.test("resolveBodySiteCode matches a site by its printed label", () => {
   const result = resolveBodySiteCode("NOT_A_CODE", "желчный пузырь", SITES);
   assertEquals(result.kind, "resolved");
-  if (result.kind === "resolved") assertEquals(result.entry.site_code, "gallbladder");
+  if (result.kind === "resolved") {
+    assertEquals(result.entry.site_code, "gallbladder");
+  }
 });
 
 /**
@@ -288,6 +290,16 @@ Deno.test("an abbreviation does not override a long name that names another anal
   // filed into total bilirubin on the strength of `bil`.
   const result = resolveObservationCode(null, "Билирубин прямой (BIL)", catalog);
   assertEquals(result.kind, "unresolved");
+  // Nor when extra wording keeps the long part from naming anything outright: `прямой` is still
+  // direct bilirubin's word.
+  assertEquals(
+    resolveObservationCode(null, "Билирубин прямой в сыворотке (BIL)", catalog).kind,
+    "unresolved",
+  );
+  assertEquals(
+    resolveObservationCode(null, "Билирубин в сыворотке (BIL)", catalog).kind,
+    "resolved",
+  );
 });
 
 Deno.test("the printed unit picks between entries the label names", () => {
@@ -312,5 +324,7 @@ Deno.test("the printed unit picks between entries the label names", () => {
   // A known unit no entry takes leaves the row unmatched, naming the entry it ruled out.
   const mismatch = resolveObservationCode(null, "Альбумин", catalog, "г/дл");
   assertEquals(mismatch.kind, "unresolved");
-  if (mismatch.kind === "unresolved") assertEquals(mismatch.unitMismatch?.obs_code, "albumin");
+  if (mismatch.kind === "unresolved") {
+    assertEquals(mismatch.unitMismatch?.obs_code, "albumin");
+  }
 });

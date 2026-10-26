@@ -211,9 +211,12 @@ export async function createCatalogEntries(
   const fresh = params.entries.filter((entry) => !existing.has(String(entry[spec.codeColumn])));
   if (fresh.length === 0) return { created: [], existing: [...existing] };
 
+  // Entries in one batch may set different optional fields. PostgREST inserts the union of their
+  // columns, and without this a field one entry left out is written as NULL rather than its
+  // default -- which the NOT NULL synonym and unit columns refuse, failing the whole batch.
   const { data, error } = await supabase
     .from(spec.table)
-    .insert(fresh as never)
+    .insert(fresh as never, { defaultToNull: false })
     .select(spec.columns);
   if (error) {
     throw new Error(`Failed to create ${spec.label} entries: ${error.message}`);
@@ -290,6 +293,7 @@ export async function addCatalogSynonyms(
   }
 
   const changes: SynonymChange[] = [];
+  const writtenByCode = new Map<string, { synonyms_ru: string[]; synonyms_en: string[] }>();
   for (const item of params.items) {
     const row = rows.find((candidate) => String(candidate[spec.codeColumn]) === item.code);
     const change: SynonymChange = {
@@ -302,9 +306,11 @@ export async function addCatalogSynonyms(
     changes.push(change);
     if (!row) continue;
 
+    // The same code may come more than once in a batch; each write starts from the one before.
+    const written = writtenByCode.get(item.code);
     const next = {
-      synonyms_ru: [...((row.synonyms_ru as string[] | null) ?? [])],
-      synonyms_en: [...((row.synonyms_en as string[] | null) ?? [])],
+      synonyms_ru: [...(written?.synonyms_ru ?? (row.synonyms_ru as string[] | null) ?? [])],
+      synonyms_en: [...(written?.synonyms_en ?? (row.synonyms_en as string[] | null) ?? [])],
     };
     for (const column of ["synonyms_ru", "synonyms_en"] as const) {
       for (const raw of item[column] ?? []) {
@@ -332,6 +338,7 @@ export async function addCatalogSynonyms(
     if (updateError) {
       throw new Error(`Failed to add synonyms to ${item.code}: ${updateError.message}`);
     }
+    writtenByCode.set(item.code, next);
   }
   return changes;
 }
