@@ -202,7 +202,7 @@ Deno.test(
 );
 
 Deno.test(
-  "previewRowsAction applies every batch the extension reads, once it is complete",
+  "previewRowsAction applies every batch, a file's included, once it is complete",
   async () => {
     const applied: string[] = [];
     const applyPendingBatch = async (batchId: string) => {
@@ -212,7 +212,7 @@ Deno.test(
       });
     };
 
-    // A file import: the page that uploaded it applies it.
+    // A file import lands as the extension's do: nobody confirms it (T-261026-2ew).
     const manual = createRepositoryMock({
       batch: {
         id: "batch-manual",
@@ -237,9 +237,8 @@ Deno.test(
       ),
       200,
     );
-    assertEquals(manualPayload.auto_applied, false);
-    assertEquals(applied, []);
-    assertEquals(manual.state.batch?.status, "pending");
+    assertEquals(manualPayload.auto_applied, true);
+    assertEquals(applied, ["batch-manual"]);
 
     // A batch a person started in the extension: applied without asking them (T-261026-2ew).
     const attended = createRepositoryMock({
@@ -268,7 +267,7 @@ Deno.test(
       200,
     );
     assertEquals(attendedPayload.auto_applied, true);
-    assertEquals(applied, ["batch-attended"]);
+    assertEquals(applied, ["batch-manual", "batch-attended"]);
     applied.length = 0;
 
     // The extension's unattended batch: nobody started it, so nobody would come back to apply it.

@@ -32,18 +32,10 @@ export interface PreviewRowsDeps {
   telemetry?: EdgeTelemetry;
   /**
    * Applies a pending batch as a person's "Apply" would. Called for the final chunk of every
-   * batch the extension reads: an import is undone by rolling it back, not reviewed before it
-   * lands (T-261026-2ew), and an unattended one has nobody to review it at all.
+   * batch, a file's or one the extension reads: an import is undone by rolling it back, not
+   * reviewed before it lands (T-261026-2ew).
    */
   applyPendingBatch?: (batchId: string) => Promise<Response>;
-}
-
-function isUnattendedBatchMeta(meta: unknown): boolean {
-  return (
-    Boolean(meta) &&
-    typeof meta === "object" &&
-    (meta as Record<string, unknown>).unattended === true
-  );
 }
 
 type RowErrorSignature =
@@ -720,20 +712,16 @@ export async function previewRowsAction(
   // session as failed, and a completed batch must not be reported as one that was not.
   //
   // The batch goes through the same apply a person's click does, with the decisions the
-  // preview suggested. Every batch the extension reads is applied, rows that errored in the
-  // preview included: those rows land nowhere and the import's page lists them, and a wrong
-  // import is rolled back rather than held for review (T-261026-2ew). A file import is still
-  // applied by the page that uploaded it. An apply that throws has already
+  // preview suggested. Every batch is applied, a file's as much as one the extension reads, rows
+  // that errored in the preview included: those rows land nowhere and the import's page lists
+  // them, and a wrong import is rolled back rather than held for review (T-261026-2ew). An apply
+  // that throws has already
   // discarded the preview and may have written part of the batch, so the batch is marked
   // failed and the request fails with it: the extension then leaves this window unlanded and
   // the next run reads it again, with duplicates refused by their import hash.
   let autoApplied = false;
   let autoApplyErrorCount: number | null = null;
-  if (
-    patch.status === "pending" &&
-    (importType === "web_export" || isUnattendedBatchMeta(patch.meta)) &&
-    deps.applyPendingBatch
-  ) {
+  if (patch.status === "pending" && deps.applyPendingBatch) {
     try {
       const applied = await deps.applyPendingBatch(batchId);
       autoApplied = applied.status < 400;
