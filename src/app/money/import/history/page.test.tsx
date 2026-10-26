@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import MoneyImportHistoryPage from "./page";
+import { feedQueryForReviewPeriod } from "@/types/money-import-review";
 
 let selectedPersonIdState: string | null = "person-1";
 let batchesResult:
@@ -226,7 +227,7 @@ describe("MoneyImportHistoryPage", () => {
     expect(summary).toHaveTextContent("money.importReviewSummary 1 40 1 0");
     expect(screen.getByRole("link", { name: "money.importReviewOpenFeed" })).toHaveAttribute(
       "href",
-      `/money/transactions?preset=custom&from=${day(25)}&to=${day(15)}`,
+      `/money/transactions?${feedQueryForReviewPeriod("custom", { from: day(25), to: day(15) })}`,
     );
 
     fireEvent.change(screen.getByLabelText("money.importReviewTo"), {

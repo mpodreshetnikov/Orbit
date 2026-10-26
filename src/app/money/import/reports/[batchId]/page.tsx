@@ -7,6 +7,7 @@ import { useTranslations } from "next-intl";
 import { ArrowLeft, ChevronDown, ChevronRight } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase";
 import { REPORT_ROW_SELECT, readReportRows } from "@/lib/money/import-report-rows";
 import { REQUEST_TIMEOUT_MS, isTimeoutMessage, timeoutSignal } from "@/lib/request-timeout";
@@ -24,6 +25,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { MoneyImportOutcome } from "@/components/money/import-outcome";
+import { importStillSettling } from "@/types/money-import-review";
 import {
   Dialog,
   DialogContent,
@@ -52,6 +54,12 @@ const BATCH_STATUS_KEYS: Record<string, string> = {
 
 /** How often a batch still being read is asked again, so the page follows the import live. */
 const RUNNING_REFRESH_MS = 3000;
+const ROLLED_BACK_QUERY_KEYS = [
+  "money-transactions",
+  "money-transaction",
+  "money-transaction-feed",
+  "money-transaction-feed-summary",
+] as const;
 
 function normalizeId(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -273,6 +281,7 @@ export default function MoneyImportReportPage() {
     "apply" | "discard" | "rollback" | null
   >(null);
   const [refreshTick, setRefreshTick] = useState(0);
+  const queryClient = useQueryClient();
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
   const [expandedTxIds, setExpandedTxIds] = useState<Record<string, boolean>>({});
@@ -502,12 +511,12 @@ export default function MoneyImportReportPage() {
     };
   }, [batchId, refreshTick, t]);
 
-  const batchStatus = batch?.status;
+  const settling = batch ? importStillSettling(batch, new Date()) : false;
   useEffect(() => {
-    if (batchStatus !== "running") return;
+    if (!settling) return;
     const timer = setTimeout(() => setRefreshTick((current) => current + 1), RUNNING_REFRESH_MS);
     return () => clearTimeout(timer);
-  }, [batchStatus, refreshTick]);
+  }, [settling, refreshTick]);
 
   useEffect(() => {
     const node = listRef.current;
@@ -817,6 +826,10 @@ export default function MoneyImportReportPage() {
         p_batch_id: batchId,
       });
       if (rollbackError) throw new Error(rollbackError.message);
+      // The feed's cached pages would still show what the rollback removed.
+      for (const key of ROLLED_BACK_QUERY_KEYS) {
+        void queryClient.invalidateQueries({ queryKey: [key] });
+      }
       toast.success(t("money.importRollbackDone"));
       setRefreshTick((current) => current + 1);
     } catch (rollbackError) {

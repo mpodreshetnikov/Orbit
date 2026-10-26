@@ -9,6 +9,7 @@ import * as Haptics from "expo-haptics";
 import type { CheckupItem, CheckupItemStatus } from "@orbit-types/checkup";
 import type { checkupColumns } from "@orbit-types/checkup-form";
 import type { UpdateConditionInput } from "@orbit-types/condition";
+import { importStillSettling } from "@orbit-types/money-import-review";
 import type { RoutingChoice } from "@orbit-types/notification-routing";
 import type { FindingSummary } from "@orbit-types/finding";
 import type {
@@ -836,8 +837,10 @@ export function useImportBatch(id: string) {
   return useQuery({
     queryKey: ["money-import-batch", id],
     queryFn: () => fetchImportBatch(id),
-    refetchInterval: (query) =>
-      query.state.data?.batch.status === "running" ? RUNNING_IMPORT_REFRESH_MS : false,
+    refetchInterval: (query) => {
+      const batch = query.state.data?.batch;
+      return batch && importStillSettling(batch, new Date()) ? RUNNING_IMPORT_REFRESH_MS : false;
+    },
   });
 }
 

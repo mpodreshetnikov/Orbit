@@ -110,15 +110,16 @@ export function feedQueryForReviewPeriod(
     const from = parseDay(custom.from, "start");
     const to = parseDay(custom.to, "end");
     if (!from || !to) return null;
-    // Rebuilt from the parsed dates, not the typed text, so nothing typed reaches the URL as is.
-    return `preset=custom&from=${formatDay(from)}&to=${formatDay(to)}`;
+    // The feed takes the window's own instants, so its last day is whole there too; they are
+    // rebuilt from the parsed dates, so nothing typed reaches the URL as is.
+    const query = new URLSearchParams({
+      preset: "custom",
+      from: from.toISOString(),
+      to: to.toISOString(),
+    });
+    return query.toString();
   }
   return null;
-}
-
-function formatDay(date: Date): string {
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
 /** What an import's page leads with: still reading, landed, undone, or broken. */
@@ -137,4 +138,22 @@ export function importOutcome(status: MoneyImportBatchStatus): ImportOutcome {
   if (status === "failed") return "failed";
   if (status === "discarded") return "discarded";
   return "awaiting";
+}
+
+/** How long a batch the extension read may sit `pending` before it is applied on its own. */
+const AUTO_APPLY_GRACE_MS = 10 * 60 * 1000;
+
+/**
+ * Whether an import's page should keep asking for it. A batch still being read does, and so does a
+ * fresh extension batch that is `pending` for the moment between its last rows and being applied on
+ * its own; a file import waits for its owner instead, and an old pending batch has stopped moving.
+ */
+export function importStillSettling(
+  batch: Pick<MoneyImportBatch, "status" | "import_type" | "created_at">,
+  now: Date,
+): boolean {
+  if (batch.status === "running") return true;
+  if (batch.status !== "pending" || batch.import_type !== "web_export") return false;
+  const createdAt = new Date(batch.created_at).getTime();
+  return Number.isFinite(createdAt) && now.getTime() - createdAt < AUTO_APPLY_GRACE_MS;
 }

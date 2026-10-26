@@ -4,6 +4,7 @@ import {
   feedQueryForReviewPeriod,
   importOutcome,
   importReviewWindow,
+  importStillSettling,
   summarizeImportBatches,
 } from "./money-import-review";
 
@@ -67,9 +68,12 @@ describe("feedQueryForReviewPeriod", () => {
   it("points at the feed's matching window", () => {
     expect(feedQueryForReviewPeriod("week")).toBe("preset=7d");
     expect(feedQueryForReviewPeriod("month")).toBe("preset=30d");
-    expect(feedQueryForReviewPeriod("custom", { from: "2026-10-01", to: "2026-10-05" })).toBe(
-      "preset=custom&from=2026-10-01&to=2026-10-05",
+    const query = new URLSearchParams(
+      feedQueryForReviewPeriod("custom", { from: "2026-10-01", to: "2026-10-05" }) ?? "",
     );
+    expect(query.get("preset")).toBe("custom");
+    expect(query.get("from")).toBe(new Date(2026, 9, 1, 0, 0, 0, 0).toISOString());
+    expect(query.get("to")).toBe(new Date(2026, 9, 5, 23, 59, 59, 999).toISOString());
     expect(feedQueryForReviewPeriod("custom", { from: "2026-10-01" })).toBeNull();
     expect(feedQueryForReviewPeriod("all")).toBeNull();
   });
@@ -83,5 +87,45 @@ describe("importOutcome", () => {
     expect(importOutcome("rolled_back")).toBe("rolled_back");
     expect(importOutcome("failed")).toBe("failed");
     expect(importOutcome("discarded")).toBe("discarded");
+  });
+});
+
+describe("importStillSettling", () => {
+  const minutesAgo = (minutes: number) => new Date(now.getTime() - minutes * 60_000).toISOString();
+
+  it("follows a batch being read and a fresh extension batch about to apply on its own", () => {
+    expect(
+      importStillSettling(
+        { status: "running", import_type: "file", created_at: minutesAgo(60) },
+        now,
+      ),
+    ).toBe(true);
+    expect(
+      importStillSettling(
+        { status: "pending", import_type: "web_export", created_at: minutesAgo(1) },
+        now,
+      ),
+    ).toBe(true);
+  });
+
+  it("stops for a file import waiting on its owner, an old pending batch, and a finished one", () => {
+    expect(
+      importStillSettling(
+        { status: "pending", import_type: "file", created_at: minutesAgo(1) },
+        now,
+      ),
+    ).toBe(false);
+    expect(
+      importStillSettling(
+        { status: "pending", import_type: "web_export", created_at: minutesAgo(30) },
+        now,
+      ),
+    ).toBe(false);
+    expect(
+      importStillSettling(
+        { status: "completed", import_type: "web_export", created_at: minutesAgo(1) },
+        now,
+      ),
+    ).toBe(false);
   });
 });
