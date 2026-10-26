@@ -11,8 +11,17 @@ const records = vi.hoisted(() => ({
   getRecordFindings: vi.fn(),
   getRecordObservations: vi.fn(),
 }));
-const documents = vi.hoisted(() => ({ removeRecordDraft: vi.fn() }));
-const persons = vi.hoisted(() => ({ name: "Максим" as string | null }));
+const documents = vi.hoisted(() => ({
+  removeRecordDraft: vi.fn(),
+  getPendingCompletions: vi.fn(),
+  applyRecordProposals: vi.fn(),
+  dismissRecordProposals: vi.fn(),
+  signRecordPageLinks: vi.fn(),
+}));
+const persons = vi.hoisted(() => ({
+  name: "Максим" as string | null,
+  queued: [] as Array<{ id: string; title: string | null; status: string }>,
+}));
 
 vi.mock("../health/records", () => records);
 vi.mock("../health/documents", () => documents);
@@ -23,6 +32,7 @@ vi.mock("../supabase-user-client", () => ({
         eq: () => ({
           maybeSingle: async () => ({ data: persons.name ? { name: persons.name } : null }),
         }),
+        in: async () => ({ data: persons.queued, error: null }),
       }),
     }),
   })),
@@ -58,16 +68,30 @@ const ctx = {
 
 function register() {
   const tools = new Map<string, Registered>();
-  const resources = new Map<string, { uri: string; config: Record<string, unknown> }>();
+  const resources = new Map<
+    string,
+    {
+      uri: string;
+      config: Record<string, unknown>;
+      read: (uri: URL) => Promise<{ contents: Array<Record<string, unknown>> }>;
+    }
+  >();
   registerRecordDraftApp({
     registerTool: vi.fn((name: string, config: Record<string, unknown>, handler: Handler) => {
       tools.set(name, { config, handler });
       return {} as never;
     }),
-    registerResource: vi.fn((name: string, uri: string, config: Record<string, unknown>) => {
-      resources.set(name, { uri, config });
-      return {} as never;
-    }),
+    registerResource: vi.fn(
+      (
+        name: string,
+        uri: string,
+        config: Record<string, unknown>,
+        read: (uri: URL) => Promise<{ contents: Array<Record<string, unknown>> }>,
+      ) => {
+        resources.set(name, { uri, config, read });
+        return {} as never;
+      },
+    ),
   } as never);
   return { tools, resources };
 }
@@ -255,6 +279,22 @@ describe("buildDraftView", () => {
       { name: "Дефицит B12", status: "разрешён", evidence: "Витамин B12" },
     ]);
   });
+
+  it("asks to confirm proposals only for an approved record that has some", () => {
+    const build = (status: string, conditions: Array<Record<string, unknown>>) =>
+      buildDraftView({
+        record: { ...RECORD, status },
+        personName: null,
+        observations: [],
+        findings: [],
+        conditions,
+        reviewUrl: null,
+      }).has_proposals;
+
+    expect(build("structure_review", CONDITIONS)).toBe(false);
+    expect(build("active", CONDITIONS)).toBe(true);
+    expect(build("active", [CONDITIONS[0]])).toBe(false);
+  });
 });
 
 describe("registerRecordDraftApp", () => {
@@ -265,6 +305,8 @@ describe("registerRecordDraftApp", () => {
     records.getRecordObservations.mockResolvedValue(OBSERVATIONS);
     records.getRecordFindings.mockResolvedValue(FINDINGS);
     records.getRecordConditions.mockResolvedValue(CONDITIONS);
+    documents.getPendingCompletions.mockResolvedValue([]);
+    documents.signRecordPageLinks.mockResolvedValue([]);
   });
 
   it("links show_record_draft to the card and keeps decline away from the model", () => {
@@ -281,9 +323,57 @@ describe("registerRecordDraftApp", () => {
     expect(tools.get("show_record_draft")!.config.annotations).toMatchObject({
       readOnlyHint: true,
     });
-    expect(tools.get("decline_record_draft")!.config._meta).toEqual({
-      ui: { visibility: ["app"] },
+    for (const name of [
+      "decline_record_draft",
+      "confirm_record_proposals",
+      "dismiss_record_proposals",
+    ]) {
+      expect(tools.get(name)!.config._meta).toEqual({ ui: { visibility: ["app"] } });
+    }
+  });
+
+  it("asks the owner to confirm what was proposed for an approved record", async () => {
+    records.getMedicalRecord.mockResolvedValue({ ...RECORD, status: "active" });
+    documents.getPendingCompletions.mockResolvedValue([
+      { checkup_item_id: "k-1", title: "Витамин D", done_at: "2026-10-20", reason: "в бланке" },
+    ]);
+    const result = await register()
+      .tools.get("show_record_draft")!
+      .handler({ record_id: RECORD_ID }, ctx);
+
+    expect(result.content[0].text).toContain("1 checkup completion(s) awaiting confirmation");
+    expect(result.content[0].text).toContain("Nothing has changed on the chart until they confirm");
+    expect(result.structuredContent?.draft).toMatchObject({
+      has_proposals: true,
+      completions: [{ title: "Витамин D", done_at: "2026-10-20", reason: "в бланке" }],
     });
+  });
+
+  it("confirms and declines proposals only on an approved record", async () => {
+    const { tools } = register();
+    const confirm = tools.get("confirm_record_proposals")!.handler;
+    const dismiss = tools.get("dismiss_record_proposals")!.handler;
+
+    const refused = await confirm({ record_id: RECORD_ID }, ctx);
+    expect(refused.isError).toBe(true);
+    expect(documents.applyRecordProposals).not.toHaveBeenCalled();
+
+    records.getMedicalRecord.mockResolvedValue({ ...RECORD, status: "active" });
+    documents.applyRecordProposals.mockResolvedValue({
+      mentionsConfirmed: 2,
+      closuresLeftPending: 0,
+      checkupsCompleted: 8,
+    });
+    const confirmed = await confirm({ record_id: RECORD_ID }, ctx);
+    expect(confirmed.content[0].text).toContain("2 closure(s), 8 checkup(s) marked done");
+
+    documents.dismissRecordProposals.mockResolvedValue({
+      closuresDismissed: 1,
+      completionsDropped: 0,
+    });
+    const dismissed = await dismiss({ record_id: RECORD_ID }, ctx);
+    expect(dismissed.content[0].text).toContain("The record stays approved");
+    expect(dismissed.structuredContent).toMatchObject({ status: "active", closuresDismissed: 1 });
   });
 
   it("returns the draft view and tells the model to wait for the owner", async () => {
@@ -293,12 +383,57 @@ describe("registerRecordDraftApp", () => {
 
     expect(result.isError).toBeUndefined();
     expect(result.content[0].text).toContain('Showing the draft of "Общий анализ крови"');
-    expect(result.content[0].text).toContain("wait for them");
+    expect(result.content[0].text).toContain("posts a short message from them in the chat");
     expect(result.structuredContent?.draft).toMatchObject({
       record_id: RECORD_ID,
       person_name: "Максим",
       review_url: `https://orbit.test/health/records/${RECORD_ID}`,
     });
+  });
+
+  it("hands the card the document's pages, and lets the host load them from storage", async () => {
+    const page = {
+      name: "scan-1.jpg",
+      mime_type: "image/jpeg",
+      url: "https://orbit.test/storage/v1/object/sign/medical-attachments/p/r/1-scan-1.jpg?token=t",
+    };
+    documents.signRecordPageLinks.mockResolvedValue([page]);
+    const { tools, resources } = register();
+    const result = await tools.get("show_record_draft")!.handler({ record_id: RECORD_ID }, ctx);
+
+    expect(documents.signRecordPageLinks).toHaveBeenCalledWith(expect.anything(), RECORD_ID);
+    expect(result.structuredContent?.draft).toMatchObject({ pages: [page] });
+
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://orbit.test");
+    try {
+      const read = await resources
+        .get("orbit-record-draft")!
+        .read(new URL(RECORD_DRAFT_RESOURCE_URI));
+      expect(read.contents[0]._meta).toEqual({
+        ui: { csp: { resourceDomains: ["https://orbit.test"] } },
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("queues further drafts on the same card, leaving out ones already decided", async () => {
+    const second = "22222222-2222-4222-8222-222222222222";
+    const decided = "33333333-3333-4333-8333-333333333333";
+    persons.queued = [
+      { id: decided, title: "УЗИ", status: "active" },
+      { id: second, title: "Биохимия", status: "structure_review" },
+    ];
+    const result = await register()
+      .tools.get("show_record_draft")!
+      .handler({ record_id: RECORD_ID, then_record_ids: [second, decided, RECORD_ID] }, ctx);
+
+    expect(result.structuredContent?.queue).toEqual([
+      { record_id: RECORD_ID, title: "Общий анализ крови" },
+      { record_id: second, title: "Биохимия" },
+    ]);
+    expect(result.content[0].text).toContain('goes through 1 more draft(s): "Биохимия"');
+    persons.queued = [];
   });
 
   it("refuses a record that has not been ingested yet", async () => {
@@ -342,14 +477,57 @@ describe("registerRecordDraftApp", () => {
 });
 
 describe("RECORD_DRAFT_HTML", () => {
+  it("starts the model's turn with a chat message after a decision", () => {
+    // Model context alone does not start a turn, so each outcome also posts a line in the chat.
+    expect(RECORD_DRAFT_HTML).toContain('request("ui/message", { role: "user"');
+    for (const line of [
+      "Одобрил запись «",
+      "Отклонил запись «",
+      "Подтвердил сверку",
+      "Отклонил сверку: «",
+      "Добавил в расписание: ",
+    ]) {
+      expect(RECORD_DRAFT_HTML).toContain(line);
+    }
+  });
+
+  it("holds the chat message for a queue until the owner is through it", () => {
+    expect(RECORD_DRAFT_HTML).toContain("Разобрал записи в карточке: ");
+    expect(RECORD_DRAFT_HTML).toContain('if (!noteOutcome("approved")) tellChat(');
+    expect(RECORD_DRAFT_HTML).toContain('" из " + queue.length');
+  });
+
+  it("never strands a queue: a failed load can be retried and the last draft can always finish", () => {
+    expect(RECORD_DRAFT_HTML).toContain('"Повторить"');
+    expect(RECORD_DRAFT_HTML).toContain("if (failed && inQueue() && !queueDone)");
+    expect(RECORD_DRAFT_HTML).toContain(
+      "if (inQueue() && !queueDone) footer.appendChild(queueActions());",
+    );
+    expect(RECORD_DRAFT_HTML).toContain('kind: "already"');
+  });
+
+  it("keeps the queued ids when the card fetches its own draft", () => {
+    expect(RECORD_DRAFT_HTML).toContain("thenRecordIds = args.then_record_ids");
+    expect(RECORD_DRAFT_HTML).toContain("then_record_ids: thenRecordIds");
+  });
+
+  it("ships a script that parses", () => {
+    // The page is a template literal, so one wrong escape breaks the whole card with no other sign.
+    const start = RECORD_DRAFT_HTML.indexOf("<script>") + "<script>".length;
+    const script = RECORD_DRAFT_HTML.slice(start, RECORD_DRAFT_HTML.lastIndexOf("</script>"));
+    expect(() => new Function(script)).not.toThrow();
+  });
+
   it("never turns document text into markup", () => {
     expect(RECORD_DRAFT_HTML).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
   });
 
   it("approves through activate_medical_record and declines through the card-only tool", () => {
-    const calls = RECORD_DRAFT_HTML.match(/run\("(approve|decline)", "[a-z_]+"\)/g);
+    const calls = RECORD_DRAFT_HTML.match(/run\("(approve|decline|confirm|dismiss)", "[a-z_]+"\)/g);
     expect(calls).toEqual([
+      'run("confirm", "confirm_record_proposals")',
       'run("approve", "activate_medical_record")',
+      'run("dismiss", "dismiss_record_proposals")',
       'run("decline", "decline_record_draft")',
     ]);
   });

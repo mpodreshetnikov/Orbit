@@ -11,10 +11,22 @@ import {
   getIngestableRecord,
   getRecordExtractionIssues,
   isIngestableStatus,
+  proposeRecordReconciliation,
   signPageUploads,
+  suggestReconciliation,
   type PageUpload,
 } from "../health/documents";
-import { getRecordConditions, getRecordFindings, getRecordObservations } from "../health/records";
+import {
+  reviewReconciliationDecision,
+  type ReconciliationDecision,
+  type ReconciliationSuggestion,
+} from "../health/reconciliation-gate";
+import {
+  getMedicalRecord,
+  getRecordConditions,
+  getRecordFindings,
+  getRecordObservations,
+} from "../health/records";
 import { isoDateSchema, personSelectorSchema, uuidSchema } from "../schemas/common";
 import { invokeEdgeFunctionAsUser } from "../supabase-user-client";
 import { withPerson, withUserClient } from "../tool-context";
@@ -107,6 +119,50 @@ function formatUploads(uploads: PageUpload[]): string {
         `${index + 1}. ${upload.filename} (${upload.mime_type})\n   curl -sS -X PUT -H "Content-Type: ${upload.mime_type}" --data-binary @"<local path to ${upload.filename}>" "${upload.upload_url}"`,
     )
     .join("\n");
+}
+
+function formatSuggestion(item: ReconciliationSuggestion): string {
+  const id = item.kind === "condition" ? `condition_id ${item.id}` : `checkup_item_id ${item.id}`;
+  return `- ${item.kind}: ${item.label} -- ${item.reason} (${id})`;
+}
+
+const RECONCILE_YOURSELF =
+  "The server sees only words and dates, so also add anything else this document closes that you found yourself: get_ingest_candidates lists every condition, open finding and scheduled checkup with its id. A diagnosis the document establishes that the person does not have yet goes in extraction.conditions.";
+
+/** Why a submission that has not decided what the document closes is sent back, and what to do. */
+function reconciliationRefusal(
+  verdict: Exclude<ReturnType<typeof reviewReconciliationDecision>, { ok: true }>,
+  alsoDue: ReconciliationSuggestion[],
+): string {
+  const lines = [
+    "Not ingested: decide what this document closes first, in this same call, then send it again. Nothing was stored.",
+  ];
+  if (verdict.unruled.length > 0) {
+    lines.push(
+      verdict.missing === "decision"
+        ? "The server thinks this document may close:"
+        : "The server thinks this document may close these, and reconciliation does not rule on them:",
+      ...verdict.unruled.map(formatSuggestion),
+      "For each one: put it in reconciliation.conditions_to_resolve or reconciliation.checkups_to_complete, or in reconciliation.not_applicable with the reason it does not apply.",
+    );
+  } else {
+    lines.push(
+      verdict.missing === "decision"
+        ? "reconciliation is missing. The server found nothing this document obviously closes, but say so yourself."
+        : "reconciliation closes nothing and does not say that nothing applies.",
+    );
+  }
+  if (alsoDue.length > 0) {
+    lines.push(
+      "Also due in the period this document dates from (complete them if the document covers them):",
+      ...alsoDue.map(formatSuggestion),
+    );
+  }
+  lines.push(
+    RECONCILE_YOURSELF,
+    "When the document closes nothing, send reconciliation.nothing_to_reconcile: true.",
+  );
+  return lines.join("\n");
 }
 
 function formatRejections(label: string, rows: unknown): string[] {
@@ -202,7 +258,7 @@ export function registerDocumentTools(server: McpToolServer): void {
     {
       title: "Get what a document could close",
       description:
-        "List what a new document about this person could close: their conditions (with the condition_id a closure must cite), their open imaging findings, and their scheduled checkups (with the checkup_item_id a completion must cite). Call this before ingest_medical_document when the document may show something has resolved or a checkup was done.",
+        "List what a new document about this person could close: their conditions (with the condition_id a closure must cite), their open imaging findings, and their scheduled checkups (with the checkup_item_id a completion must cite). Call this before every ingest_medical_document: ingest refuses a submission that has not decided what the document closes, and the decision goes in that same call, not later.",
       inputSchema: z.object({ ...personSelectorSchema }),
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
@@ -236,8 +292,9 @@ export function registerDocumentTools(server: McpToolServer): void {
       description: [
         "Submit what you read from a record's uploaded pages. The server runs its own checks on it, the same ones the app's pipeline runs: every entity's source_anchor must appear verbatim in source_text; lab names are matched to the observation catalogue and values converted to canonical units; a condition closure is accepted only when this document's own in-range measurement supports it, and is left pending confirmation; a finding closure is accepted only when an asserted absence in this document covers it.",
         "Print names and units as written. Put a finding the document says is NOT there (e.g. 'конкременты не выявлены') in extraction.asserted_absences, never in findings.",
-        "Before submitting findings or absences, look up each finding type and body site with search_catalog_entries (catalogs finding_type and body_site). The server codes them from their labels, and a label no entry carries stays uncoded: it cannot be tracked over time, and uncoded findings at different sites merge into one history. When an entry is missing, add it first with upsert_catalog_entry, putting the document's wording in its Russian synonyms; when one exists under another wording, add that wording as a synonym. One finding per site.",
-        "The record moves to review, not to the chart. The reply lists what was stored, what was refused and why, observations the catalogue did not recognise (dropped at approval unless added with upsert_catalog_entry and the document re-ingested), and closures awaiting confirmation. Re-submitting replaces the previous submission for this record.",
+        "Before submitting findings or absences, look up each finding type and body site with search_catalog_entries (catalogs finding_type and body_site). The server codes them from their labels, and a label no entry carries stays uncoded: it cannot be tracked over time, and uncoded findings at different sites merge into one history. When entries are missing, add them first with create_catalog_entries (several in one call), putting the document's wording in their Russian synonyms; when one exists under another wording, add that wording with add_catalog_synonyms. One finding per site.",
+        "Every submission carries reconciliation, decided now and not after approval: the conditions this document resolves, the findings it settles and the checkups it completes (ids from get_ingest_candidates), the server's suggestions you rule out in not_applicable with a reason, or nothing_to_reconcile: true when it closes nothing. A submission without that decision, or that leaves a server suggestion unruled, is refused before anything is stored, and the refusal lists what the server thinks the document may close.",
+        "The record moves to review, not to the chart. The reply lists what was stored, what was refused and why, observations the catalogue did not recognise (dropped at approval unless added with create_catalog_entries or add_catalog_synonyms and the document re-ingested), and closures awaiting confirmation. Re-submitting replaces the previous submission for this record.",
       ].join(" "),
       inputSchema: z.object({
         record_id: uuidSchema,
@@ -294,9 +351,30 @@ export function registerDocumentTools(server: McpToolServer): void {
                 }),
               )
               .default([]),
+            not_applicable: z
+              .array(
+                z.object({
+                  id: uuidSchema.describe(
+                    "The condition_id or checkup_item_id of a suggestion this document does not close.",
+                  ),
+                  reason: z.string().min(1),
+                }),
+              )
+              .default([])
+              .describe(
+                "Suggestions the server made that you checked and that this document does not close, each with why.",
+              ),
+            nothing_to_reconcile: z
+              .boolean()
+              .optional()
+              .describe(
+                "true when you checked and this document closes nothing; required when every list above is empty.",
+              ),
           })
           .optional()
-          .describe("What this document shows has resolved or been done. Omit when nothing has."),
+          .describe(
+            "Required: what this document shows has resolved or been done, decided in this call. Send nothing_to_reconcile: true when nothing has; a submission without reconciliation is refused.",
+          ),
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
@@ -327,12 +405,39 @@ export function registerDocumentTools(server: McpToolServer): void {
         );
       }
 
+      const decision = args.reconciliation as ReconciliationDecision | undefined;
+      const classification = args.classification as { record_date?: unknown };
+      const extraction = args.extraction as { observations?: Array<{ obs_name_text?: unknown }> };
+      const context = await suggestReconciliation(supabase, record.person_id, {
+        recordDate:
+          typeof classification.record_date === "string" ? classification.record_date : null,
+        sourceText: args.source_text,
+        observationLabels: (extraction.observations ?? []).flatMap((row) =>
+          typeof row.obs_name_text === "string" ? [row.obs_name_text] : [],
+        ),
+      });
+      const verdict = reviewReconciliationDecision(context, decision);
+      if (!verdict.ok) {
+        return fail(reconciliationRefusal(verdict, context.alsoDue), {
+          record_id: record.id,
+          suggestions: verdict.unruled,
+          also_due: context.alsoDue,
+        });
+      }
+
+      // The rulings and the flag are this tool's own; the edge function takes the closures.
+      const ruledOut = decision?.not_applicable ?? [];
+      const reconciliation = {
+        conditions_to_resolve: decision?.conditions_to_resolve ?? [],
+        findings_to_resolve: decision?.findings_to_resolve ?? [],
+        checkups_to_complete: decision?.checkups_to_complete ?? [],
+      };
       const { status, payload } = await invokeEdgeFunctionAsUser(auth, "health-ingest", {
         record_id: record.id,
         source_text: args.source_text,
         classification: args.classification,
         extraction: args.extraction,
-        reconciliation: args.reconciliation,
+        reconciliation,
       });
       const result = (payload && typeof payload === "object" ? payload : {}) as {
         success?: boolean;
@@ -358,11 +463,16 @@ export function registerDocumentTools(server: McpToolServer): void {
 
       const lines = [
         `Ingested record ${record.id}; it is now in review, not on the chart.`,
+        ...(ruledOut.length > 0
+          ? [
+              `Ruled out by you: ${ruledOut.map((item) => `${String(item.id)} (${String(item.reason)})`).join("; ")}.`,
+            ]
+          : []),
         `Stored ${observations.length} observation(s), ${findings.length} finding(s), ${conditions.length} diagnosis mention(s).`,
       ];
       if (unmatched.length > 0) {
         lines.push(
-          `Not recognised by the observation catalogue (dropped at approval unless added with upsert_catalog_entry and re-ingested):`,
+          `Not recognised by the observation catalogue (dropped at approval unless added with create_catalog_entries, all of them in one call, or given as a wording to an existing entry with add_catalog_synonyms, and re-ingested):`,
           ...unmatched.map((row) =>
             `- ${String(row.obs_name)} ${String(row.value_text ?? "")} ${String(row.unit ?? "")}`.trimEnd(),
           ),
@@ -370,7 +480,7 @@ export function registerDocumentTools(server: McpToolServer): void {
       }
       if (uncoded.length > 0) {
         lines.push(
-          `Findings the catalogues did not recognise (add the finding type or body site with upsert_catalog_entry, with this wording as a synonym, and re-ingest; uncoded, they cannot be tracked over time):`,
+          `Findings the catalogues did not recognise (add the finding type or body site with create_catalog_entries, or this wording to an existing one with add_catalog_synonyms, and re-ingest; uncoded, they cannot be tracked over time):`,
           ...uncoded.map(
             (row) =>
               `- ${String(row.finding_type_text)}${row.finding_code ? "" : " (no finding type)"}${row.body_site_text ? ` at ${String(row.body_site_text)}` : ""}${row.site_code ? "" : " (no body site)"}`,
@@ -446,6 +556,119 @@ export function registerDocumentTools(server: McpToolServer): void {
         condition_record_id: args.condition_record_id,
         review_decision: "dismissed",
       });
+    }, WRITE_SCOPE),
+  );
+
+  server.registerTool(
+    "propose_reconciliation",
+    {
+      title: "Propose what an approved record closes",
+      description:
+        "For a record that is already approved (active): propose the conditions it ends and the checkups it completes, when that was missed at ingest. Nothing changes on the chart until the owner confirms on the record's card: call show_record_draft right after, and do not report anything as closed before they confirm. Get the condition_id and checkup_item_id values from get_ingest_candidates. For a record still in review, put this in ingest_medical_document's reconciliation instead.",
+      inputSchema: z.object({
+        record_id: uuidSchema,
+        conditions_to_resolve: z
+          .array(
+            z.object({
+              condition_id: uuidSchema,
+              status: z
+                .enum(["resolved", "history"])
+                .default("resolved")
+                .describe("resolved: it ended. history: past, still worth knowing."),
+              source_anchor: z
+                .string()
+                .min(1)
+                .describe("A short snippet copied verbatim from the record's text that shows it."),
+              supporting_obs_code: z
+                .string()
+                .nullable()
+                .optional()
+                .describe(
+                  "The catalogue code of the lab value on this record that decides it, if one does; it must be in range.",
+                ),
+            }),
+          )
+          .default([]),
+        checkups_to_complete: z
+          .array(
+            z.object({
+              checkup_item_id: uuidSchema,
+              done_at: isoDateSchema
+                .optional()
+                .describe("When it was done; defaults to the record's date."),
+              reason: z.string().min(1).describe("What on the record shows it was done."),
+            }),
+          )
+          .default([]),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    withUserClient<{
+      record_id: string;
+      conditions_to_resolve: Array<{
+        condition_id: string;
+        status: "resolved" | "history";
+        source_anchor: string;
+        supporting_obs_code?: string | null;
+      }>;
+      checkups_to_complete: Array<{ checkup_item_id: string; done_at?: string; reason: string }>;
+    }>(async (supabase, args) => {
+      const conditions = args.conditions_to_resolve ?? [];
+      const checkups = args.checkups_to_complete ?? [];
+      if (conditions.length === 0 && checkups.length === 0) {
+        return fail("Nothing proposed: give conditions_to_resolve, checkups_to_complete, or both.");
+      }
+      const record = await getMedicalRecord(supabase, args.record_id);
+      if (!record) return fail(`No medical record with id ${args.record_id}.`);
+      if (record.status !== "active") {
+        return fail(
+          `Record ${args.record_id} is ${String(record.status)}; propose_reconciliation is for an approved record. A record in review takes these in ingest_medical_document's reconciliation.`,
+        );
+      }
+      const recordDate = record.record_date ? String(record.record_date).slice(0, 10) : null;
+      if (!recordDate && checkups.some((item) => !item.done_at)) {
+        return fail("The record has no date, so give done_at for every checkup.");
+      }
+
+      const outcome = await proposeRecordReconciliation(
+        supabase,
+        {
+          id: String(record.id),
+          person_id: String(record.person_id),
+          record_date: recordDate,
+          ocr_text: (record.ocr_text as string | null) ?? null,
+        },
+        {
+          conditions: conditions.map((item) => ({
+            condition_id: item.condition_id,
+            status: item.status ?? "resolved",
+            source_anchor: item.source_anchor,
+            supporting_obs_code: item.supporting_obs_code ?? null,
+          })),
+          checkups: checkups.map((item) => ({
+            checkup_item_id: item.checkup_item_id,
+            done_at: item.done_at ?? (recordDate as string),
+            reason: item.reason,
+          })),
+        },
+      );
+
+      const proposed = outcome.proposedClosures + outcome.proposedCompletions;
+      const lines = [
+        `Proposed for "${String(record.title)}": ${outcome.proposedClosures} closure(s), ${outcome.proposedCompletions} checkup completion(s).`,
+      ];
+      if (outcome.refused.length > 0) {
+        lines.push(
+          `Refused ${outcome.refused.length}:`,
+          ...outcome.refused.map((item) => `- ${item.id}: ${item.reason}`),
+        );
+      }
+      lines.push(
+        proposed > 0
+          ? "Nothing has changed on the chart yet. Call show_record_draft now: the owner confirms or declines these on the card."
+          : "Nothing was proposed, so there is nothing to show.",
+      );
+      return ok(lines.join("\n"), { record_id: String(record.id), ...outcome });
     }, WRITE_SCOPE),
   );
 

@@ -1,5 +1,6 @@
 import { createMcpHandler, withMcpAuth } from "mcp-handler";
 import { PROTECTED_RESOURCE_METADATA_PATH, isMcpServerEnabled } from "@/lib/mcp/config";
+import { registerCheckupProposalApp } from "@/lib/mcp/apps/checkup-proposal";
 import { registerAppProbe } from "@/lib/mcp/apps/probe";
 import { registerRecordDraftApp } from "@/lib/mcp/apps/record-draft";
 import { registerHealthTools } from "@/lib/mcp/tools";
@@ -26,6 +27,7 @@ const handler = createMcpHandler(
     registerHealthTools(server);
     registerAppProbe(server);
     registerRecordDraftApp(server);
+    registerCheckupProposalApp(server);
   },
   {
     serverInfo: { name: "orbit-health", version: "1.0.0" },
@@ -34,7 +36,7 @@ const handler = createMcpHandler(
       "Most tools are scoped to a person (family members and pets are tracked separately).",
       "Call list_persons first when you do not know which person a request refers to, and ask the user rather than guessing.",
       "Two different things are called measurements here: `measurements` are manually recorded body metrics (weight, height, circumferences), while observations are lab values extracted from uploaded medical documents. Pick the right one for the question.",
-      "To bring in a medical document you have read yourself: create_medical_record, upload its pages, get_ingest_candidates when it may close something, ingest_medical_document, then show_record_draft so the user approves or declines the draft on its card (activate_medical_record only when they agree in words instead).",
+      "To bring in a medical document you have read yourself: create_medical_record, upload its pages, get_ingest_candidates, ingest_medical_document with its reconciliation decided in the same call, then show_record_draft so the user approves or declines the draft on its card (activate_medical_record only when they agree in words instead). When an approved record turns out to close a condition or complete a checkup, propose_reconciliation, then show_record_draft so the user confirms it on the card. To schedule a follow-up a document asks for, propose_checkup; the user adds it from its card.",
     ].join(" "),
   },
 );

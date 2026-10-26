@@ -1,7 +1,7 @@
 // deno-lint-ignore-file require-await
 import { assertEquals } from "std/assert/assert-equals";
 import type { EdgeTelemetry } from "../_shared/observability.ts";
-import { runHealthStructureService } from "./service.ts";
+import { inDocumentOrder, runHealthStructureService } from "./service.ts";
 import type { HealthStructureRepository } from "./repository.ts";
 import { emptyLlmUsage, type LlmUsage } from "../_shared/llm-usage.ts";
 import type { StructuredDataWithEntities, StructuredParseOutcome } from "./types.ts";
@@ -1012,3 +1012,11 @@ Deno.test(
     assertEquals(written, [[]]);
   },
 );
+
+Deno.test("rows are stamped a millisecond apart in the printed order", () => {
+  const rows = inDocumentOrder([{ obs_name: "WBC" }, { obs_name: "RBC" }], Date.UTC(2026, 9, 26));
+  assertEquals(rows, [
+    { obs_name: "WBC", created_at: "2026-10-26T00:00:00.000Z" },
+    { obs_name: "RBC", created_at: "2026-10-26T00:00:00.001Z" },
+  ]);
+});

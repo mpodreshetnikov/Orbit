@@ -23,9 +23,12 @@ const documents = vi.hoisted(() => ({
   getIngestableRecord: vi.fn(),
   getRecordExtractionIssues: vi.fn(),
   isIngestableStatus: vi.fn((status: string) => status !== "active"),
+  proposeRecordReconciliation: vi.fn(),
   signPageUploads: vi.fn(),
+  suggestReconciliation: vi.fn(),
 }));
 const records = vi.hoisted(() => ({
+  getMedicalRecord: vi.fn(),
   getRecordConditions: vi.fn(),
   getRecordFindings: vi.fn(),
   getRecordObservations: vi.fn(),
@@ -94,6 +97,20 @@ const SUBMISSION = {
     keywords: [],
   },
   extraction: { observations: [], findings: [], conditions: [], asserted_absences: [] },
+  reconciliation: { nothing_to_reconcile: true },
+};
+
+const B12_CONDITION = {
+  kind: "condition",
+  id: "33333333-3333-3333-3333-333333333333",
+  label: "Недостаточность витамина B12 [E53.8] (active)",
+  reason: "this document measures vitamin B12, which decides it",
+};
+const ULTRASOUND = {
+  kind: "checkup",
+  id: "44444444-4444-4444-4444-444444444444",
+  label: "УЗИ брюшной полости (imaging), due 2026-03-01",
+  reason: "due in the period this document dates from",
 };
 
 async function handlers(): Promise<Map<string, Handler>> {
@@ -113,6 +130,7 @@ beforeEach(() => {
   documents.getIngestableRecord.mockResolvedValue(RECORD);
   documents.findMissingPages.mockResolvedValue([]);
   documents.getRecordExtractionIssues.mockResolvedValue([]);
+  documents.suggestReconciliation.mockResolvedValue({ suggestions: [], alsoDue: [] });
   records.getRecordObservations.mockResolvedValue([]);
   records.getRecordFindings.mockResolvedValue([]);
   records.getRecordConditions.mockResolvedValue([]);
@@ -162,6 +180,96 @@ describe("ingest_medical_document", () => {
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("is active");
     expect(userClient.invokeEdgeFunctionAsUser).not.toHaveBeenCalled();
+  });
+
+  it("refuses a submission that has not decided what the document closes, storing nothing", async () => {
+    documents.suggestReconciliation.mockResolvedValue({
+      suggestions: [B12_CONDITION],
+      alsoDue: [ULTRASOUND],
+    });
+    const { reconciliation: _omitted, ...undecided } = SUBMISSION;
+    void _omitted;
+    const result = await (await handlers()).get("ingest_medical_document")!(undecided, ctx);
+    const text = result.content[0].text;
+
+    expect(result.isError).toBe(true);
+    expect(text).toContain("Not ingested: decide what this document closes first");
+    expect(text).toContain(`condition_id ${B12_CONDITION.id}`);
+    expect(text).toContain(`checkup_item_id ${ULTRASOUND.id}`);
+    expect(text).toContain("nothing_to_reconcile: true");
+    expect(text).toContain("extraction.conditions");
+    expect(userClient.invokeEdgeFunctionAsUser).not.toHaveBeenCalled();
+    expect(documents.suggestReconciliation).toHaveBeenCalledWith(expect.anything(), "p-1", {
+      recordDate: "2025-10-27",
+      sourceText: SUBMISSION.source_text,
+      observationLabels: [],
+    });
+  });
+
+  it("refuses the flag when it leaves a suggestion unruled", async () => {
+    documents.suggestReconciliation.mockResolvedValue({
+      suggestions: [B12_CONDITION],
+      alsoDue: [],
+    });
+    const result = await (await handlers()).get("ingest_medical_document")!(SUBMISSION, ctx);
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("reconciliation does not rule on them");
+    expect(userClient.invokeEdgeFunctionAsUser).not.toHaveBeenCalled();
+  });
+
+  it("refuses an empty decision that does not say nothing applies", async () => {
+    const result = await (await handlers()).get("ingest_medical_document")!(
+      { ...SUBMISSION, reconciliation: {} },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("does not say that nothing applies");
+    expect(userClient.invokeEdgeFunctionAsUser).not.toHaveBeenCalled();
+  });
+
+  it("passes the closures on and keeps its own rulings out of the edge call", async () => {
+    documents.suggestReconciliation.mockResolvedValue({
+      suggestions: [B12_CONDITION],
+      alsoDue: [],
+    });
+    userClient.invokeEdgeFunctionAsUser.mockResolvedValue({
+      status: 200,
+      payload: { success: true },
+    });
+    const closure = {
+      condition_id: B12_CONDITION.id,
+      supporting_obs_code: "vitamin_b12",
+      reason: "B12 704 in range",
+      source_anchor: "Витамин В12 704",
+    };
+    const result = await (await handlers()).get("ingest_medical_document")!(
+      {
+        ...SUBMISSION,
+        reconciliation: {
+          conditions_to_resolve: [closure],
+          not_applicable: [{ id: ULTRASOUND.id, reason: "a lab cannot complete an ultrasound" }],
+        },
+      },
+      ctx,
+    );
+
+    expect(result.isError).toBeUndefined();
+    expect(userClient.invokeEdgeFunctionAsUser).toHaveBeenCalledWith(
+      expect.anything(),
+      "health-ingest",
+      expect.objectContaining({
+        reconciliation: {
+          conditions_to_resolve: [closure],
+          findings_to_resolve: [],
+          checkups_to_complete: [],
+        },
+      }),
+    );
+    expect(result.content[0].text).toContain(
+      `Ruled out by you: ${ULTRASOUND.id} (a lab cannot complete an ultrasound).`,
+    );
   });
 
   it("hands out fresh links for pages that never arrived, without calling the server", async () => {
@@ -342,5 +450,81 @@ describe("dismiss_condition_closure", () => {
       ctx,
     );
     expect(result.isError).toBe(true);
+  });
+});
+
+describe("propose_reconciliation", () => {
+  const ACTIVE = {
+    id: RECORD_ID,
+    person_id: "p-1",
+    title: "Витамины",
+    status: "active",
+    record_date: "2026-03-06",
+    ocr_text: "Витамин B12 704 пг/мл",
+  };
+
+  it("is only for an approved record", async () => {
+    records.getMedicalRecord.mockResolvedValue({ ...ACTIVE, status: "structure_review" });
+    const result = await (await handlers()).get("propose_reconciliation")!(
+      { record_id: RECORD_ID, checkups_to_complete: [{ checkup_item_id: "k", reason: "r" }] },
+      ctx,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("ingest_medical_document's reconciliation");
+    expect(documents.proposeRecordReconciliation).not.toHaveBeenCalled();
+  });
+
+  it("dates a completion by the record and says nothing changes before the owner confirms", async () => {
+    records.getMedicalRecord.mockResolvedValue(ACTIVE);
+    documents.proposeRecordReconciliation.mockResolvedValue({
+      proposedClosures: 1,
+      proposedCompletions: 1,
+      refused: [{ id: "k-2", reason: "Витамин D was already done on 2026-03-10" }],
+    });
+    const result = await (await handlers()).get("propose_reconciliation")!(
+      {
+        record_id: RECORD_ID,
+        conditions_to_resolve: [
+          {
+            condition_id: B12_CONDITION.id,
+            source_anchor: "Витамин B12 704",
+            supporting_obs_code: "vitamin_b12",
+          },
+        ],
+        checkups_to_complete: [
+          { checkup_item_id: "k-1", reason: "B12 in the report" },
+          { checkup_item_id: "k-2", done_at: "2026-03-07", reason: "D in the report" },
+        ],
+      },
+      ctx,
+    );
+
+    expect(documents.proposeRecordReconciliation.mock.calls[0][2]).toEqual({
+      conditions: [
+        {
+          condition_id: B12_CONDITION.id,
+          status: "resolved",
+          source_anchor: "Витамин B12 704",
+          supporting_obs_code: "vitamin_b12",
+        },
+      ],
+      checkups: [
+        { checkup_item_id: "k-1", done_at: "2026-03-06", reason: "B12 in the report" },
+        { checkup_item_id: "k-2", done_at: "2026-03-07", reason: "D in the report" },
+      ],
+    });
+    const text = result.content[0].text;
+    expect(text).toContain("1 closure(s), 1 checkup completion(s)");
+    expect(text).toContain("k-2: Витамин D was already done on 2026-03-10");
+    expect(text).toContain("Call show_record_draft now");
+  });
+
+  it("refuses an empty proposal before loading anything", async () => {
+    const result = await (await handlers()).get("propose_reconciliation")!(
+      { record_id: RECORD_ID },
+      ctx,
+    );
+    expect(result.isError).toBe(true);
+    expect(records.getMedicalRecord).not.toHaveBeenCalled();
   });
 });

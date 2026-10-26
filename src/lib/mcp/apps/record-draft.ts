@@ -1,13 +1,23 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/types/database";
 import { RECORD_TYPE_LABELS, type RecordType } from "@/types/medical-record";
-import { removeRecordDraft } from "../health/documents";
+import {
+  applyRecordProposals,
+  dismissRecordProposals,
+  getPendingCompletions,
+  removeRecordDraft,
+  signRecordPageLinks,
+  type RecordPageLink,
+} from "../health/documents";
 import {
   getMedicalRecord,
   getRecordConditions,
   getRecordFindings,
   getRecordObservations,
 } from "../health/records";
+import { getSupabaseUrl } from "../config";
 import { uuidSchema } from "../schemas/common";
 import { withUserClient } from "../tool-context";
 import { fail, ok } from "../tool-result";
@@ -73,6 +83,11 @@ export interface DraftClosure {
   status: string;
   evidence: string | null;
 }
+export interface DraftCompletion {
+  title: string;
+  done_at: string;
+  reason: string;
+}
 export interface DraftView {
   record_id: string;
   status: string;
@@ -82,10 +97,18 @@ export interface DraftView {
   person_name: string | null;
   summary: string | null;
   review_url: string | null;
+  /** The document's own pages, with an hour-long link to each file. */
+  pages: RecordPageLink[];
   observations: DraftObservation[];
   findings: DraftFinding[];
   conditions: DraftCondition[];
   closures: DraftClosure[];
+  completions: DraftCompletion[];
+  /**
+   * An approved record with closures or completions proposed after approval
+   * (`propose_reconciliation`): the card asks the owner to confirm those, not to approve the record.
+   */
+  has_proposals: boolean;
 }
 
 function text(value: unknown): string | null {
@@ -111,6 +134,8 @@ export function buildDraftView(input: {
   observations: Array<Record<string, unknown>>;
   findings: Array<Record<string, unknown>>;
   conditions: Array<Record<string, unknown>>;
+  completions?: Array<{ title: string; done_at: string; reason: string }>;
+  pages?: RecordPageLink[];
   reviewUrl: string | null;
 }): DraftView {
   const { record } = input;
@@ -180,6 +205,10 @@ export function buildDraftView(input: {
     });
   }
 
+  const completions = (input.completions ?? []).map(
+    (row): DraftCompletion => ({ title: row.title, done_at: row.done_at, reason: row.reason }),
+  );
+
   return {
     record_id: String(record.id),
     status: String(record.status ?? ""),
@@ -189,15 +218,61 @@ export function buildDraftView(input: {
     person_name: input.personName,
     summary: text(record.llm_summary) ?? text(record.notes),
     review_url: input.reviewUrl,
+    pages: input.pages ?? [],
     observations,
     findings,
     conditions,
     closures,
+    completions,
+    has_proposals:
+      String(record.status) === "active" && (closures.length > 0 || completions.length > 0),
   };
 }
 
 function reviewUrl(auth: McpAuthExtra, recordId: string): string | null {
   return auth.appOrigin ? `${auth.appOrigin}/health/records/${recordId}` : null;
+}
+
+/**
+ * The drafts a queued card goes through: this one first, then each listed record that is still a
+ * draft and readable by the caller, in the order given. One already decided is left out rather
+ * than shown again.
+ */
+async function loadDraftQueue(
+  supabase: SupabaseClient<Database>,
+  first: DraftView,
+  more: string[],
+): Promise<Array<{ record_id: string; title: string }>> {
+  const head = { record_id: first.record_id, title: first.title };
+  const ids = [...new Set(more)].filter((id) => id !== first.record_id);
+  if (ids.length === 0) return [head];
+  const { data, error } = await supabase
+    .from("medical_records")
+    .select("id, title, status")
+    .in("id", ids);
+  if (error) throw new Error(`Failed to load the queued drafts: ${error.message}`);
+  const rows = new Map(
+    ((data ?? []) as Array<{ id: string; title: string | null; status: string }>).map((row) => [
+      row.id,
+      row,
+    ]),
+  );
+  const rest = ids.flatMap((id) => {
+    const row = rows.get(id);
+    return row && row.status === "structure_review"
+      ? [{ record_id: id, title: row.title ?? "Без названия" }]
+      : [];
+  });
+  return [head, ...rest];
+}
+
+/** Where signed links to a record's files point: the Supabase URL the server signs them with. */
+function storageOrigins(): string[] {
+  try {
+    return [new URL(getSupabaseUrl()).origin];
+  } catch {
+    return [];
+  }
 }
 
 export function registerRecordDraftApp(
@@ -212,7 +287,16 @@ export function registerRecordDraftApp(
       mimeType: MCP_APP_MIME_TYPE,
     },
     async (uri) => ({
-      contents: [{ uri: uri.href, mimeType: MCP_APP_MIME_TYPE, text: RECORD_DRAFT_HTML }],
+      contents: [
+        {
+          uri: uri.href,
+          mimeType: MCP_APP_MIME_TYPE,
+          text: RECORD_DRAFT_HTML,
+          // The page thumbnails load from storage's signed links, which the host's sandbox blocks
+          // unless the origin is declared.
+          _meta: { ui: { csp: { resourceDomains: storageOrigins() } } },
+        },
+      ],
     }),
   );
 
@@ -221,56 +305,82 @@ export function registerRecordDraftApp(
     {
       title: "Show record draft",
       description:
-        "Show the owner an ingested record's draft as a card in the chat: what it will put on the chart (lab values, findings, diagnoses, closures), with Approve and Decline buttons the owner presses on the card. Call it right after ingest_medical_document instead of asking for approval in words. Approve on the card does what activate_medical_record does; Decline removes the draft (restorable in the app). Do not call activate_medical_record yourself after showing the card unless the owner asks you to in words.",
-      inputSchema: z.object({ record_id: uuidSchema }),
+        "Show the owner an ingested record's draft as a card in the chat: what it will put on the chart (lab values, findings, diagnoses, closures), with Approve and Decline buttons the owner presses on the card. Call it right after ingest_medical_document instead of asking for approval in words. Approve on the card does what activate_medical_record does; Decline removes the draft (restorable in the app). Do not call activate_medical_record yourself after showing the card unless the owner asks you to in words. After propose_reconciliation, call it for that approved record: the card then asks the owner to confirm or decline the proposed closures and checkup completions.",
+      inputSchema: z.object({
+        record_id: uuidSchema,
+        then_record_ids: z
+          .array(uuidSchema)
+          .max(19)
+          .optional()
+          .describe(
+            "More drafts to go through on the same card after this one, in order. Use it when several documents were ingested together: the owner decides them one after another, and you get one chat message when they are done instead of one per draft.",
+          ),
+      }),
       annotations: { readOnlyHint: true, openWorldHint: false },
       _meta: {
         ui: { resourceUri: RECORD_DRAFT_RESOURCE_URI },
         "ui/resourceUri": RECORD_DRAFT_RESOURCE_URI,
       },
     },
-    withUserClient<{ record_id: string }>(async (supabase, args, auth) => {
-      const record = await getMedicalRecord(supabase, args.record_id);
-      if (!record) return fail(`No medical record with id ${args.record_id}.`);
-      const status = String(record.status);
-      if (status !== "structure_review" && status !== "active" && status !== "removed") {
-        return fail(
-          `Record ${args.record_id} is ${status}; it has nothing to show yet. Call ingest_medical_document first.`,
+    withUserClient<{ record_id: string; then_record_ids?: string[] }>(
+      async (supabase, args, auth) => {
+        const record = await getMedicalRecord(supabase, args.record_id);
+        if (!record) return fail(`No medical record with id ${args.record_id}.`);
+        const status = String(record.status);
+        if (status !== "structure_review" && status !== "active" && status !== "removed") {
+          return fail(
+            `Record ${args.record_id} is ${status}; it has nothing to show yet. Call ingest_medical_document first.`,
+          );
+        }
+
+        const [observations, findings, conditions, completions, person, pages] = await Promise.all([
+          getRecordObservations(supabase, args.record_id),
+          getRecordFindings(supabase, args.record_id),
+          getRecordConditions(supabase, args.record_id),
+          status === "removed" ? [] : getPendingCompletions(supabase, args.record_id),
+          supabase.from("persons").select("name").eq("id", String(record.person_id)).maybeSingle(),
+          signRecordPageLinks(supabase, args.record_id),
+        ]);
+        const view = buildDraftView({
+          record,
+          personName: (person.data as { name?: string } | null)?.name ?? null,
+          observations,
+          findings,
+          conditions,
+          completions,
+          pages,
+          reviewUrl: reviewUrl(auth, args.record_id),
+        });
+
+        const counts = `${view.observations.length} lab value(s), ${view.findings.length} finding(s), ${view.conditions.length} diagnosis mention(s), ${view.closures.length} closure(s) awaiting confirmation, ${view.completions.length} checkup completion(s) awaiting confirmation`;
+        const next =
+          status === "structure_review"
+            ? "The owner approves or declines it on the card; end your turn and wait: when they press a button the card posts a short message from them in the chat, and the outcome is in your context. If the card does not show, give them the review link instead."
+            : view.has_proposals
+              ? "It is approved; the owner confirms or declines the proposed closures and completions on the card. Nothing has changed on the chart until they confirm; end your turn and wait: when they press a button the card posts a short message from them in the chat, and the outcome is in your context."
+              : status === "active"
+                ? "It is already approved."
+                : "It was declined and set aside.";
+        const queue = await loadDraftQueue(supabase, view, args.then_record_ids ?? []);
+        return ok(
+          [
+            `Showing the draft of "${view.title}" (${counts}). ${next}`,
+            queue.length > 1
+              ? `The card then goes through ${queue.length - 1} more draft(s): ${queue
+                  .slice(1)
+                  .map((item) => `"${item.title}"`)
+                  .join(
+                    ", ",
+                  )}. You get one message from the owner when they have been through them.`
+              : null,
+            view.review_url ? `Review link: ${view.review_url}` : null,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+          queue.length > 1 ? { draft: view, queue } : { draft: view },
         );
-      }
-
-      const [observations, findings, conditions, person] = await Promise.all([
-        getRecordObservations(supabase, args.record_id),
-        getRecordFindings(supabase, args.record_id),
-        getRecordConditions(supabase, args.record_id),
-        supabase.from("persons").select("name").eq("id", String(record.person_id)).maybeSingle(),
-      ]);
-      const view = buildDraftView({
-        record,
-        personName: (person.data as { name?: string } | null)?.name ?? null,
-        observations,
-        findings,
-        conditions,
-        reviewUrl: reviewUrl(auth, args.record_id),
-      });
-
-      const counts = `${view.observations.length} lab value(s), ${view.findings.length} finding(s), ${view.conditions.length} diagnosis mention(s), ${view.closures.length} closure(s) awaiting confirmation`;
-      const next =
-        status === "structure_review"
-          ? "The owner approves or declines it on the card; wait for them. If the card does not show, give them the review link instead."
-          : status === "active"
-            ? "It is already approved."
-            : "It was declined and set aside.";
-      return ok(
-        [
-          `Showing the draft of "${view.title}" (${counts}). ${next}`,
-          view.review_url ? `Review link: ${view.review_url}` : null,
-        ]
-          .filter(Boolean)
-          .join("\n"),
-        { draft: view },
-      );
-    }),
+      },
+    ),
   );
 
   server.registerTool(
@@ -298,6 +408,62 @@ export function registerRecordDraftApp(
           record_id: args.record_id,
           status: "removed",
         },
+      );
+    }, WRITE_SCOPE),
+  );
+  server.registerTool(
+    "confirm_record_proposals",
+    {
+      title: "Confirm proposed closures",
+      description:
+        "Used by the record draft card's Confirm button on an approved record: the closures and checkup completions proposed for it reach the chart.",
+      inputSchema: z.object({ record_id: uuidSchema }),
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+      _meta: { ui: { visibility: ["app"] } },
+    },
+    withUserClient<{ record_id: string }>(async (supabase, args) => {
+      const record = await getMedicalRecord(supabase, args.record_id);
+      if (!record) return fail(`No medical record with id ${args.record_id}.`);
+      if (record.status !== "active") {
+        return fail(
+          `Record ${args.record_id} is ${String(record.status)}; only an approved record's proposals are confirmed here.`,
+        );
+      }
+      const outcome = await applyRecordProposals(supabase, args.record_id);
+      const lines = [
+        `Confirmed on "${String(record.title)}": ${outcome.mentionsConfirmed} closure(s), ${outcome.checkupsCompleted} checkup(s) marked done.`,
+      ];
+      if (outcome.closuresLeftPending > 0) {
+        lines.push(
+          `${outcome.closuresLeftPending} closure(s) left awaiting confirmation: the measurement they cite is no longer in range on this record.`,
+        );
+      }
+      return ok(lines.join("\n"), { record_id: args.record_id, status: "active", ...outcome });
+    }, WRITE_SCOPE),
+  );
+
+  server.registerTool(
+    "dismiss_record_proposals",
+    {
+      title: "Decline proposed closures",
+      description:
+        "Used by the record draft card's Decline button on an approved record: the closures and checkup completions proposed for it are turned down, and the record itself stays approved.",
+      inputSchema: z.object({ record_id: uuidSchema }),
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+      _meta: { ui: { visibility: ["app"] } },
+    },
+    withUserClient<{ record_id: string }>(async (supabase, args) => {
+      const record = await getMedicalRecord(supabase, args.record_id);
+      if (!record) return fail(`No medical record with id ${args.record_id}.`);
+      if (record.status !== "active") {
+        return fail(
+          `Record ${args.record_id} is ${String(record.status)}; only an approved record's proposals are declined here.`,
+        );
+      }
+      const outcome = await dismissRecordProposals(supabase, args.record_id);
+      return ok(
+        `Declined on "${String(record.title)}": ${outcome.closuresDismissed} closure(s), ${outcome.completionsDropped} checkup completion(s). The record stays approved.`,
+        { record_id: args.record_id, status: "active", ...outcome },
       );
     }, WRITE_SCOPE),
   );
