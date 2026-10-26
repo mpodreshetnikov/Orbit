@@ -46,16 +46,17 @@ with this version of Expo Go".
    needs an https tunnel, which is not set up yet — use the deployed instance.
 
 4. Scan the QR code with the iPhone's camera, then **Войти через Google** with the same account as
-   the web app. The sheet returns to Expo Go on an `exp://` address, which the instance accepts only
-   once it runs a `deploy/orbit` that lists it in `ADDITIONAL_REDIRECT_URLS` — before that, Google
-   signs you in and the instance refuses the redirect.
+   the web app. The sheet returns to Expo Go on an `exp://` address, or `exps://` when the bundle
+   comes over https (the preview's tunnel), which the instance accepts only once it runs a
+   `deploy/orbit` that lists the scheme in `ADDITIONAL_REDIRECT_URLS` — before that, Google signs
+   you in and the instance sends the sheet to the web app instead.
 
 **Without a computer:** dispatch _Actions → Mobile preview → Run workflow_ on any branch. A GitHub
-runner serves that branch behind an anonymous ngrok tunnel for an hour and posts an `exp://` address
-to open in Expo Go. It needs the `MOBILE_PREVIEW_INSTANCE` repository variable (the instance's
-domain) and the `EXPO_TOKEN` secret: a personal access token, not a robot one, for the Expo account
-the phone's Expo Go is signed in to. Expo Go refuses a tunnelled project served anonymously, and
-ngrok refuses a robot user.
+runner serves that branch behind Expo's https tunnel (`*.on.expo.app`) for the minutes asked, up to
+three hours, and posts an `exp://` address to open in Expo Go. It needs the `MOBILE_PREVIEW_INSTANCE`
+repository variable (the instance's domain) and the `EXPO_TOKEN` secret: a personal access token for
+the Expo account the phone's Expo Go is signed in to, since Expo Go refuses a tunnelled project
+served anonymously.
 
 Hot reload is live: save a file and the phone updates. That loop is the reason this is Expo rather
 than SwiftUI — see the Decision Log in `T-261018-l19`.
