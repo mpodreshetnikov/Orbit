@@ -9,7 +9,9 @@
  *
  * An approved record with closures or completions proposed after approval (`has_proposals`) gets
  * the same card in a second mode: only what was proposed, with Confirm (`confirm_record_proposals`)
- * and Decline (`dismiss_record_proposals`) instead (T-261026-y7c).
+ * and Decline (`dismiss_record_proposals`) instead (T-261026-y7c). A third mode shows the new
+ * checkups `propose_checkup` returns, with Add (`add_proposed_checkups`) and Skip, which writes
+ * nothing.
  */
 export const RECORD_DRAFT_HTML = `<!doctype html>
 <html lang="ru">
@@ -100,6 +102,7 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
   var hostCaps = {};
   var hostContext = {};
   var draft = null;
+  var checkups = null; // the checkup_proposal view, in the card's third mode
   var recordId = null;
   var decision = null; // { kind: "approved" | "declined" | "confirmed" | "dismissed" | "error", ... }
   var busy = null;
@@ -176,6 +179,8 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
   }
 
   function takeResult(result) {
+    var proposed = result && result.structuredContent && result.structuredContent.checkup_proposal;
+    if (proposed) { checkups = proposed; render(); return; }
     var view = result && result.structuredContent && result.structuredContent.draft;
     if (view) {
       draft = view;
@@ -271,6 +276,7 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
   function render() {
     var card = document.getElementById("card");
     card.textContent = "";
+    if (checkups) { renderCheckups(card); return; }
     if (!draft) {
       card.appendChild(el("p", "placeholder", decision && decision.kind === "load-error"
         ? "Не удалось загрузить черновик: " + (decision.message || "без текста")
@@ -476,6 +482,94 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
     clearConfirm();
     if (isProposal()) run("dismiss", "dismiss_record_proposals");
     else run("decline", "decline_record_draft");
+  }
+
+  function renderCheckups(card) {
+    var eyebrow = el("div", "eyebrow");
+    eyebrow.appendChild(el("span", "brand", "Orbit · новый чекап"));
+    eyebrow.appendChild(decision && decision.kind === "added" ? el("span", "chip ok", "Добавлено")
+      : decision && decision.kind === "skipped" ? el("span", "chip off", "Не добавлено")
+      : el("span", "chip", "Предложение"));
+    card.appendChild(eyebrow);
+    var items = checkups.items;
+    card.appendChild(el("h1", null, items.length === 1 ? items[0].title : "Новые чекапы: " + items.length));
+    card.appendChild(el("div", "meta", [checkups.person_name, checkups.evidence_label ? "по записи «" + checkups.evidence_label + "»" : null].filter(Boolean).join(" · ")));
+    var list = section(decision && decision.kind === "added" ? "В расписании" : "Добавится в расписание", items, function (c) {
+      var lines = [c.category_label + " · " + c.schedule_label, c.why, c.condition_name ? "Диагноз: " + c.condition_name : null];
+      return row(c.title, lines, el("div", "end sub", "с " + formatDate(c.first_due_at)));
+    });
+    if (list) card.appendChild(list);
+
+    var footer = el("div", "footer");
+    if (decision && (decision.kind === "added" || decision.kind === "skipped")) {
+      var box = el("div", decision.kind === "added" ? "result ok" : "result");
+      box.appendChild(el("strong", null, decision.kind === "added" ? "Добавлено в расписание" : "Не добавлено"));
+      box.appendChild(el("p", null, decision.details || (decision.kind === "added" ? "Напоминания придут, как у остальных чекапов." : "В расписании ничего не изменилось.")));
+      footer.appendChild(box);
+      card.appendChild(footer);
+      return;
+    }
+    if (decision && decision.kind === "error") {
+      var error = el("div", "result bad");
+      error.appendChild(el("strong", null, "Не получилось"));
+      error.appendChild(el("p", null, decision.message));
+      error.style.marginBottom = "10px";
+      footer.appendChild(error);
+    }
+    var actions = el("div", "actions");
+    var skip = el("button", "action decline", "Не нужно");
+    skip.type = "button";
+    var add = el("button", "action approve", busy === "add" ? "Добавляем…" : "Добавить");
+    add.type = "button";
+    skip.disabled = add.disabled = Boolean(busy);
+    skip.addEventListener("click", onSkipCheckups);
+    add.addEventListener("click", onAddCheckups);
+    actions.appendChild(skip);
+    actions.appendChild(add);
+    footer.appendChild(actions);
+    card.appendChild(footer);
+  }
+  function checkupTitles() {
+    return checkups.items.map(function (c) { return "\\"" + c.title + "\\""; }).join(", ");
+  }
+  function onSkipCheckups() {
+    if (busy) return;
+    decision = { kind: "skipped" };
+    tellModel("The owner chose not to add the proposed checkup(s) " + checkupTitles() + " on the Orbit card. Do not schedule them.");
+    render();
+  }
+  function settleCheckups(result) {
+    busy = null;
+    if (result && result.isError) {
+      decision = { kind: "error", message: resultText(result) || "сервер ответил ошибкой" };
+    } else {
+      var outcome = (result && result.structuredContent) || {};
+      var refused = outcome.refused || [];
+      decision = {
+        kind: "added",
+        details: refused.length ? "Уже были в расписании и не добавлены: " + refused.map(function (r) { return r.title; }).join(", ") + "." : null
+      };
+      tellModel("The owner added the proposed checkup(s) " + checkupTitles() + " on the Orbit card; they are scheduled now." + (refused.length ? " " + refused.length + " were not added because they were already scheduled." : ""));
+    }
+    render();
+  }
+  function onAddCheckups() {
+    if (busy) return;
+    busy = "add";
+    if (decision && decision.kind === "error") decision = null;
+    render();
+    var args = {
+      person_id: checkups.person_id,
+      evidence_record_id: checkups.evidence_record_id,
+      checkups: checkups.items.map(function (c) { return c.input; })
+    };
+    request("tools/call", { name: "add_proposed_checkups", arguments: args }, 60000, function (late) {
+      settleCheckups(late.error ? { isError: true, content: [{ type: "text", text: late.error.message }] } : late.result);
+    }).then(settleCheckups, function (error) {
+      busy = null;
+      decision = { kind: "error", message: error.message + ". Если ответ придёт позже, карточка обновится сама." };
+      render();
+    });
   }
 
   // The host sizes the frame from what the card reports. The root element's own box is measured:

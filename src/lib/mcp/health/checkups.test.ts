@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { getCheckup, listCheckups } from "./checkups";
+import {
+  addProposedCheckups,
+  firstDueDate,
+  getCheckup,
+  listCheckups,
+  reviewCheckupProposals,
+  type ProposedCheckup,
+} from "./checkups";
 import { createSupabaseStub } from "./test-support";
 
 const NOW = new Date("2026-06-15T12:00:00Z");
@@ -204,5 +211,115 @@ describe("getCheckup", () => {
   it("surfaces a query error", async () => {
     const stub = createSupabaseStub({ checkup_items: [{ error: { message: "boom" } }] });
     await expect(getCheckup(stub.client, "c-1")).rejects.toThrow(/Failed to load checkup/);
+  });
+});
+
+describe("firstDueDate", () => {
+  const halfYear = { type: "interval" as const, every: 6, unit: "month" as const };
+
+  it("takes the anchor, or one interval from today without one", () => {
+    expect(firstDueDate(halfYear, "2026-12-01", "2026-10-26")).toBe("2026-12-01");
+    expect(firstDueDate(halfYear, null, "2026-10-26")).toBe("2027-04-26");
+  });
+
+  it("moves a past anchor along the series, as the insert trigger does", () => {
+    expect(firstDueDate(halfYear, "2026-03-06", "2026-10-26")).toBe("2027-03-06");
+  });
+
+  it("keeps a one-off date even when it has passed", () => {
+    expect(firstDueDate({ type: "one_off", due_at: "2026-09-06" }, null, "2026-10-26")).toBe(
+      "2026-09-06",
+    );
+  });
+});
+
+describe("reviewCheckupProposals", () => {
+  const ultrasound: ProposedCheckup = {
+    title: "УЗИ щитовидной железы",
+    category: "imaging",
+    schedule: { type: "interval", every: 1, unit: "year" },
+    first_due_at: "2027-03-06",
+    why: "Узел 4 мм, контроль через год",
+    condition_id: "cond-1",
+  };
+
+  it("refuses a title the person already has, a repeat, and a stranger's condition", async () => {
+    const stub = createSupabaseStub({
+      checkup_items: [{ data: [{ title: "ОАК", status: "paused" }] }],
+      conditions: [{ data: [{ id: "cond-1", name: "Узел щитовидной железы" }] }],
+      medical_records: [{ data: { id: "rec-1", title: "УЗИ", record_date: "2026-03-06" } }],
+    });
+
+    const review = await reviewCheckupProposals(
+      stub.client,
+      "p-1",
+      [
+        ultrasound,
+        { ...ultrasound, title: "узи  щитовидной железы" },
+        { ...ultrasound, title: "оак", condition_id: null },
+        { ...ultrasound, title: "Гастроскопия", condition_id: "cond-2" },
+      ],
+      "rec-1",
+      "2026-10-26",
+    );
+
+    expect(review.accepted).toEqual([
+      { input: ultrasound, first_due_at: "2027-03-06", condition_name: "Узел щитовидной железы" },
+    ]);
+    expect(review.refused.map((item) => item.title)).toEqual([
+      "узи  щитовидной железы",
+      "оак",
+      "Гастроскопия",
+    ]);
+    expect(review.refused[1].reason).toContain('already scheduled as "ОАК" (paused)');
+    expect(review.evidence).toEqual({
+      record_id: "rec-1",
+      title: "УЗИ",
+      record_date: "2026-03-06",
+    });
+    expect(stub.argsFor("checkup_items", "in")).toEqual([["status", ["active", "paused"]]]);
+  });
+
+  it("refuses everything when the cited record is not the person's", async () => {
+    const stub = createSupabaseStub({
+      checkup_items: [{ data: [] }],
+      conditions: [{ data: [{ id: "cond-1", name: "Узел" }] }],
+      medical_records: [{ data: null }],
+    });
+    const review = await reviewCheckupProposals(
+      stub.client,
+      "p-1",
+      [ultrasound],
+      "rec-x",
+      "2026-10-26",
+    );
+    expect(review.accepted).toEqual([]);
+    expect(review.refused[0].reason).toContain("evidence_record_id");
+  });
+
+  it("writes the anchor, the condition link and where it came from", async () => {
+    const stub = createSupabaseStub({
+      checkup_items: [
+        { data: [{ id: "k-1", title: ultrasound.title, next_due_at: "2027-03-06" }] },
+      ],
+    });
+    const added = await addProposedCheckups(stub.client, "p-1", {
+      accepted: [{ input: ultrasound, first_due_at: "2027-03-06", condition_name: "Узел" }],
+      refused: [],
+      evidence: { record_id: "rec-1", title: "УЗИ", record_date: "2026-03-06" },
+    });
+
+    expect(stub.argsFor("checkup_items", "insert")[0][0]).toEqual([
+      {
+        person_id: "p-1",
+        title: "УЗИ щитовидной железы",
+        category: "imaging",
+        schedule: { type: "interval", every: 1, unit: "year", anchor_date: "2027-03-06" },
+        why_text: "Узел 4 мм, контроль через год",
+        why_links: [{ type: "condition", id: "cond-1", label: "Узел" }],
+        notes: "Добавлено из Claude по записи «УЗИ» от 2026-03-06.",
+      },
+    ]);
+    expect(added).toEqual([{ id: "k-1", title: ultrasound.title, next_due_at: "2027-03-06" }]);
   });
 });
