@@ -622,6 +622,18 @@ describe("MoneyImportReportPage", () => {
     expect(await screen.findByText("money.importReportNoRows")).toBeInTheDocument();
   });
 
+  it("says why a failed run failed", async () => {
+    batchResult = {
+      data: makeBatch({ status: "failed", meta: { failure_message: "Bank answered 403" } }),
+      error: null,
+    };
+    rowsResult = { data: [], error: null };
+
+    render(<MoneyImportReportPage />);
+
+    expect(await screen.findByText(/money\.importReportFailureReason/)).toBeInTheDocument();
+  });
+
   it("shows pending preview actions, applies batch, and keeps card mapping available", async () => {
     batchResult = {
       data: makeBatch({

@@ -713,7 +713,7 @@ export async function runScheduledImport(
       // Same duty the manual path takes: a run that dies mid-window leaves a session the server
       // still counts as running, and nobody is here to notice. Failing to say so is how the
       // import history fills with runs that never ended.
-      await tryCompleteSessionAsFailed(session, deps.callEdge);
+      await tryCompleteSessionAsFailed(session, deps.callEdge, error);
       throw error;
     } finally {
       // The field first, the registry after: a store still holding the session once the
@@ -779,10 +779,23 @@ export async function runScheduledImport(
   return { incremental, backfill };
 }
 
+/** Long enough for a connector's reason, short enough that a stack never lands in the report. */
+const FAILURE_MESSAGE_MAX_LENGTH = 500;
+
 export async function tryCompleteSessionAsFailed(
   session: Record<string, unknown>,
   callEdge: ImportRunnerDeps["callEdge"],
+  error?: unknown,
 ): Promise<void> {
+  // The reason goes to the batch, where the report shows it: until it did, a failed run said
+  // only "Failed", and finding out why took the extension's console open before the run.
+  const failureMessage =
+    error === undefined
+      ? null
+      : (error instanceof Error ? error.message : String(error)).slice(
+          0,
+          FAILURE_MESSAGE_MAX_LENGTH,
+        );
   try {
     const edgeAuth = resolveEdgeAuthToken(session);
     await callEdge(session.function_url as string, edgeAuth.token, {
@@ -790,6 +803,7 @@ export async function tryCompleteSessionAsFailed(
       session_id: session.session_id,
       batch_id: session.batch_id,
       status: "failed",
+      ...(failureMessage ? { failure_message: failureMessage } : {}),
     });
   } catch {
     // Ignore completion failures; original error is still reported to UI.

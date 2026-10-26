@@ -656,6 +656,7 @@
     "importReportCardMapping": "Card mapping",
     "importReportHideFilteredRows": "Hide filtered rows",
     "importReportShowFilteredRows": "Show filtered rows",
+    "importReportFailureReason": "Reason: {value}",
     "importReportNoRows": "No rows imported for this batch.",
     "importReportColumnDate": "Date",
     "importReportColumnStatus": "Status",

@@ -76,14 +76,15 @@ your key first (`ssh-copy-id root@<server ip>` from your computer) and run the l
 
 `deploy/bootstrap.sh` only does what a careful administrator would, and is safe to run again:
 
-| What                       | Why                                                                                        |
-| -------------------------- | ------------------------------------------------------------------------------------------ |
-| User `orbit` with `sudo`   | Day-to-day logins are not root; it gets the SSH keys root already has                      |
-| SSH: keys only, no root    | Password guessing stops working. Done only once `orbit` has a key, so nobody is locked out |
-| Firewall (`ufw`)           | Only SSH (22), HTTP (80) and HTTPS (443) are reachable from outside                        |
-| `fail2ban`                 | An address that fails to log in 5 times in 10 minutes is banned for an hour                |
-| Automatic security updates | Installed daily; if one needs a reboot, it happens at 04:30 UTC and Orbit starts by itself |
-| Docker, logs capped        | Each service keeps at most 30 MB of logs, so they cannot fill the disk                     |
+| What                       | Why                                                                                             |
+| -------------------------- | ----------------------------------------------------------------------------------------------- |
+| User `orbit` with `sudo`   | Day-to-day logins are not root; it gets the SSH keys root already has                           |
+| SSH: keys only, no root    | Password guessing stops working. Done only once `orbit` has a key, so nobody is locked out      |
+| Firewall (`ufw`)           | Only SSH (22), HTTP (80) and HTTPS (443) are reachable from outside                             |
+| `fail2ban`                 | An address that fails to log in 5 times in 10 minutes is banned for an hour                     |
+| Automatic security updates | Installed daily; if one needs a reboot, it happens at 04:30 UTC and Orbit starts by itself      |
+| Docker, logs capped        | Each service keeps at most 30 MB of logs, so they cannot fill the disk                          |
+| Old images removed         | After each update only the running version's images and the previous one's stay, for a rollback |
 
 The database and the Supabase dashboard are not reachable from outside at all, firewall or not:
 Orbit's containers publish only ports 80 and 443.
@@ -413,6 +414,7 @@ and follow the printed instructions (an SSH tunnel from your computer, then <htt
 | `This server cannot reach: openrouter.ai` (HTTP 403)   | OpenRouter refuses servers in some countries. Everything except the AI features works; they come back with a server elsewhere or another AI provider                                                                                                                     |
 | A backup or a download times out though the site works | Your server's network cuts some transfers short — on 2026-10-18 a server in Russia could not download from anything on Cloudflare. Run the workflow with _action_ `doctor`, and use services it can reach                                                                |
 | `this server cannot reach api.telegram.org`            | Your server's network blocks Telegram, so alerts cannot reach it from there. Use the healthchecks.io check above instead: it e-mails you, and also notices a server that has gone silent                                                                                 |
+| `Only N GB free on disk`                               | Run the workflow with _action_ `doctor`: its Disk section shows what holds the space. Images of older versions go after every update, so it is usually data, backups waiting to upload, or something outside Orbit                                                       |
 | The build stops with `Killed` or the server freezes    | Not enough memory for the build. `swapon --show` should list `/orbit.swap`; if your provider forbids swap, use a 4 GB server                                                                                                                                             |
 
 ## Secrets

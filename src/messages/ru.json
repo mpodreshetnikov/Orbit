@@ -656,6 +656,7 @@
     "importReportCardMapping": "Привязка карт",
     "importReportHideFilteredRows": "Скрыть отфильтрованные строки",
     "importReportShowFilteredRows": "Показать отфильтрованные строки",
+    "importReportFailureReason": "Причина: {value}",
     "importReportNoRows": "В этой партии нет импортированных строк.",
     "importReportColumnDate": "Дата",
     "importReportColumnStatus": "Статус",
