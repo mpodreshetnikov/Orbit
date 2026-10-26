@@ -105,6 +105,7 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
   var draft = null;
   var checkups = null; // the checkup_proposal view, in the card's third mode
   var recordId = null;
+  var thenRecordIds = [];
   var decision = null; // { kind: "approved" | "declined" | "confirmed" | "dismissed" | "error", ... }
   var busy = null;
   var expanded = false;
@@ -147,6 +148,7 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
     if (data.method === "ui/notifications/tool-input") {
       var args = data.params && data.params.arguments;
       if (args && args.record_id) recordId = args.record_id;
+      if (args && Array.isArray(args.then_record_ids)) thenRecordIds = args.then_record_ids;
     } else if (data.method === "ui/notifications/tool-result") {
       takeResult(data.params);
     } else if (data.method === "ui/notifications/host-context-changed") {
@@ -195,6 +197,10 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
       recordId = view.record_id;
       if (!decision && view.status === "active" && !view.has_proposals) decision = { kind: "approved", already: true };
       if (!decision && view.status === "removed") decision = { kind: "declined", already: true };
+      // Decided in Orbit while the card waited: the summary says so rather than count it unseen.
+      if (decision && decision.already && inQueue() && !outcomes[queueIndex]) {
+        outcomes[queueIndex] = { record_id: view.record_id, title: view.title, kind: "already" };
+      }
     } else if (result && result.isError) {
       decision = { kind: "load-error", message: resultText(result) };
     }
@@ -286,9 +292,18 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
     card.textContent = "";
     if (checkups) { renderCheckups(card); return; }
     if (!draft) {
-      card.appendChild(el("p", "placeholder", decision && decision.kind === "load-error"
+      var failed = decision && decision.kind === "load-error";
+      card.appendChild(el("p", "placeholder", failed
         ? "Не удалось загрузить черновик: " + (decision.message || "без текста")
         : "Загружаем черновик…"));
+      // One failed load must not strand the rest of the queue or the summary of what was decided.
+      if (failed && inQueue() && !queueDone) {
+        card.appendChild(el("div", "position", (queueIndex + 1) + " из " + queue.length));
+        var retry = el("button", "action", "Повторить");
+        retry.type = "button";
+        retry.addEventListener("click", loadQueued);
+        card.appendChild(queueActions(retry));
+      }
       return;
     }
 
@@ -371,19 +386,7 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
         box.appendChild(el("p", null, "Черновик убран из записей. Вернуть его можно в Orbit, в удалённых записях."));
       }
       footer.appendChild(box);
-      if (inQueue() && !queueDone && queueIndex < queue.length - 1) {
-        var actions = el("div", "actions");
-        actions.style.marginTop = "10px";
-        var stop = el("button", "action decline", "Закончить");
-        stop.type = "button";
-        stop.addEventListener("click", finishQueue);
-        var next = el("button", "action approve", "Дальше: " + (queueIndex + 2) + " из " + queue.length);
-        next.type = "button";
-        next.addEventListener("click", nextInQueue);
-        actions.appendChild(stop);
-        actions.appendChild(next);
-        footer.appendChild(actions);
-      }
+      if (inQueue() && !queueDone) footer.appendChild(queueActions());
       footer.appendChild(renderLinks(false));
       return footer;
     }
@@ -436,7 +439,7 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
   }
 
   function inQueue() { return Boolean(queue) && queue.length > 1; }
-  var OUTCOME_LABELS = { approved: "одобрено", declined: "отклонено", confirmed: "сверка подтверждена", dismissed: "сверка отклонена" };
+  var OUTCOME_LABELS = { approved: "одобрено", declined: "отклонено", confirmed: "сверка подтверждена", dismissed: "сверка отклонена", already: "уже решено в Orbit" };
   // Each decision reaches the model as it happens; the chat gets one line, when the owner is done
   // with the whole queue, so Claude does not take a turn in the middle of it.
   function noteOutcome(kind) {
@@ -451,24 +454,48 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
     done.forEach(function (o) { counts[o.kind] = (counts[o.kind] || 0) + 1; });
     var left = queue.filter(function (q, i) { return !outcomes[i]; });
     tellModel("The owner went through the queued drafts on the Orbit card. " +
-      done.map(function (o) { return "\\"" + o.title + "\\" (record_id " + o.record_id + "): " + o.kind; }).join("; ") + "." +
+      done.map(function (o) { return "\\"" + o.title + "\\" (record_id " + o.record_id + "): " + (o.kind === "already" ? "already decided in Orbit before the card reached it" : o.kind); }).join("; ") + "." +
       (left.length ? " Not reviewed yet: " + left.map(function (q) { return "\\"" + q.title + "\\" (record_id " + q.record_id + ")"; }).join("; ") + "." : ""));
     tellChat("Разобрал записи в карточке: " + Object.keys(counts).map(function (k) { return OUTCOME_LABELS[k] + " " + counts[k]; }).join(", ") +
       (left.length ? ", не смотрел " + left.length : "") + ".");
     queueDone = true;
     render();
   }
+  // Закончить is always there, so the last draft ends the queue even if it was decided elsewhere.
+  function queueActions(extra) {
+    var actions = el("div", "actions");
+    actions.style.marginTop = "10px";
+    var stop = el("button", "action decline", "Закончить");
+    stop.type = "button";
+    stop.addEventListener("click", finishQueue);
+    actions.appendChild(stop);
+    if (extra) actions.appendChild(extra);
+    if (queueIndex < queue.length - 1) {
+      var next = el("button", "action approve", "Дальше: " + (queueIndex + 2) + " из " + queue.length);
+      next.type = "button";
+      next.addEventListener("click", nextInQueue);
+      actions.appendChild(next);
+    }
+    return actions;
+  }
   function nextInQueue() {
     queueIndex += 1;
+    loadQueued();
+  }
+  function loadQueued() {
     draft = null;
     decision = null;
     expanded = false;
     render();
-    var id = queue[queueIndex].record_id;
+    var index = queueIndex;
+    var id = queue[index].record_id;
     recordId = id;
     request("tools/call", { name: "show_record_draft", arguments: { record_id: id } }, 60000, function (late) {
-      if (!draft && late.result) takeResult(late.result);
-    }).then(takeResult, function (error) {
+      if (!draft && index === queueIndex && late.result) takeResult(late.result);
+    }).then(function (result) {
+      if (index === queueIndex) takeResult(result);
+    }, function (error) {
+      if (index !== queueIndex) return;
       decision = { kind: "load-error", message: error.message };
       render();
     });
@@ -690,7 +717,8 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
     // A host that delivers the input but not the result: fetch the draft by the card's own call.
     setTimeout(function () {
       if (draft || !recordId || queueIndex > 0) return;
-      request("tools/call", { name: "show_record_draft", arguments: { record_id: recordId } }, 30000, function (late) {
+      var args = thenRecordIds.length ? { record_id: recordId, then_record_ids: thenRecordIds } : { record_id: recordId };
+      request("tools/call", { name: "show_record_draft", arguments: args }, 30000, function (late) {
         if (!draft && late.result) takeResult(late.result);
       }).then(takeResult, function () {});
     }, 2000);

@@ -455,6 +455,20 @@ describe("RECORD_DRAFT_HTML", () => {
     expect(RECORD_DRAFT_HTML).toContain('" из " + queue.length');
   });
 
+  it("never strands a queue: a failed load can be retried and the last draft can always finish", () => {
+    expect(RECORD_DRAFT_HTML).toContain('"Повторить"');
+    expect(RECORD_DRAFT_HTML).toContain("if (failed && inQueue() && !queueDone)");
+    expect(RECORD_DRAFT_HTML).toContain(
+      "if (inQueue() && !queueDone) footer.appendChild(queueActions());",
+    );
+    expect(RECORD_DRAFT_HTML).toContain('kind: "already"');
+  });
+
+  it("keeps the queued ids when the card fetches its own draft", () => {
+    expect(RECORD_DRAFT_HTML).toContain("thenRecordIds = args.then_record_ids");
+    expect(RECORD_DRAFT_HTML).toContain("then_record_ids: thenRecordIds");
+  });
+
   it("ships a script that parses", () => {
     // The page is a template literal, so one wrong escape breaks the whole card with no other sign.
     const start = RECORD_DRAFT_HTML.indexOf("<script>") + "<script>".length;
