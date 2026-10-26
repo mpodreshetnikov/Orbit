@@ -909,3 +909,53 @@ Deno.test(
     assertEquals(batchStatus, "completed");
   },
 );
+
+Deno.test("money-import handler keeps the reason a run failed on its batch", async () => {
+  // A failed run used to leave a report that said only "Failed": the reason lived in the
+  // extension's console, open or not. It now rides on complete_session into the batch meta,
+  // beside what the meta already held.
+  let batchStatus = "running";
+  let batchMeta: Record<string, unknown> | null = { parse_strategy: "full" };
+  const handler = createMoneyImportHandler({
+    repository: {
+      ...createRepositoryMock({
+        sessionByToken: {
+          id: "session-1",
+          batch_id: "batch-1",
+          source: "tbank_web",
+          payer_person_id: "person-1",
+          status: "running",
+          revoked_at: null,
+          expires_at: "2999-01-01T00:00:00.000Z",
+          meta: null,
+        },
+      }),
+      getImportBatch: async () => ({
+        id: "batch-1",
+        payer_person_id: "person-1",
+        source: "tbank_web",
+        status: batchStatus,
+        meta: batchMeta,
+      }),
+      updateImportBatch: async (_batchId, patch) => {
+        if (typeof patch.status === "string") batchStatus = patch.status;
+        if (patch.meta !== undefined) batchMeta = patch.meta as Record<string, unknown> | null;
+      },
+    },
+    now: () => new Date("2026-01-01T00:00:00.000Z"),
+  });
+
+  await handler(
+    sessionTokenRequest("complete_session", {
+      session_id: "session-1",
+      batch_id: "batch-1",
+      status: "failed",
+      failure_message: "T-Bank operations request returned 403",
+    }),
+  );
+  assertEquals(batchStatus, "failed");
+  assertEquals(batchMeta, {
+    parse_strategy: "full",
+    failure_message: "T-Bank operations request returned 403",
+  });
+});
