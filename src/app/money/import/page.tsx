@@ -293,6 +293,8 @@ export default function MoneyImportPage() {
   const [selectedSourceId, setSelectedSourceId] = useState<string>("");
   const [fileStatus, setFileStatus] = useState<{ count: number } | "reading" | null>(null);
   const [fileErrors, setFileErrors] = useState<string[]>([]);
+  // Rows the parser could not read never reach the server, so the report cannot tell of them.
+  const [fileSkipped, setFileSkipped] = useState<{ batchId: string; rows: number } | null>(null);
 
   const [extensionActive, setExtensionActive] = useState<boolean | null>(null);
   const [extensionAutoStatus, setExtensionAutoStatus] = useState<{
@@ -366,6 +368,7 @@ export default function MoneyImportPage() {
   const resetSourceState = () => {
     setFileStatus(null);
     setFileErrors([]);
+    setFileSkipped(null);
     setExtensionActive(null);
     setExtensionStatusMessage(null);
     setInstalledExtensionVersion(null);
@@ -398,6 +401,7 @@ export default function MoneyImportPage() {
     async (f: File) => {
       if (!selectedPersonId || !selectedConnector || selectedConnector.kind !== "file") return;
       setFileErrors([]);
+      setFileSkipped(null);
       setFileStatus("reading");
       try {
         const parsed = await selectedConnector.parse(f).catch(() => null);
@@ -421,6 +425,12 @@ export default function MoneyImportPage() {
           },
           accessToken,
         );
+        const skipped = parsed.errors?.length ?? 0;
+        if (skipped > 0) {
+          setFileSkipped({ batchId: result.batch_id, rows: skipped });
+          setFileStatus(null);
+          return;
+        }
         router.push(`/money/import/reports/${result.batch_id}`);
       } catch (error) {
         setFileErrors([error instanceof Error ? error.message : t("money.importFailed")]);
@@ -999,6 +1009,19 @@ export default function MoneyImportPage() {
                       <li key={index}>{error}</li>
                     ))}
                   </ul>
+                )}
+                {fileSkipped && (
+                  <div
+                    role="alert"
+                    className="space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm"
+                  >
+                    <p>{t("money.importFileSkipped", { count: fileSkipped.rows })}</p>
+                    <Button asChild size="sm" variant="outline">
+                      <Link href={`/money/import/reports/${fileSkipped.batchId}`}>
+                        {t("money.importOpenReport")}
+                      </Link>
+                    </Button>
+                  </div>
                 )}
               </CardContent>
             </Card>

@@ -100,10 +100,13 @@ export default function MoneyImportScreen() {
   const [bank, setBank] = useState<ImportBankId>("tbank");
   const [status, setStatus] = useState<string | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
+  // Rows the parser could not read never reach the server, so the import's page cannot tell of them.
+  const [skipped, setSkipped] = useState<{ batchId: string; rows: number } | null>(null);
 
   const start = async (statement: StatementFile) => {
     if (!personId) return;
     setErrors([]);
+    setSkipped(null);
     setStatus(t("money.importFileReading"));
     try {
       const parsed = await readStatement(statement.uri).catch(() => null);
@@ -125,6 +128,13 @@ export default function MoneyImportScreen() {
       });
       void client.invalidateQueries({ queryKey: ["money-import-batches"] });
       void client.invalidateQueries({ queryKey: ["money-feed"] });
+      void client.invalidateQueries({ queryKey: ["money-feed-summary"] });
+      const unread = parsed.errors?.length ?? 0;
+      if (unread > 0) {
+        setSkipped({ batchId: result.batch_id, rows: unread });
+        setStatus(null);
+        return;
+      }
       router.replace(`/money/import/${result.batch_id}` as Href);
     } catch (error) {
       setErrors([(error as Error).message]);
@@ -217,6 +227,16 @@ export default function MoneyImportScreen() {
               {error}
             </Text>
           ))}
+          {skipped ? (
+            <View testID="import-file-skipped" style={{ gap: space.sm }}>
+              <Text size="sm">{t("money.importFileSkipped", { count: skipped.rows })}</Text>
+              <Button
+                variant="outline"
+                label={t("money.importOpenReport")}
+                onPress={() => router.replace(`/money/import/${skipped.batchId}` as Href)}
+              />
+            </View>
+          ) : null}
         </Section>
 
         <Card style={{ padding: space.md, gap: space.xs, opacity: 0.6 }}>

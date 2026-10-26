@@ -816,6 +816,7 @@
     "importFileReading": "Reading the file…",
     "importFileUploading": "Uploading {count} operations…",
     "importFileEmpty": "The file has no operations.",
+    "importFileSkipped": "The import has started, but {count, plural, one {# row} other {# rows}} of the file could not be read and are not in it.",
     "importAccountsAuto": "Accounts are matched by card number, unknown cards go to the bank's first account.",
     "importStartHint": "{bank} opens in a new tab, and this import's page opens here with its progress.",
     "importAutoDesktopOnly": "Set up in a computer browser that has the Orbit extension.",

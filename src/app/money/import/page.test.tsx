@@ -317,6 +317,34 @@ describe("MoneyImportPage", () => {
     });
   });
 
+  it("stays on the page to say rows of the file were not read, with a way to the import", async () => {
+    connectorsState = [
+      makeFileConnector("tbank", async () => ({
+        transactions: [makeParsedTransaction()],
+        errors: ["Row 3: invalid date"],
+      })),
+    ];
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ batch_id: "batch-partial" }),
+    } as Response);
+
+    render(<MoneyImportPage />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByTestId("import-bank-tbank"));
+    const file = new File(["date,amount"], "bank.csv", { type: "text/csv" });
+    fireEvent.change(screen.getByLabelText("dropzone-input"), { target: { files: [file] } });
+
+    expect(await screen.findByText(/money.importFileSkipped/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "money.importOpenReport" })).toHaveAttribute(
+      "href",
+      "/money/import/reports/batch-partial",
+    );
+    expect(routerMock.push).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("says so when the file has no operations", async () => {
     connectorsState = [makeFileConnector("tbank", async () => ({ transactions: [] }))];
 

@@ -179,10 +179,33 @@ describe("a statement import", () => {
     expect(imports()).toHaveLength(1);
   });
 
+  it("stays to say which rows of the file were not read, then opens the import", async () => {
+    mockFiles["file:///partly.csv"] = [
+      STATEMENT,
+      "не дата;;*1234;OK;-1,00;RUB;Кафе;5812;Сломано",
+    ].join("\n");
+    mockPicked.current = { name: "partly.csv", uri: "file:///partly.csv" };
+    await renderScreens(routes, "/money/import");
+    const upload = await screen.findByText("Загрузить файл");
+    await waitFor(() => expect(upload).toBeEnabled());
+    await fireEvent.press(upload);
+
+    expect(
+      await screen.findByText(
+        "Импорт запущен, но 1 строку файла не удалось прочитать: их в импорте нет.",
+      ),
+    ).toBeOnTheScreen();
+    expect(imports()).toHaveLength(1);
+    await fireEvent.press(screen.getByText("Открыть отчёт"));
+    expect(await screen.findByText("Импорт ждёт применения")).toBeOnTheScreen();
+  });
+
   it("says when the file cannot be read, has nothing in it, or the upload fails", async () => {
     mockPicked.current = { name: "gone.csv", uri: "file:///gone.csv" };
     await renderScreens(routes, "/money/import");
-    await fireEvent.press(await screen.findByText("Загрузить файл"));
+    const upload = await screen.findByText("Загрузить файл");
+    await waitFor(() => expect(upload).toBeEnabled());
+    await fireEvent.press(upload);
     expect(await screen.findByText("Не удалось прочитать файл.")).toBeOnTheScreen();
 
     mockFiles["file:///empty.csv"] = HEADER;
