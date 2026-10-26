@@ -514,6 +514,24 @@ describe("import-runner", () => {
     );
   });
 
+  it("sends the reason a run failed, cut to a report's length", async () => {
+    const callEdge = vi.fn().mockResolvedValue({});
+    await tryCompleteSessionAsFailed(
+      {
+        function_url: "https://example.com/fn",
+        session_token: "token",
+        session_id: "session-1",
+        batch_id: "batch-1",
+      },
+      callEdge,
+      new Error(`T-Bank answered 403 ${"x".repeat(600)}`),
+    );
+    const body = callEdge.mock.calls[0]?.[2] as Record<string, unknown>;
+    expect(body).toEqual(expect.objectContaining({ status: "failed" }));
+    expect(String(body.failure_message)).toMatch(/^T-Bank answered 403 x+$/);
+    expect(String(body.failure_message)).toHaveLength(500);
+  });
+
   it("swallows failure completion errors", async () => {
     const callEdge = vi.fn().mockRejectedValue(new Error("boom"));
     await expect(
