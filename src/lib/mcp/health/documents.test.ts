@@ -341,7 +341,7 @@ describe("activateMedicalRecord", () => {
     const stub = createSupabaseStub(
       {
         record_observations: [
-          { data: [{ id: "obs-unmatched" }] }, // delete of unapplied rows
+          { data: [{ id: "obs-unmatched" }] }, // count of unapplied rows, which stay
           { data: null }, // verify
           { data: [B12_IN_RANGE] }, // closure re-check
         ],
@@ -374,6 +374,7 @@ describe("activateMedicalRecord", () => {
 
     expect(stub.argsFor("record_observations", "eq")[0]).toEqual(["record_id", "rec-1"]);
     expect(stub.argsFor("record_observations", "eq")[1]).toEqual(["is_applied", false]);
+    expect(stub.argsFor("record_observations", "delete")).toHaveLength(0);
     expect(stub.argsFor("medical_records", "update")[0][0]).toEqual({ status: "active" });
     expect(stub.argsFor("condition_records", "update")).toEqual([
       [{ is_user_verified: true, review_decision: "confirmed" }],
@@ -386,7 +387,7 @@ describe("activateMedicalRecord", () => {
       evidence_record_id: "rec-1",
     });
     expect(outcome).toEqual({
-      droppedUnmatchedObservations: 1,
+      keptUnmatchedObservations: 1,
       proposalsMaterialized: 0,
       proposalsSkipped: 0,
       mentionsConfirmed: 1,

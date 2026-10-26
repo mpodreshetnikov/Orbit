@@ -369,8 +369,8 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
     var unrecognised = draft.observations.filter(function (o) { return !o.recognised; }).length;
     if (!proposal && unrecognised && (!decision || decision.kind === "error")) {
       card.appendChild(el("div", "warning", unrecognised === 1
-        ? "1 показатель не распознан каталогом: при одобрении он не попадёт в карту."
-        : unrecognised + " " + plural(unrecognised, "показатель не распознан", "показателя не распознаны", "показателей не распознаны") + " каталогом: при одобрении они не попадут в карту."));
+        ? "1 показатель не распознан каталогом: он сохранится в записи, но не попадёт в историю показателей."
+        : unrecognised + " " + plural(unrecognised, "показатель не распознан", "показателя не распознаны", "показателей не распознаны") + " каталогом: они сохранятся в записи, но не попадут в историю показателей."));
     }
 
     card.appendChild(renderFooter());
@@ -579,7 +579,7 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
     } else if (action === "approve") {
       var outcome = (result && result.structuredContent) || {};
       var notes = [];
-      if (outcome.droppedUnmatchedObservations) notes.push("Нераспознанных показателей отброшено: " + outcome.droppedUnmatchedObservations + ".");
+      if (outcome.keptUnmatchedObservations) notes.push("Нераспознанные показатели сохранены в записи, но не в истории: " + outcome.keptUnmatchedObservations + ".");
       if (outcome.proposalsMaterialized) notes.push("Новых или связанных диагнозов: " + outcome.proposalsMaterialized + ".");
       if (outcome.checkupsCompleted) notes.push("Отмечено чекапов: " + outcome.checkupsCompleted + ".");
       if (outcome.closuresLeftPending) notes.push("Закрытий осталось на подтверждении: " + outcome.closuresLeftPending + ".");

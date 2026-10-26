@@ -939,6 +939,7 @@ describe("RecordDetail", () => {
             id: "obs-custom",
             obs_name: "Custom marker",
             obs_code: null,
+            is_applied: true,
             value_numeric: null,
             value_text: "trace",
             unit: null,
@@ -964,6 +965,33 @@ describe("RecordDetail", () => {
     await userEvent.setup().click(screen.getAllByRole("button")[1]);
     expect(onEdit).toHaveBeenCalled();
     expect(onDelete).toHaveBeenCalled();
+
+    // A row kept at approval although the catalogue did not know it says so, and has no history
+    // link to offer.
+    rerender(
+      <ObservationRowEditable
+        observation={
+          {
+            id: "obs-unrecognised",
+            obs_name: "Странный показатель",
+            obs_code: null,
+            is_applied: false,
+            value_numeric: 3,
+            value_text: "3",
+            unit: null,
+            ref_range_low: null,
+            ref_range_high: null,
+            status: null,
+          } as RecordObservationWithCatalog
+        }
+        onEdit={onEdit}
+        onDelete={onDelete}
+        isProcessing={false}
+      />,
+    );
+    expect(screen.getByText("observations.unrecognisedBadge")).toBeInTheDocument();
+    expect(screen.getByText("observations.unrecognisedHint")).toBeInTheDocument();
+    expect(screen.queryByText("observations.customBadge")).not.toBeInTheDocument();
 
     hookMocks.useObservationCatalog.mockReturnValue({
       data: [

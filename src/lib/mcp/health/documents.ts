@@ -515,7 +515,8 @@ export async function removeRecordDraft(
 }
 
 export interface ActivationOutcome {
-  droppedUnmatchedObservations: number;
+  /** Observations the catalogue does not know, kept on the record and out of every history. */
+  keptUnmatchedObservations: number;
   proposalsMaterialized: number;
   proposalsSkipped: number;
   /** Diagnosis mentions confirmed by the approval, closures among them. */
@@ -529,8 +530,9 @@ export interface ActivationOutcome {
  * Approve an ingested record, by the rules the review screen's Approve button applies
  * (`runSave(true)` in `structure-review-step.tsx`), in the same order:
  *
- * 1. observations nobody could match to the catalogue are deleted, as the screen deletes the rows a
- *    person left unapplied;
+ * 1. observations nobody could match to the catalogue are kept, unapplied: they stay on the record
+ *    with their printed label and value, and out of every history until the catalogue knows them
+ *    (T-261026-0gz; they used to be deleted, which lost every row a catalogue gap left behind);
  * 2. condition proposals become conditions (`materializeConditionProposals`) -- before the record
  *    turns active, so a failed write leaves it in review rather than active with diagnoses missing;
  * 3. the record turns active, and its observations and findings are marked verified;
@@ -543,13 +545,14 @@ export async function activateMedicalRecord(
   record: { id: string; person_id: string },
   deps: { lookupIcd: (code: string) => Promise<IcdLookupResult | null> },
 ): Promise<ActivationOutcome> {
-  const { data: dropped, error: dropError } = await supabase
+  const { data: unmatched, error: unmatchedError } = await supabase
     .from("record_observations")
-    .delete()
+    .select("id")
     .eq("record_id", record.id)
-    .eq("is_applied", false)
-    .select("id");
-  if (dropError) throw new Error(`Failed to drop unmatched observations: ${dropError.message}`);
+    .eq("is_applied", false);
+  if (unmatchedError) {
+    throw new Error(`Failed to count unmatched observations: ${unmatchedError.message}`);
+  }
 
   const mentions = await loadConditionMentions(supabase, record.id);
   const materialization = await materializeConditionProposals(
@@ -583,7 +586,7 @@ export async function activateMedicalRecord(
   );
 
   return {
-    droppedUnmatchedObservations: (dropped ?? []).length,
+    keptUnmatchedObservations: (unmatched ?? []).length,
     proposalsMaterialized: materialization.materialized,
     proposalsSkipped: materialization.skipped,
     ...confirmed,
