@@ -11,6 +11,7 @@ import {
 } from "@/lib/conditions/resolution-proposal";
 import { isConfirmedByRecordApproval, isUnverifiedClosure } from "@/types/condition-closure";
 import {
+  analyteDecidesCondition,
   pickReconciliationSuggestions,
   type GateCheckup,
   type GateCondition,
@@ -585,11 +586,10 @@ async function confirmRecordProposals(
       done.add(`${suggestion.checkup_item_id}:${doneAt}`);
       completed += 1;
     }
-    const { error } = await supabase
-      .from("medical_records")
-      .update({ llm_suggested_checkup_completions: null })
-      .eq("id", recordId);
-    if (error) throw new Error(`Failed to clear the applied checkup suggestions: ${error.message}`);
+    // Only what was applied comes off the list: a proposal added meanwhile stays for the owner.
+    await changeSuggestedCompletions(supabase, recordId, (current) =>
+      current.filter((entry) => !suggested.some((applied) => sameSuggestion(applied, entry))),
+    );
   }
 
   return {
@@ -630,6 +630,55 @@ function parseSuggestedCompletions(
       },
     ];
   });
+}
+
+type SuggestedCompletion = ReturnType<typeof parseSuggestedCompletions>[number];
+
+/**
+ * Change a record's suggested completions without losing a concurrent change. Proposing, confirming
+ * and dismissing each read the list and write it back whole, so two of them at once -- an agent's
+ * parallel `propose_reconciliation` calls, or a proposal landing while the owner confirms -- would
+ * otherwise drop one side silently. The write is conditional on `updated_at` still being what was
+ * read, and is retried on a fresh read when it is not.
+ */
+async function changeSuggestedCompletions(
+  supabase: SupabaseClient<Database>,
+  recordId: string,
+  change: (current: SuggestedCompletion[]) => SuggestedCompletion[],
+): Promise<void> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { data, error } = await supabase
+      .from("medical_records")
+      .select("llm_suggested_checkup_completions, updated_at")
+      .eq("id", recordId)
+      .maybeSingle();
+    if (error) throw new Error(`Failed to read the suggested completions: ${error.message}`);
+    const row = data as { llm_suggested_checkup_completions: unknown; updated_at: string } | null;
+    if (!row) return;
+    const current = parseSuggestedCompletions(row.llm_suggested_checkup_completions);
+    const next = change(current);
+    if (JSON.stringify(next) === JSON.stringify(current)) return;
+    const { data: written, error: writeError } = await supabase
+      .from("medical_records")
+      .update({ llm_suggested_checkup_completions: next.length > 0 ? next : null })
+      .eq("id", recordId)
+      .eq("updated_at", row.updated_at)
+      .select("id");
+    if (writeError) {
+      throw new Error(`Failed to save the suggested completions: ${writeError.message}`);
+    }
+    if ((written ?? []).length > 0) return;
+  }
+  throw new Error(
+    "The record kept changing while its suggested checkup completions were being saved; try again.",
+  );
+}
+
+function sameSuggestion(left: SuggestedCompletion, right: SuggestedCompletion): boolean {
+  return (
+    left.checkup_item_id === right.checkup_item_id &&
+    left.suggested_done_at === right.suggested_done_at
+  );
 }
 
 /** What a proposal for an approved record asks for, as `propose_reconciliation` received it. */
@@ -677,7 +726,7 @@ export async function proposeRecordReconciliation(
     const [conditions, mentions, observations] = await Promise.all([
       supabase
         .from("conditions")
-        .select("id, name, current_status")
+        .select("id, name, code, current_status")
         .eq("person_id", record.person_id)
         .is("deleted_at", null)
         .in("id", ids),
@@ -695,9 +744,14 @@ export async function proposeRecordReconciliation(
       if (result.error) throw new Error(`Failed to check the proposal: ${result.error.message}`);
     }
     const known = new Map(
-      ((conditions.data ?? []) as Array<{ id: string; name: string; current_status: string }>).map(
-        (row) => [row.id, row],
-      ),
+      (
+        (conditions.data ?? []) as Array<{
+          id: string;
+          name: string;
+          code: string | null;
+          current_status: string;
+        }>
+      ).map((row) => [row.id, row]),
     );
     const mentioned = new Map(
       ((mentions.data ?? []) as Array<{ condition_id: string; status_in_record: string }>).map(
@@ -737,6 +791,18 @@ export async function proposeRecordReconciliation(
         });
         continue;
       }
+      // `proposedClosureStillHolds` checks the value, not the pairing: ingest's edge gate is what
+      // pairs an analyte with the condition it decides, and this path bypasses it.
+      if (
+        item.supporting_obs_code &&
+        !analyteDecidesCondition(item.supporting_obs_code, condition)
+      ) {
+        refused.push({
+          id: item.condition_id,
+          reason: `${item.supporting_obs_code} does not decide ${condition.name}; propose it without supporting_obs_code if the text itself settles it`,
+        });
+        continue;
+      }
       if (
         item.supporting_obs_code &&
         !proposedClosureStillHolds(
@@ -746,7 +812,7 @@ export async function proposeRecordReconciliation(
       ) {
         refused.push({
           id: item.condition_id,
-          reason: `the record does not hold ${item.supporting_obs_code} in range, or it cannot decide this condition; propose it without supporting_obs_code if the text itself settles it`,
+          reason: `the record does not hold ${item.supporting_obs_code} in range; propose it without supporting_obs_code if the text itself settles it`,
         });
         continue;
       }
@@ -768,7 +834,7 @@ export async function proposeRecordReconciliation(
   let proposedCompletions = 0;
   if (input.checkups.length > 0) {
     const ids = input.checkups.map((item) => item.checkup_item_id);
-    const [items, completions, current] = await Promise.all([
+    const [items, completions] = await Promise.all([
       supabase
         .from("checkup_items")
         .select("id, title, status")
@@ -778,13 +844,8 @@ export async function proposeRecordReconciliation(
         .from("checkup_completions")
         .select("checkup_item_id, done_at")
         .in("checkup_item_id", ids),
-      supabase
-        .from("medical_records")
-        .select("llm_suggested_checkup_completions")
-        .eq("id", record.id)
-        .maybeSingle(),
     ]);
-    for (const result of [items, completions, current]) {
+    for (const result of [items, completions]) {
       if (result.error) throw new Error(`Failed to check the proposal: ${result.error.message}`);
     }
     const known = new Map(
@@ -802,10 +863,7 @@ export async function proposeRecordReconciliation(
       if ((latestDone.get(row.checkup_item_id) ?? "") < day)
         latestDone.set(row.checkup_item_id, day);
     }
-    const pending = parseSuggestedCompletions(
-      (current.data as { llm_suggested_checkup_completions?: unknown } | null)
-        ?.llm_suggested_checkup_completions,
-    );
+    const accepted: SuggestedCompletion[] = [];
 
     for (const item of input.checkups) {
       const checkup = known.get(item.checkup_item_id);
@@ -825,21 +883,23 @@ export async function proposeRecordReconciliation(
         });
         continue;
       }
-      const others = pending.filter((entry) => entry.checkup_item_id !== item.checkup_item_id);
-      pending.length = 0;
-      pending.push(...others, {
+      const others = accepted.filter((entry) => entry.checkup_item_id !== item.checkup_item_id);
+      accepted.length = 0;
+      accepted.push(...others, {
         checkup_item_id: item.checkup_item_id,
         suggested_done_at: item.done_at,
         reason: item.reason,
       });
-      proposedCompletions += 1;
     }
-    if (proposedCompletions > 0) {
-      const { error } = await supabase
-        .from("medical_records")
-        .update({ llm_suggested_checkup_completions: pending })
-        .eq("id", record.id);
-      if (error) throw new Error(`Failed to propose the checkup completions: ${error.message}`);
+    if (accepted.length > 0) {
+      // A newer proposal for the same checkup replaces the waiting one; the rest are kept.
+      await changeSuggestedCompletions(supabase, record.id, (current) => [
+        ...current.filter(
+          (entry) => !accepted.some((item) => item.checkup_item_id === entry.checkup_item_id),
+        ),
+        ...accepted,
+      ]);
+      proposedCompletions = accepted.length;
     }
   }
 
@@ -887,24 +947,12 @@ export async function dismissRecordProposals(
     if (error) throw new Error(`Failed to dismiss a closure: ${error.message}`);
   }
 
-  const { data, error } = await supabase
-    .from("medical_records")
-    .select("llm_suggested_checkup_completions")
-    .eq("id", recordId)
-    .maybeSingle();
-  if (error) throw new Error(`Failed to load the proposal: ${error.message}`);
-  const completions = parseSuggestedCompletions(
-    (data as { llm_suggested_checkup_completions?: unknown } | null)
-      ?.llm_suggested_checkup_completions,
-  );
-  if (completions.length > 0) {
-    const { error: clearError } = await supabase
-      .from("medical_records")
-      .update({ llm_suggested_checkup_completions: null })
-      .eq("id", recordId);
-    if (clearError) throw new Error(`Failed to clear the proposal: ${clearError.message}`);
-  }
-  return { closuresDismissed: mentions.length, completionsDropped: completions.length };
+  let completionsDropped = 0;
+  await changeSuggestedCompletions(supabase, recordId, (current) => {
+    completionsDropped = current.length;
+    return [];
+  });
+  return { closuresDismissed: mentions.length, completionsDropped };
 }
 
 /** The checkup completions waiting on a record, with each checkup's title, for its card. */

@@ -352,7 +352,8 @@ describe("proposeRecordReconciliation", () => {
         {
           data: [
             condition("cond-b12", "Недостаточность B12"),
-            condition("cond-d", "Дефицит D"),
+            condition("cond-d", "Дефицит витамина D"),
+            condition("cond-dm", "Сахарный диабет"),
             condition("cond-gone", "Гастрит", "resolved"),
             condition("cond-mentioned", "Описторхоз"),
           ],
@@ -378,6 +379,12 @@ describe("proposeRecordReconciliation", () => {
           status: "resolved",
           source_anchor: "Витамин D 31.08",
           supporting_obs_code: "vitamin_d_25oh",
+        },
+        {
+          condition_id: "cond-dm",
+          status: "resolved",
+          source_anchor: "Витамин B12 704",
+          supporting_obs_code: "vitamin_b12",
         },
         {
           condition_id: "cond-gone",
@@ -424,6 +431,10 @@ describe("proposeRecordReconciliation", () => {
     expect(outcome.proposedClosures).toBe(1);
     expect(outcome.refused).toEqual([
       { id: "cond-d", reason: expect.stringContaining("does not hold vitamin_d_25oh in range") },
+      {
+        id: "cond-dm",
+        reason: expect.stringContaining("vitamin_b12 does not decide Сахарный диабет"),
+      },
       { id: "cond-gone", reason: "Гастрит is already resolved" },
       { id: "cond-mentioned", reason: expect.stringContaining("already mentions Описторхоз") },
       { id: "cond-other", reason: "not one of this person's conditions" },
@@ -453,9 +464,10 @@ describe("proposeRecordReconciliation", () => {
               { checkup_item_id: "k-old", suggested_done_at: "2026-03-06", reason: "раньше" },
               { checkup_item_id: "k-d", suggested_done_at: "2026-03-01", reason: "заменится" },
             ],
+            updated_at: "2026-10-26T13:00:00.123456+00:00",
           },
         },
-        { data: null },
+        { data: [{ id: "rec-1" }] },
       ],
     });
 
@@ -478,11 +490,52 @@ describe("proposeRecordReconciliation", () => {
         },
       ],
     ]);
+    expect(stub.argsFor("medical_records", "eq")).toContainEqual([
+      "updated_at",
+      "2026-10-26T13:00:00.123456+00:00",
+    ]);
     expect(outcome.proposedCompletions).toBe(1);
     expect(outcome.refused).toEqual([
       { id: "k-done", reason: "ОАК was already done on 2026-03-10" },
       { id: "k-paused", reason: "УЗИ is paused" },
     ]);
+  });
+
+  it("keeps a completion another call queued between its read and its write", async () => {
+    const queued = (ids: string[], updatedAt: string) => ({
+      data: {
+        llm_suggested_checkup_completions: ids.map((id) => ({
+          checkup_item_id: id,
+          suggested_done_at: "2026-03-06",
+          reason: id,
+        })),
+        updated_at: updatedAt,
+      },
+    });
+    const stub = createSupabaseStub({
+      checkup_items: [{ data: [{ id: "k-d", title: "Витамин D", status: "active" }] }],
+      checkup_completions: [{ data: [] }],
+      medical_records: [
+        queued([], "t1"),
+        { data: [] }, // the row moved on: nothing written
+        queued(["k-b12"], "t2"),
+        { data: [{ id: "rec-1" }] },
+      ],
+    });
+
+    await proposeRecordReconciliation(stub.client, record, {
+      conditions: [],
+      checkups: [{ checkup_item_id: "k-d", done_at: "2026-03-06", reason: "k-d" }],
+    });
+
+    const writes = stub.argsFor("medical_records", "update");
+    expect(writes).toHaveLength(2);
+    expect(writes[1][0]).toEqual({
+      llm_suggested_checkup_completions: [
+        { checkup_item_id: "k-b12", suggested_done_at: "2026-03-06", reason: "k-b12" },
+        { checkup_item_id: "k-d", suggested_done_at: "2026-03-06", reason: "k-d" },
+      ],
+    });
   });
 });
 
@@ -499,7 +552,17 @@ describe("applyRecordProposals", () => {
               ],
             },
           },
-          { data: null },
+          {
+            data: {
+              llm_suggested_checkup_completions: [
+                { checkup_item_id: "k-d", suggested_done_at: "2026-03-06", reason: "D" },
+                { checkup_item_id: "k-b12", suggested_done_at: "2026-03-06", reason: "B12" },
+                { checkup_item_id: "k-new", suggested_done_at: "2026-03-06", reason: "meanwhile" },
+              ],
+              updated_at: "t2",
+            },
+          },
+          { data: [{ id: "rec-1" }] },
         ],
         record_observations: [{ data: [B12_IN_RANGE] }],
         condition_records: [{ data: null }, { data: { status_in_record: "resolved" } }],
@@ -518,6 +581,16 @@ describe("applyRecordProposals", () => {
       [{ checkup_item_id: "k-d", done_at: "2026-03-06", note: "D", evidence_record_id: "rec-1" }],
     ]);
     expect(stub.argsFor("conditions", "update")).toEqual([[{ current_status: "resolved" }]]);
+    // What it applied comes off the list; what was proposed meanwhile stays for the owner.
+    expect(stub.argsFor("medical_records", "update")).toEqual([
+      [
+        {
+          llm_suggested_checkup_completions: [
+            { checkup_item_id: "k-new", suggested_done_at: "2026-03-06", reason: "meanwhile" },
+          ],
+        },
+      ],
+    ]);
     expect(outcome).toEqual({ mentionsConfirmed: 1, closuresLeftPending: 0, checkupsCompleted: 1 });
   });
 });
@@ -533,9 +606,10 @@ describe("dismissRecordProposals", () => {
               llm_suggested_checkup_completions: [
                 { checkup_item_id: "k-d", suggested_done_at: "2026-03-06", reason: "D" },
               ],
+              updated_at: "t1",
             },
           },
-          { data: null },
+          { data: [{ id: "rec-1" }] },
         ],
       },
       {

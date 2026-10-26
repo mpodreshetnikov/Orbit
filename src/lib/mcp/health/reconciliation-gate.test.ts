@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  analyteDecidesCondition,
   isInCurrentCycle,
   pickReconciliationSuggestions,
   reviewReconciliationDecision,
@@ -188,5 +189,20 @@ describe("reviewReconciliationDecision", () => {
   it("does not let the flag stand in for a suggestion it ignores", () => {
     const verdict = reviewReconciliationDecision(context, { nothing_to_reconcile: true });
     expect(verdict.ok).toBe(false);
+  });
+});
+
+describe("analyteDecidesCondition", () => {
+  it("pairs an analyte only with the condition it decides, by code or by name", () => {
+    expect(analyteDecidesCondition("vitamin_b12", { name: "Что-то", code: "E53.8" })).toBe(true);
+    expect(
+      analyteDecidesCondition("vitamin_d_25oh", { name: "Дефицит витамина D", code: null }),
+    ).toBe(true);
+    expect(analyteDecidesCondition("vitamin_b12", { name: "Сахарный диабет", code: "E11" })).toBe(
+      false,
+    );
+    expect(analyteDecidesCondition("glucose", { name: "Сахарный диабет", code: "E11" })).toBe(
+      false,
+    );
   });
 });

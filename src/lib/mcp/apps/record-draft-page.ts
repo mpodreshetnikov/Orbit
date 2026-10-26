@@ -293,7 +293,7 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
     if (draft.summary) card.appendChild(el("p", "summary", draft.summary));
 
     var flagged = draft.observations.filter(function (o) { return o.flag || o.critical; }).length;
-    var done = decision && decision.kind === "confirmed";
+    var done = decision && decision.kind === "confirmed" && !decision.partial;
     var closuresTitle = done ? "Закрыто" : proposal ? "Закроется при подтверждении" : "Закроется при одобрении";
     var completionsTitle = done ? "Отмечено выполненным" : proposal ? "Отметится выполненным при подтверждении" : "Отметится выполненным при одобрении";
     var closing = [
@@ -343,7 +343,7 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
     if (isSettled()) {
       var box = el("div", decision.kind === "approved" || decision.kind === "confirmed" ? "result ok" : "result");
       if (decision.kind === "confirmed") {
-        box.appendChild(el("strong", null, "Подтверждено, в карте"));
+        box.appendChild(el("strong", null, decision.partial ? "Подтверждено частично" : "Подтверждено, в карте"));
         if (decision.details) box.appendChild(el("p", null, decision.details));
       } else if (decision.kind === "dismissed") {
         box.appendChild(el("strong", null, "Отклонено"));
@@ -422,8 +422,9 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
       if (confirmed.mentionsConfirmed) lines.push("Закрыто диагнозов: " + confirmed.mentionsConfirmed + ".");
       if (confirmed.checkupsCompleted) lines.push("Отмечено чекапов: " + confirmed.checkupsCompleted + ".");
       if (confirmed.closuresLeftPending) lines.push("Закрытий осталось на подтверждении: " + confirmed.closuresLeftPending + ".");
-      decision = { kind: "confirmed", details: lines.join(" ") || null };
-      tellModel("The owner confirmed the proposed closures and checkup completions for \\"" + draft.title + "\\" (record_id " + draft.record_id + ") on the Orbit card; they are on the chart now.");
+      var left = confirmed.closuresLeftPending || 0;
+      decision = { kind: "confirmed", partial: left > 0, details: lines.join(" ") || null };
+      tellModel("The owner confirmed the proposed closures and checkup completions for \\"" + draft.title + "\\" (record_id " + draft.record_id + ") on the Orbit card: " + (confirmed.mentionsConfirmed || 0) + " closure(s) and " + (confirmed.checkupsCompleted || 0) + " checkup completion(s) are on the chart now." + (left ? " " + left + " closure(s) did NOT reach the chart: the measurement they cite is no longer in range on this record, so they still await confirmation and the condition keeps its status." : ""));
     } else if (action === "dismiss") {
       decision = { kind: "dismissed" };
       tellModel("The owner declined the proposed closures and checkup completions for \\"" + draft.title + "\\" (record_id " + draft.record_id + ") on the Orbit card; nothing changed. Do not propose them again unless the owner asks.");
