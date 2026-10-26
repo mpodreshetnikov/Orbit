@@ -10,11 +10,12 @@ name: Импорт
     timeout: 60000
 - takeScreenshot: import-01-start
 # The file card sits under the bank and the way in: bring its drop area on screen, then open it.
+# The area is one button, so its label runs on into the hint under the title.
 - scrollUntilVisible:
-    element: "Выберите файл выписки"
+    element: "Выберите файл выписки.*"
     direction: DOWN
 - takeScreenshot: import-01-file
-- tapOn: "Выберите файл выписки"
+- tapOn: "Выберите файл выписки.*"
 - extendedWaitUntil: { visible: "(Cancel|Отменить|Отмена)", timeout: 15000 }
 - takeScreenshot: import-02-picker
 # The picker can take the first Cancel while it is still settling and stay open: cancel again while
