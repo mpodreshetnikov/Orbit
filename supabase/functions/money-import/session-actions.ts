@@ -363,6 +363,16 @@ export async function completeSessionAction(
       if (batchStatus === "failed" && currentBatchStatus !== "completed") {
         batchPatch.status = "failed";
         batchPatch.completed_at = nowIso;
+        // Why the run failed, for the report: the extension's reason, kept beside the range
+        // meta rather than over it.
+        const failureMessage = normalizeText(body.failure_message)?.slice(0, 500);
+        if (failureMessage) {
+          const currentMeta =
+            batch.meta && typeof batch.meta === "object" && !Array.isArray(batch.meta)
+              ? (batch.meta as Record<string, unknown>)
+              : {};
+          batchPatch.meta = { ...currentMeta, failure_message: failureMessage };
+        }
       } else if (currentBatchStatus === "completed") {
         batchPatch.completed_at = nowIso;
       }

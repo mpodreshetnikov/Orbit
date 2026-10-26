@@ -39,6 +39,10 @@ export default function ImportBatchScreen() {
     );
   }
   const { batch, rows } = report.data;
+  const failureMessage =
+    batch.status === "failed" && typeof batch.meta?.failure_message === "string"
+      ? batch.meta.failure_message.trim() || null
+      : null;
   const operations = rows.filter((row) => row.row_kind === "transaction");
   const run = (apply: boolean) =>
     review.mutate(
@@ -85,6 +89,11 @@ export default function ImportBatchScreen() {
                 {line}
               </Text>
             ))}
+          {failureMessage ? (
+            <Text size="sm" tone="destructive">
+              {t("money.importReportFailureReason", { value: failureMessage })}
+            </Text>
+          ) : null}
         </Card>
 
         {batch.status === "pending" ? (
