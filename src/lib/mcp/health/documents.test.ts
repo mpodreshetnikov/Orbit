@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   activateMedicalRecord,
+  applyRecordProposals,
   createDraftRecord,
   dismissConditionClosure,
+  dismissRecordProposals,
   findMissingPages,
+  proposeRecordReconciliation,
   removeRecordDraft,
   storagePathForPage,
   suggestReconciliation,
@@ -327,6 +330,235 @@ describe("activateMedicalRecord", () => {
     expect(stub.argsFor("condition_records", "update")).toEqual([]);
     expect(outcome.closuresLeftPending).toBe(1);
     expect(outcome.mentionsConfirmed).toBe(0);
+  });
+});
+
+describe("proposeRecordReconciliation", () => {
+  const record = {
+    id: "rec-1",
+    person_id: "p-1",
+    record_date: "2026-03-06",
+    ocr_text: "Витамин B12 704 пг/мл (197-771)\nВитамин D 31.08",
+  };
+  const condition = (id: string, name: string, current_status = "active") => ({
+    id,
+    name,
+    current_status,
+  });
+
+  it("writes a closure nobody has verified, and refuses what the record cannot back", async () => {
+    const stub = createSupabaseStub({
+      conditions: [
+        {
+          data: [
+            condition("cond-b12", "Недостаточность B12"),
+            condition("cond-d", "Дефицит D"),
+            condition("cond-gone", "Гастрит", "resolved"),
+            condition("cond-mentioned", "Описторхоз"),
+          ],
+        },
+      ],
+      condition_records: [
+        { data: [{ condition_id: "cond-mentioned", status_in_record: "suspected" }] },
+        { data: null }, // insert
+      ],
+      record_observations: [{ data: [B12_IN_RANGE] }],
+    });
+
+    const outcome = await proposeRecordReconciliation(stub.client, record, {
+      conditions: [
+        {
+          condition_id: "cond-b12",
+          status: "resolved",
+          source_anchor: "витамин b12 704",
+          supporting_obs_code: "vitamin_b12",
+        },
+        {
+          condition_id: "cond-d",
+          status: "resolved",
+          source_anchor: "Витамин D 31.08",
+          supporting_obs_code: "vitamin_d_25oh",
+        },
+        {
+          condition_id: "cond-gone",
+          status: "resolved",
+          source_anchor: "x",
+          supporting_obs_code: null,
+        },
+        {
+          condition_id: "cond-mentioned",
+          status: "resolved",
+          source_anchor: "Витамин D",
+          supporting_obs_code: null,
+        },
+        {
+          condition_id: "cond-other",
+          status: "resolved",
+          source_anchor: "x",
+          supporting_obs_code: null,
+        },
+        {
+          condition_id: "cond-b12",
+          status: "history",
+          source_anchor: "не из этого документа",
+          supporting_obs_code: null,
+        },
+      ],
+      checkups: [],
+    });
+
+    expect(stub.argsFor("condition_records", "insert")).toEqual([
+      [
+        {
+          condition_id: "cond-b12",
+          record_id: "rec-1",
+          status_in_record: "resolved",
+          source_anchor: "витамин b12 704",
+          supporting_obs_code: "vitamin_b12",
+          is_llm_extracted: true,
+          is_user_verified: false,
+          review_decision: "pending",
+        },
+      ],
+    ]);
+    expect(outcome.proposedClosures).toBe(1);
+    expect(outcome.refused).toEqual([
+      { id: "cond-d", reason: expect.stringContaining("does not hold vitamin_d_25oh in range") },
+      { id: "cond-gone", reason: "Гастрит is already resolved" },
+      { id: "cond-mentioned", reason: expect.stringContaining("already mentions Описторхоз") },
+      { id: "cond-other", reason: "not one of this person's conditions" },
+      {
+        id: "cond-b12",
+        reason: expect.stringContaining("source_anchor is not in the record's text"),
+      },
+    ]);
+  });
+
+  it("queues completions on the record beside the ones already waiting, never before the last one done", async () => {
+    const stub = createSupabaseStub({
+      checkup_items: [
+        {
+          data: [
+            { id: "k-d", title: "Витамин D", status: "active" },
+            { id: "k-done", title: "ОАК", status: "active" },
+            { id: "k-paused", title: "УЗИ", status: "paused" },
+          ],
+        },
+      ],
+      checkup_completions: [{ data: [{ checkup_item_id: "k-done", done_at: "2026-03-10" }] }],
+      medical_records: [
+        {
+          data: {
+            llm_suggested_checkup_completions: [
+              { checkup_item_id: "k-old", suggested_done_at: "2026-03-06", reason: "раньше" },
+              { checkup_item_id: "k-d", suggested_done_at: "2026-03-01", reason: "заменится" },
+            ],
+          },
+        },
+        { data: null },
+      ],
+    });
+
+    const outcome = await proposeRecordReconciliation(stub.client, record, {
+      conditions: [],
+      checkups: [
+        { checkup_item_id: "k-d", done_at: "2026-03-06", reason: "D в бланке" },
+        { checkup_item_id: "k-done", done_at: "2026-03-06", reason: "ОАК в бланке" },
+        { checkup_item_id: "k-paused", done_at: "2026-03-06", reason: "—" },
+      ],
+    });
+
+    expect(stub.argsFor("medical_records", "update")).toEqual([
+      [
+        {
+          llm_suggested_checkup_completions: [
+            { checkup_item_id: "k-old", suggested_done_at: "2026-03-06", reason: "раньше" },
+            { checkup_item_id: "k-d", suggested_done_at: "2026-03-06", reason: "D в бланке" },
+          ],
+        },
+      ],
+    ]);
+    expect(outcome.proposedCompletions).toBe(1);
+    expect(outcome.refused).toEqual([
+      { id: "k-done", reason: "ОАК was already done on 2026-03-10" },
+      { id: "k-paused", reason: "УЗИ is paused" },
+    ]);
+  });
+});
+
+describe("applyRecordProposals", () => {
+  it("confirms the closure and records each completion once", async () => {
+    const stub = createSupabaseStub(
+      {
+        medical_records: [
+          {
+            data: {
+              llm_suggested_checkup_completions: [
+                { checkup_item_id: "k-d", suggested_done_at: "2026-03-06", reason: "D" },
+                { checkup_item_id: "k-b12", suggested_done_at: "2026-03-06", reason: "B12" },
+              ],
+            },
+          },
+          { data: null },
+        ],
+        record_observations: [{ data: [B12_IN_RANGE] }],
+        condition_records: [{ data: null }, { data: { status_in_record: "resolved" } }],
+        conditions: [{ data: null }],
+        checkup_completions: [
+          { data: [{ checkup_item_id: "k-b12", done_at: "2026-03-06T00:00:00Z" }] },
+          { data: null },
+        ],
+      },
+      { get_record_conditions: { data: [B12_CLOSURE] } },
+    );
+
+    const outcome = await applyRecordProposals(stub.client, "rec-1");
+
+    expect(stub.argsFor("checkup_completions", "insert")).toEqual([
+      [{ checkup_item_id: "k-d", done_at: "2026-03-06", note: "D", evidence_record_id: "rec-1" }],
+    ]);
+    expect(stub.argsFor("conditions", "update")).toEqual([[{ current_status: "resolved" }]]);
+    expect(outcome).toEqual({ mentionsConfirmed: 1, closuresLeftPending: 0, checkupsCompleted: 1 });
+  });
+});
+
+describe("dismissRecordProposals", () => {
+  it("dismisses pending closures and drops the suggested completions", async () => {
+    const stub = createSupabaseStub(
+      {
+        condition_records: [{ data: null }],
+        medical_records: [
+          {
+            data: {
+              llm_suggested_checkup_completions: [
+                { checkup_item_id: "k-d", suggested_done_at: "2026-03-06", reason: "D" },
+              ],
+            },
+          },
+          { data: null },
+        ],
+      },
+      {
+        get_record_conditions: {
+          data: [
+            B12_CLOSURE,
+            { ...B12_CLOSURE, id: "cr-verified", is_user_verified: true },
+            { ...B12_CLOSURE, id: "cr-active", status_in_record: "active" },
+          ],
+        },
+      },
+    );
+
+    const outcome = await dismissRecordProposals(stub.client, "rec-1");
+
+    expect(stub.argsFor("condition_records", "update")).toEqual([
+      [{ review_decision: "dismissed" }],
+    ]);
+    expect(stub.argsFor("condition_records", "eq")).toEqual([["id", "cr-b12"]]);
+    expect(stub.argsFor("medical_records", "update")).toEqual([
+      [{ llm_suggested_checkup_completions: null }],
+    ]);
+    expect(outcome).toEqual({ closuresDismissed: 1, completionsDropped: 1 });
   });
 });
 

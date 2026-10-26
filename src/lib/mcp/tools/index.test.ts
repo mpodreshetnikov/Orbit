@@ -67,6 +67,7 @@ describe("registerHealthTools", () => {
         "get_finding_history",
         "get_ingest_candidates",
         "ingest_medical_document",
+        "propose_reconciliation",
         "search_medical_records",
         "search_observations",
         "upsert_catalog_entry",
@@ -106,6 +107,7 @@ describe("registerHealthTools", () => {
     "dismiss_condition_closure",
     "ingest_medical_document",
     "log_dose",
+    "propose_reconciliation",
     "update_medication",
     "upsert_catalog_entry",
   ];

@@ -1,7 +1,12 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { RECORD_TYPE_LABELS, type RecordType } from "@/types/medical-record";
-import { removeRecordDraft } from "../health/documents";
+import {
+  applyRecordProposals,
+  dismissRecordProposals,
+  getPendingCompletions,
+  removeRecordDraft,
+} from "../health/documents";
 import {
   getMedicalRecord,
   getRecordConditions,
@@ -73,6 +78,11 @@ export interface DraftClosure {
   status: string;
   evidence: string | null;
 }
+export interface DraftCompletion {
+  title: string;
+  done_at: string;
+  reason: string;
+}
 export interface DraftView {
   record_id: string;
   status: string;
@@ -86,6 +96,12 @@ export interface DraftView {
   findings: DraftFinding[];
   conditions: DraftCondition[];
   closures: DraftClosure[];
+  completions: DraftCompletion[];
+  /**
+   * An approved record with closures or completions proposed after approval
+   * (`propose_reconciliation`): the card asks the owner to confirm those, not to approve the record.
+   */
+  has_proposals: boolean;
 }
 
 function text(value: unknown): string | null {
@@ -111,6 +127,7 @@ export function buildDraftView(input: {
   observations: Array<Record<string, unknown>>;
   findings: Array<Record<string, unknown>>;
   conditions: Array<Record<string, unknown>>;
+  completions?: Array<{ title: string; done_at: string; reason: string }>;
   reviewUrl: string | null;
 }): DraftView {
   const { record } = input;
@@ -180,6 +197,10 @@ export function buildDraftView(input: {
     });
   }
 
+  const completions = (input.completions ?? []).map(
+    (row): DraftCompletion => ({ title: row.title, done_at: row.done_at, reason: row.reason }),
+  );
+
   return {
     record_id: String(record.id),
     status: String(record.status ?? ""),
@@ -193,6 +214,9 @@ export function buildDraftView(input: {
     findings,
     conditions,
     closures,
+    completions,
+    has_proposals:
+      String(record.status) === "active" && (closures.length > 0 || completions.length > 0),
   };
 }
 
@@ -221,7 +245,7 @@ export function registerRecordDraftApp(
     {
       title: "Show record draft",
       description:
-        "Show the owner an ingested record's draft as a card in the chat: what it will put on the chart (lab values, findings, diagnoses, closures), with Approve and Decline buttons the owner presses on the card. Call it right after ingest_medical_document instead of asking for approval in words. Approve on the card does what activate_medical_record does; Decline removes the draft (restorable in the app). Do not call activate_medical_record yourself after showing the card unless the owner asks you to in words.",
+        "Show the owner an ingested record's draft as a card in the chat: what it will put on the chart (lab values, findings, diagnoses, closures), with Approve and Decline buttons the owner presses on the card. Call it right after ingest_medical_document instead of asking for approval in words. Approve on the card does what activate_medical_record does; Decline removes the draft (restorable in the app). Do not call activate_medical_record yourself after showing the card unless the owner asks you to in words. After propose_reconciliation, call it for that approved record: the card then asks the owner to confirm or decline the proposed closures and checkup completions.",
       inputSchema: z.object({ record_id: uuidSchema }),
       annotations: { readOnlyHint: true, openWorldHint: false },
       _meta: {
@@ -239,10 +263,11 @@ export function registerRecordDraftApp(
         );
       }
 
-      const [observations, findings, conditions, person] = await Promise.all([
+      const [observations, findings, conditions, completions, person] = await Promise.all([
         getRecordObservations(supabase, args.record_id),
         getRecordFindings(supabase, args.record_id),
         getRecordConditions(supabase, args.record_id),
+        status === "removed" ? [] : getPendingCompletions(supabase, args.record_id),
         supabase.from("persons").select("name").eq("id", String(record.person_id)).maybeSingle(),
       ]);
       const view = buildDraftView({
@@ -251,16 +276,19 @@ export function registerRecordDraftApp(
         observations,
         findings,
         conditions,
+        completions,
         reviewUrl: reviewUrl(auth, args.record_id),
       });
 
-      const counts = `${view.observations.length} lab value(s), ${view.findings.length} finding(s), ${view.conditions.length} diagnosis mention(s), ${view.closures.length} closure(s) awaiting confirmation`;
+      const counts = `${view.observations.length} lab value(s), ${view.findings.length} finding(s), ${view.conditions.length} diagnosis mention(s), ${view.closures.length} closure(s) awaiting confirmation, ${view.completions.length} checkup completion(s) awaiting confirmation`;
       const next =
         status === "structure_review"
           ? "The owner approves or declines it on the card; wait for them. If the card does not show, give them the review link instead."
-          : status === "active"
-            ? "It is already approved."
-            : "It was declined and set aside.";
+          : view.has_proposals
+            ? "It is approved; the owner confirms or declines the proposed closures and completions on the card. Nothing has changed on the chart until they confirm; wait for them."
+            : status === "active"
+              ? "It is already approved."
+              : "It was declined and set aside.";
       return ok(
         [
           `Showing the draft of "${view.title}" (${counts}). ${next}`,
@@ -298,6 +326,62 @@ export function registerRecordDraftApp(
           record_id: args.record_id,
           status: "removed",
         },
+      );
+    }, WRITE_SCOPE),
+  );
+  server.registerTool(
+    "confirm_record_proposals",
+    {
+      title: "Confirm proposed closures",
+      description:
+        "Used by the record draft card's Confirm button on an approved record: the closures and checkup completions proposed for it reach the chart.",
+      inputSchema: z.object({ record_id: uuidSchema }),
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+      _meta: { ui: { visibility: ["app"] } },
+    },
+    withUserClient<{ record_id: string }>(async (supabase, args) => {
+      const record = await getMedicalRecord(supabase, args.record_id);
+      if (!record) return fail(`No medical record with id ${args.record_id}.`);
+      if (record.status !== "active") {
+        return fail(
+          `Record ${args.record_id} is ${String(record.status)}; only an approved record's proposals are confirmed here.`,
+        );
+      }
+      const outcome = await applyRecordProposals(supabase, args.record_id);
+      const lines = [
+        `Confirmed on "${String(record.title)}": ${outcome.mentionsConfirmed} closure(s), ${outcome.checkupsCompleted} checkup(s) marked done.`,
+      ];
+      if (outcome.closuresLeftPending > 0) {
+        lines.push(
+          `${outcome.closuresLeftPending} closure(s) left awaiting confirmation: the measurement they cite is no longer in range on this record.`,
+        );
+      }
+      return ok(lines.join("\n"), { record_id: args.record_id, status: "active", ...outcome });
+    }, WRITE_SCOPE),
+  );
+
+  server.registerTool(
+    "dismiss_record_proposals",
+    {
+      title: "Decline proposed closures",
+      description:
+        "Used by the record draft card's Decline button on an approved record: the closures and checkup completions proposed for it are turned down, and the record itself stays approved.",
+      inputSchema: z.object({ record_id: uuidSchema }),
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+      _meta: { ui: { visibility: ["app"] } },
+    },
+    withUserClient<{ record_id: string }>(async (supabase, args) => {
+      const record = await getMedicalRecord(supabase, args.record_id);
+      if (!record) return fail(`No medical record with id ${args.record_id}.`);
+      if (record.status !== "active") {
+        return fail(
+          `Record ${args.record_id} is ${String(record.status)}; only an approved record's proposals are declined here.`,
+        );
+      }
+      const outcome = await dismissRecordProposals(supabase, args.record_id);
+      return ok(
+        `Declined on "${String(record.title)}": ${outcome.closuresDismissed} closure(s), ${outcome.completionsDropped} checkup completion(s). The record stays approved.`,
+        { record_id: args.record_id, status: "active", ...outcome },
       );
     }, WRITE_SCOPE),
   );

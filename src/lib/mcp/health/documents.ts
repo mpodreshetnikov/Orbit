@@ -494,9 +494,39 @@ export async function activateMedicalRecord(
     if (error) throw new Error(`Failed to verify ${table}: ${error.message}`);
   }
 
+  const confirmed = await confirmRecordProposals(
+    supabase,
+    record.id,
+    (activated as { llm_suggested_checkup_completions: unknown }).llm_suggested_checkup_completions,
+  );
+
+  return {
+    droppedUnmatchedObservations: (dropped ?? []).length,
+    proposalsMaterialized: materialization.materialized,
+    proposalsSkipped: materialization.skipped,
+    ...confirmed,
+  };
+}
+
+/**
+ * What approving a record rules on, shared by approving a draft and by confirming closures proposed
+ * later for an approved record (`propose_reconciliation`, T-261026-y7c):
+ *
+ * 1. every mention nobody has ruled on is confirmed, except a closure whose measurements no longer
+ *    hold on the record (`proposedClosureStillHolds`), which stays pending;
+ * 2. suggested checkup completions are recorded with this record as their evidence, once: a
+ *    completion of the same checkup on the same day is not written twice.
+ */
+async function confirmRecordProposals(
+  supabase: SupabaseClient<Database>,
+  recordId: string,
+  suggestedCompletions: unknown,
+): Promise<
+  Pick<ActivationOutcome, "mentionsConfirmed" | "closuresLeftPending" | "checkupsCompleted">
+> {
   // Read again: materialisation has just verified the proposals, and what is left unverified is
   // what approving the record rules on.
-  const unruled = (await loadConditionMentions(supabase, record.id)).filter(
+  const unruled = (await loadConditionMentions(supabase, recordId)).filter(
     isConfirmedByRecordApproval,
   );
   let persisted: PersistedObservation[] = [];
@@ -504,7 +534,7 @@ export async function activateMedicalRecord(
     const { data, error } = await supabase
       .from("record_observations")
       .select(OBSERVATION_RECHECK_COLUMNS)
-      .eq("record_id", record.id);
+      .eq("record_id", recordId);
     // A read that failed is not evidence that the closure still holds.
     if (error) throw new Error(`Failed to re-check the cited measurements: ${error.message}`);
     persisted = (data ?? []) as unknown as PersistedObservation[];
@@ -524,33 +554,48 @@ export async function activateMedicalRecord(
     }
   }
 
-  const suggested = parseSuggestedCompletions(
-    (activated as { llm_suggested_checkup_completions: unknown }).llm_suggested_checkup_completions,
-  );
-  for (const suggestion of suggested) {
-    const { error } = await supabase.from("checkup_completions").insert({
-      checkup_item_id: suggestion.checkup_item_id,
-      done_at: suggestion.suggested_done_at.slice(0, 10),
-      note: suggestion.reason || null,
-      evidence_record_id: record.id,
-    });
-    if (error) throw new Error(`Failed to record a checkup completion: ${error.message}`);
-  }
+  const suggested = parseSuggestedCompletions(suggestedCompletions);
+  let completed = 0;
   if (suggested.length > 0) {
+    const { data: existing, error: existingError } = await supabase
+      .from("checkup_completions")
+      .select("checkup_item_id, done_at")
+      .in(
+        "checkup_item_id",
+        suggested.map((suggestion) => suggestion.checkup_item_id),
+      );
+    if (existingError) {
+      throw new Error(`Failed to read checkup completions: ${existingError.message}`);
+    }
+    const done = new Set(
+      ((existing ?? []) as Array<{ checkup_item_id: string; done_at: string }>).map(
+        (row) => `${row.checkup_item_id}:${String(row.done_at).slice(0, 10)}`,
+      ),
+    );
+    for (const suggestion of suggested) {
+      const doneAt = suggestion.suggested_done_at.slice(0, 10);
+      if (done.has(`${suggestion.checkup_item_id}:${doneAt}`)) continue;
+      const { error } = await supabase.from("checkup_completions").insert({
+        checkup_item_id: suggestion.checkup_item_id,
+        done_at: doneAt,
+        note: suggestion.reason || null,
+        evidence_record_id: recordId,
+      });
+      if (error) throw new Error(`Failed to record a checkup completion: ${error.message}`);
+      done.add(`${suggestion.checkup_item_id}:${doneAt}`);
+      completed += 1;
+    }
     const { error } = await supabase
       .from("medical_records")
       .update({ llm_suggested_checkup_completions: null })
-      .eq("id", record.id);
+      .eq("id", recordId);
     if (error) throw new Error(`Failed to clear the applied checkup suggestions: ${error.message}`);
   }
 
   return {
-    droppedUnmatchedObservations: (dropped ?? []).length,
-    proposalsMaterialized: materialization.materialized,
-    proposalsSkipped: materialization.skipped,
     mentionsConfirmed: confirmable.length,
     closuresLeftPending: unruled.length - confirmable.length,
-    checkupsCompleted: suggested.length,
+    checkupsCompleted: completed,
   };
 }
 
@@ -585,4 +630,314 @@ function parseSuggestedCompletions(
       },
     ];
   });
+}
+
+/** What a proposal for an approved record asks for, as `propose_reconciliation` received it. */
+export interface RecordProposalInput {
+  conditions: Array<{
+    condition_id: string;
+    status: "resolved" | "history";
+    source_anchor: string;
+    supporting_obs_code: string | null;
+  }>;
+  checkups: Array<{ checkup_item_id: string; done_at: string; reason: string }>;
+}
+
+export interface RecordProposalOutcome {
+  proposedClosures: number;
+  proposedCompletions: number;
+  refused: Array<{ id: string; reason: string }>;
+}
+
+/**
+ * Propose closures and checkup completions an approved record shows, for the owner to confirm on
+ * its card (T-261026-y7c). Ingest is the only other way in, and it refuses an approved record, so
+ * without this a document that ended a condition could never say so once it was on the chart.
+ *
+ * Nothing here changes the chart. A closure is written the way ingest writes one -- a mention
+ * authored by the model and verified by nobody, which `AUTHORITATIVE_STATUS_FILTER` keeps from
+ * setting the condition's status -- and a completion waits on the record, as a draft's do. The
+ * owner's confirm (`applyRecordProposals`) or dismiss (`dismissRecordProposals`) decides them.
+ *
+ * The owner's confirm is the authority here, so a closure need not rest on a lab value the way an
+ * ingest closure must; but a closure that cites one is refused when the record does not hold it in
+ * range, and every closure must quote the record's own text.
+ */
+export async function proposeRecordReconciliation(
+  supabase: SupabaseClient<Database>,
+  record: { id: string; person_id: string; record_date: string | null; ocr_text: string | null },
+  input: RecordProposalInput,
+): Promise<RecordProposalOutcome> {
+  const refused: RecordProposalOutcome["refused"] = [];
+  const recordText = (record.ocr_text ?? "").toLowerCase();
+
+  let proposedClosures = 0;
+  if (input.conditions.length > 0) {
+    const ids = input.conditions.map((item) => item.condition_id);
+    const [conditions, mentions, observations] = await Promise.all([
+      supabase
+        .from("conditions")
+        .select("id, name, current_status")
+        .eq("person_id", record.person_id)
+        .is("deleted_at", null)
+        .in("id", ids),
+      supabase
+        .from("condition_records")
+        .select("condition_id, status_in_record")
+        .eq("record_id", record.id)
+        .in("condition_id", ids),
+      supabase
+        .from("record_observations")
+        .select(OBSERVATION_RECHECK_COLUMNS)
+        .eq("record_id", record.id),
+    ]);
+    for (const result of [conditions, mentions, observations]) {
+      if (result.error) throw new Error(`Failed to check the proposal: ${result.error.message}`);
+    }
+    const known = new Map(
+      ((conditions.data ?? []) as Array<{ id: string; name: string; current_status: string }>).map(
+        (row) => [row.id, row],
+      ),
+    );
+    const mentioned = new Map(
+      ((mentions.data ?? []) as Array<{ condition_id: string; status_in_record: string }>).map(
+        (row) => [row.condition_id, row.status_in_record],
+      ),
+    );
+    const persisted = (observations.data ?? []) as unknown as PersistedObservation[];
+
+    for (const item of input.conditions) {
+      const condition = known.get(item.condition_id);
+      if (!condition) {
+        refused.push({ id: item.condition_id, reason: "not one of this person's conditions" });
+        continue;
+      }
+      if (condition.current_status === item.status) {
+        refused.push({
+          id: item.condition_id,
+          reason: `${condition.name} is already ${item.status}`,
+        });
+        continue;
+      }
+      const already = mentioned.get(item.condition_id);
+      if (already) {
+        refused.push({
+          id: item.condition_id,
+          reason: `this record already mentions ${condition.name} as ${already}`,
+        });
+        continue;
+      }
+      const anchor = item.source_anchor.trim();
+      if (!anchor || !recordText.includes(anchor.toLowerCase())) {
+        refused.push({
+          id: item.condition_id,
+          reason: recordText
+            ? "source_anchor is not in the record's text; quote the record verbatim"
+            : "the record has no text to quote, so the owner has to close this condition in the app",
+        });
+        continue;
+      }
+      if (
+        item.supporting_obs_code &&
+        !proposedClosureStillHolds(
+          { status_in_record: item.status, supporting_obs_code: item.supporting_obs_code },
+          persisted,
+        )
+      ) {
+        refused.push({
+          id: item.condition_id,
+          reason: `the record does not hold ${item.supporting_obs_code} in range, or it cannot decide this condition; propose it without supporting_obs_code if the text itself settles it`,
+        });
+        continue;
+      }
+      const { error } = await supabase.from("condition_records").insert({
+        condition_id: item.condition_id,
+        record_id: record.id,
+        status_in_record: item.status,
+        source_anchor: anchor,
+        supporting_obs_code: item.supporting_obs_code,
+        is_llm_extracted: true,
+        is_user_verified: false,
+        review_decision: "pending",
+      });
+      if (error) throw new Error(`Failed to propose closing ${condition.name}: ${error.message}`);
+      proposedClosures += 1;
+    }
+  }
+
+  let proposedCompletions = 0;
+  if (input.checkups.length > 0) {
+    const ids = input.checkups.map((item) => item.checkup_item_id);
+    const [items, completions, current] = await Promise.all([
+      supabase
+        .from("checkup_items")
+        .select("id, title, status")
+        .eq("person_id", record.person_id)
+        .in("id", ids),
+      supabase
+        .from("checkup_completions")
+        .select("checkup_item_id, done_at")
+        .in("checkup_item_id", ids),
+      supabase
+        .from("medical_records")
+        .select("llm_suggested_checkup_completions")
+        .eq("id", record.id)
+        .maybeSingle(),
+    ]);
+    for (const result of [items, completions, current]) {
+      if (result.error) throw new Error(`Failed to check the proposal: ${result.error.message}`);
+    }
+    const known = new Map(
+      ((items.data ?? []) as Array<{ id: string; title: string; status: string }>).map((row) => [
+        row.id,
+        row,
+      ]),
+    );
+    const latestDone = new Map<string, string>();
+    for (const row of (completions.data ?? []) as Array<{
+      checkup_item_id: string;
+      done_at: string;
+    }>) {
+      const day = String(row.done_at).slice(0, 10);
+      if ((latestDone.get(row.checkup_item_id) ?? "") < day)
+        latestDone.set(row.checkup_item_id, day);
+    }
+    const pending = parseSuggestedCompletions(
+      (current.data as { llm_suggested_checkup_completions?: unknown } | null)
+        ?.llm_suggested_checkup_completions,
+    );
+
+    for (const item of input.checkups) {
+      const checkup = known.get(item.checkup_item_id);
+      if (!checkup) {
+        refused.push({ id: item.checkup_item_id, reason: "not one of this person's checkups" });
+        continue;
+      }
+      if (checkup.status !== "active") {
+        refused.push({ id: item.checkup_item_id, reason: `${checkup.title} is ${checkup.status}` });
+        continue;
+      }
+      const last = latestDone.get(item.checkup_item_id);
+      if (last && last >= item.done_at) {
+        refused.push({
+          id: item.checkup_item_id,
+          reason: `${checkup.title} was already done on ${last}`,
+        });
+        continue;
+      }
+      const others = pending.filter((entry) => entry.checkup_item_id !== item.checkup_item_id);
+      pending.length = 0;
+      pending.push(...others, {
+        checkup_item_id: item.checkup_item_id,
+        suggested_done_at: item.done_at,
+        reason: item.reason,
+      });
+      proposedCompletions += 1;
+    }
+    if (proposedCompletions > 0) {
+      const { error } = await supabase
+        .from("medical_records")
+        .update({ llm_suggested_checkup_completions: pending })
+        .eq("id", record.id);
+      if (error) throw new Error(`Failed to propose the checkup completions: ${error.message}`);
+    }
+  }
+
+  return { proposedClosures, proposedCompletions, refused };
+}
+
+/** The owner confirmed what was proposed for an approved record: it reaches the chart now. */
+export async function applyRecordProposals(
+  supabase: SupabaseClient<Database>,
+  recordId: string,
+): Promise<
+  Pick<ActivationOutcome, "mentionsConfirmed" | "closuresLeftPending" | "checkupsCompleted">
+> {
+  const { data, error } = await supabase
+    .from("medical_records")
+    .select("llm_suggested_checkup_completions")
+    .eq("id", recordId)
+    .maybeSingle();
+  if (error) throw new Error(`Failed to load the proposal: ${error.message}`);
+  return confirmRecordProposals(
+    supabase,
+    recordId,
+    (data as { llm_suggested_checkup_completions?: unknown } | null)
+      ?.llm_suggested_checkup_completions,
+  );
+}
+
+/**
+ * The owner turned down what was proposed for an approved record. Closures are dismissed the way
+ * the review screen dismisses one -- kept, marked, and never swept up by a later approval -- and the
+ * suggested completions are cleared.
+ */
+export async function dismissRecordProposals(
+  supabase: SupabaseClient<Database>,
+  recordId: string,
+): Promise<{ closuresDismissed: number; completionsDropped: number }> {
+  const mentions = (await loadConditionMentions(supabase, recordId)).filter(
+    (mention) => isUnverifiedClosure(mention) && isConfirmedByRecordApproval(mention),
+  );
+  for (const mention of mentions) {
+    const { error } = await supabase
+      .from("condition_records")
+      .update({ review_decision: "dismissed" })
+      .eq("id", mention.id);
+    if (error) throw new Error(`Failed to dismiss a closure: ${error.message}`);
+  }
+
+  const { data, error } = await supabase
+    .from("medical_records")
+    .select("llm_suggested_checkup_completions")
+    .eq("id", recordId)
+    .maybeSingle();
+  if (error) throw new Error(`Failed to load the proposal: ${error.message}`);
+  const completions = parseSuggestedCompletions(
+    (data as { llm_suggested_checkup_completions?: unknown } | null)
+      ?.llm_suggested_checkup_completions,
+  );
+  if (completions.length > 0) {
+    const { error: clearError } = await supabase
+      .from("medical_records")
+      .update({ llm_suggested_checkup_completions: null })
+      .eq("id", recordId);
+    if (clearError) throw new Error(`Failed to clear the proposal: ${clearError.message}`);
+  }
+  return { closuresDismissed: mentions.length, completionsDropped: completions.length };
+}
+
+/** The checkup completions waiting on a record, with each checkup's title, for its card. */
+export async function getPendingCompletions(
+  supabase: SupabaseClient<Database>,
+  recordId: string,
+): Promise<Array<{ checkup_item_id: string; title: string; done_at: string; reason: string }>> {
+  const { data, error } = await supabase
+    .from("medical_records")
+    .select("llm_suggested_checkup_completions")
+    .eq("id", recordId)
+    .maybeSingle();
+  if (error) throw new Error(`Failed to load the suggested completions: ${error.message}`);
+  const suggested = parseSuggestedCompletions(
+    (data as { llm_suggested_checkup_completions?: unknown } | null)
+      ?.llm_suggested_checkup_completions,
+  );
+  if (suggested.length === 0) return [];
+  const { data: items, error: itemsError } = await supabase
+    .from("checkup_items")
+    .select("id, title")
+    .in(
+      "id",
+      suggested.map((entry) => entry.checkup_item_id),
+    );
+  if (itemsError) throw new Error(`Failed to load the checkups: ${itemsError.message}`);
+  const titles = new Map(
+    ((items ?? []) as Array<{ id: string; title: string }>).map((row) => [row.id, row.title]),
+  );
+  return suggested.map((entry) => ({
+    checkup_item_id: entry.checkup_item_id,
+    title: titles.get(entry.checkup_item_id) ?? "Чекап",
+    done_at: entry.suggested_done_at.slice(0, 10),
+    reason: entry.reason,
+  }));
 }

@@ -11,7 +11,12 @@ const records = vi.hoisted(() => ({
   getRecordFindings: vi.fn(),
   getRecordObservations: vi.fn(),
 }));
-const documents = vi.hoisted(() => ({ removeRecordDraft: vi.fn() }));
+const documents = vi.hoisted(() => ({
+  removeRecordDraft: vi.fn(),
+  getPendingCompletions: vi.fn(),
+  applyRecordProposals: vi.fn(),
+  dismissRecordProposals: vi.fn(),
+}));
 const persons = vi.hoisted(() => ({ name: "Максим" as string | null }));
 
 vi.mock("../health/records", () => records);
@@ -255,6 +260,22 @@ describe("buildDraftView", () => {
       { name: "Дефицит B12", status: "разрешён", evidence: "Витамин B12" },
     ]);
   });
+
+  it("asks to confirm proposals only for an approved record that has some", () => {
+    const build = (status: string, conditions: Array<Record<string, unknown>>) =>
+      buildDraftView({
+        record: { ...RECORD, status },
+        personName: null,
+        observations: [],
+        findings: [],
+        conditions,
+        reviewUrl: null,
+      }).has_proposals;
+
+    expect(build("structure_review", CONDITIONS)).toBe(false);
+    expect(build("active", CONDITIONS)).toBe(true);
+    expect(build("active", [CONDITIONS[0]])).toBe(false);
+  });
 });
 
 describe("registerRecordDraftApp", () => {
@@ -265,6 +286,7 @@ describe("registerRecordDraftApp", () => {
     records.getRecordObservations.mockResolvedValue(OBSERVATIONS);
     records.getRecordFindings.mockResolvedValue(FINDINGS);
     records.getRecordConditions.mockResolvedValue(CONDITIONS);
+    documents.getPendingCompletions.mockResolvedValue([]);
   });
 
   it("links show_record_draft to the card and keeps decline away from the model", () => {
@@ -281,9 +303,57 @@ describe("registerRecordDraftApp", () => {
     expect(tools.get("show_record_draft")!.config.annotations).toMatchObject({
       readOnlyHint: true,
     });
-    expect(tools.get("decline_record_draft")!.config._meta).toEqual({
-      ui: { visibility: ["app"] },
+    for (const name of [
+      "decline_record_draft",
+      "confirm_record_proposals",
+      "dismiss_record_proposals",
+    ]) {
+      expect(tools.get(name)!.config._meta).toEqual({ ui: { visibility: ["app"] } });
+    }
+  });
+
+  it("asks the owner to confirm what was proposed for an approved record", async () => {
+    records.getMedicalRecord.mockResolvedValue({ ...RECORD, status: "active" });
+    documents.getPendingCompletions.mockResolvedValue([
+      { checkup_item_id: "k-1", title: "Витамин D", done_at: "2026-10-20", reason: "в бланке" },
+    ]);
+    const result = await register()
+      .tools.get("show_record_draft")!
+      .handler({ record_id: RECORD_ID }, ctx);
+
+    expect(result.content[0].text).toContain("1 checkup completion(s) awaiting confirmation");
+    expect(result.content[0].text).toContain("Nothing has changed on the chart until they confirm");
+    expect(result.structuredContent?.draft).toMatchObject({
+      has_proposals: true,
+      completions: [{ title: "Витамин D", done_at: "2026-10-20", reason: "в бланке" }],
     });
+  });
+
+  it("confirms and declines proposals only on an approved record", async () => {
+    const { tools } = register();
+    const confirm = tools.get("confirm_record_proposals")!.handler;
+    const dismiss = tools.get("dismiss_record_proposals")!.handler;
+
+    const refused = await confirm({ record_id: RECORD_ID }, ctx);
+    expect(refused.isError).toBe(true);
+    expect(documents.applyRecordProposals).not.toHaveBeenCalled();
+
+    records.getMedicalRecord.mockResolvedValue({ ...RECORD, status: "active" });
+    documents.applyRecordProposals.mockResolvedValue({
+      mentionsConfirmed: 2,
+      closuresLeftPending: 0,
+      checkupsCompleted: 8,
+    });
+    const confirmed = await confirm({ record_id: RECORD_ID }, ctx);
+    expect(confirmed.content[0].text).toContain("2 closure(s), 8 checkup(s) marked done");
+
+    documents.dismissRecordProposals.mockResolvedValue({
+      closuresDismissed: 1,
+      completionsDropped: 0,
+    });
+    const dismissed = await dismiss({ record_id: RECORD_ID }, ctx);
+    expect(dismissed.content[0].text).toContain("The record stays approved");
+    expect(dismissed.structuredContent).toMatchObject({ status: "active", closuresDismissed: 1 });
   });
 
   it("returns the draft view and tells the model to wait for the owner", async () => {
@@ -342,14 +412,22 @@ describe("registerRecordDraftApp", () => {
 });
 
 describe("RECORD_DRAFT_HTML", () => {
+  it("ships a script that parses", () => {
+    // The page is a template literal, so one wrong escape breaks the whole card with no other sign.
+    const script = RECORD_DRAFT_HTML.match(/<script>([\s\S]*)<\/script>/)![1];
+    expect(() => new Function(script)).not.toThrow();
+  });
+
   it("never turns document text into markup", () => {
     expect(RECORD_DRAFT_HTML).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
   });
 
   it("approves through activate_medical_record and declines through the card-only tool", () => {
-    const calls = RECORD_DRAFT_HTML.match(/run\("(approve|decline)", "[a-z_]+"\)/g);
+    const calls = RECORD_DRAFT_HTML.match(/run\("(approve|decline|confirm|dismiss)", "[a-z_]+"\)/g);
     expect(calls).toEqual([
+      'run("confirm", "confirm_record_proposals")',
       'run("approve", "activate_medical_record")',
+      'run("dismiss", "dismiss_record_proposals")',
       'run("decline", "decline_record_draft")',
     ]);
   });

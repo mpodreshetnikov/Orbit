@@ -11,6 +11,7 @@ import {
   getIngestableRecord,
   getRecordExtractionIssues,
   isIngestableStatus,
+  proposeRecordReconciliation,
   signPageUploads,
   suggestReconciliation,
   type PageUpload,
@@ -20,7 +21,12 @@ import {
   type ReconciliationDecision,
   type ReconciliationSuggestion,
 } from "../health/reconciliation-gate";
-import { getRecordConditions, getRecordFindings, getRecordObservations } from "../health/records";
+import {
+  getMedicalRecord,
+  getRecordConditions,
+  getRecordFindings,
+  getRecordObservations,
+} from "../health/records";
 import { isoDateSchema, personSelectorSchema, uuidSchema } from "../schemas/common";
 import { invokeEdgeFunctionAsUser } from "../supabase-user-client";
 import { withPerson, withUserClient } from "../tool-context";
@@ -550,6 +556,119 @@ export function registerDocumentTools(server: McpToolServer): void {
         condition_record_id: args.condition_record_id,
         review_decision: "dismissed",
       });
+    }, WRITE_SCOPE),
+  );
+
+  server.registerTool(
+    "propose_reconciliation",
+    {
+      title: "Propose what an approved record closes",
+      description:
+        "For a record that is already approved (active): propose the conditions it ends and the checkups it completes, when that was missed at ingest. Nothing changes on the chart until the owner confirms on the record's card: call show_record_draft right after, and do not report anything as closed before they confirm. Get the condition_id and checkup_item_id values from get_ingest_candidates. For a record still in review, put this in ingest_medical_document's reconciliation instead.",
+      inputSchema: z.object({
+        record_id: uuidSchema,
+        conditions_to_resolve: z
+          .array(
+            z.object({
+              condition_id: uuidSchema,
+              status: z
+                .enum(["resolved", "history"])
+                .default("resolved")
+                .describe("resolved: it ended. history: past, still worth knowing."),
+              source_anchor: z
+                .string()
+                .min(1)
+                .describe("A short snippet copied verbatim from the record's text that shows it."),
+              supporting_obs_code: z
+                .string()
+                .nullable()
+                .optional()
+                .describe(
+                  "The catalogue code of the lab value on this record that decides it, if one does; it must be in range.",
+                ),
+            }),
+          )
+          .default([]),
+        checkups_to_complete: z
+          .array(
+            z.object({
+              checkup_item_id: uuidSchema,
+              done_at: isoDateSchema
+                .optional()
+                .describe("When it was done; defaults to the record's date."),
+              reason: z.string().min(1).describe("What on the record shows it was done."),
+            }),
+          )
+          .default([]),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    withUserClient<{
+      record_id: string;
+      conditions_to_resolve: Array<{
+        condition_id: string;
+        status: "resolved" | "history";
+        source_anchor: string;
+        supporting_obs_code?: string | null;
+      }>;
+      checkups_to_complete: Array<{ checkup_item_id: string; done_at?: string; reason: string }>;
+    }>(async (supabase, args) => {
+      const conditions = args.conditions_to_resolve ?? [];
+      const checkups = args.checkups_to_complete ?? [];
+      if (conditions.length === 0 && checkups.length === 0) {
+        return fail("Nothing proposed: give conditions_to_resolve, checkups_to_complete, or both.");
+      }
+      const record = await getMedicalRecord(supabase, args.record_id);
+      if (!record) return fail(`No medical record with id ${args.record_id}.`);
+      if (record.status !== "active") {
+        return fail(
+          `Record ${args.record_id} is ${String(record.status)}; propose_reconciliation is for an approved record. A record in review takes these in ingest_medical_document's reconciliation.`,
+        );
+      }
+      const recordDate = record.record_date ? String(record.record_date).slice(0, 10) : null;
+      if (!recordDate && checkups.some((item) => !item.done_at)) {
+        return fail("The record has no date, so give done_at for every checkup.");
+      }
+
+      const outcome = await proposeRecordReconciliation(
+        supabase,
+        {
+          id: String(record.id),
+          person_id: String(record.person_id),
+          record_date: recordDate,
+          ocr_text: (record.ocr_text as string | null) ?? null,
+        },
+        {
+          conditions: conditions.map((item) => ({
+            condition_id: item.condition_id,
+            status: item.status ?? "resolved",
+            source_anchor: item.source_anchor,
+            supporting_obs_code: item.supporting_obs_code ?? null,
+          })),
+          checkups: checkups.map((item) => ({
+            checkup_item_id: item.checkup_item_id,
+            done_at: item.done_at ?? (recordDate as string),
+            reason: item.reason,
+          })),
+        },
+      );
+
+      const proposed = outcome.proposedClosures + outcome.proposedCompletions;
+      const lines = [
+        `Proposed for "${String(record.title)}": ${outcome.proposedClosures} closure(s), ${outcome.proposedCompletions} checkup completion(s).`,
+      ];
+      if (outcome.refused.length > 0) {
+        lines.push(
+          `Refused ${outcome.refused.length}:`,
+          ...outcome.refused.map((item) => `- ${item.id}: ${item.reason}`),
+        );
+      }
+      lines.push(
+        proposed > 0
+          ? "Nothing has changed on the chart yet. Call show_record_draft now: the owner confirms or declines these on the card."
+          : "Nothing was proposed, so there is nothing to show.",
+      );
+      return ok(lines.join("\n"), { record_id: String(record.id), ...outcome });
     }, WRITE_SCOPE),
   );
 

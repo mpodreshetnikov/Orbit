@@ -6,6 +6,10 @@
  * markup. Approve calls `activate_medical_record` and Decline `decline_record_draft` through the
  * host; both can take longer than a phone's first answer suggests (the probe saw more than 10 s), so
  * the card waits a minute and still shows an answer that arrives later.
+ *
+ * An approved record with closures or completions proposed after approval (`has_proposals`) gets
+ * the same card in a second mode: only what was proposed, with Confirm (`confirm_record_proposals`)
+ * and Decline (`dismiss_record_proposals`) instead (T-261026-y7c).
  */
 export const RECORD_DRAFT_HTML = `<!doctype html>
 <html lang="ru">
@@ -97,7 +101,7 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
   var hostContext = {};
   var draft = null;
   var recordId = null;
-  var decision = null; // { kind: "approved" | "declined" | "error", ... }
+  var decision = null; // { kind: "approved" | "declined" | "confirmed" | "dismissed" | "error", ... }
   var busy = null;
   var expanded = false;
   var confirmTimer = null;
@@ -176,7 +180,7 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
     if (view) {
       draft = view;
       recordId = view.record_id;
-      if (!decision && view.status === "active") decision = { kind: "approved", already: true };
+      if (!decision && view.status === "active" && !view.has_proposals) decision = { kind: "approved", already: true };
       if (!decision && view.status === "removed") decision = { kind: "declined", already: true };
     } else if (result && result.isError) {
       decision = { kind: "load-error", message: resultText(result) };
@@ -256,6 +260,14 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
     return node;
   }
 
+  function isSettled() {
+    return Boolean(decision) && ["approved", "declined", "confirmed", "dismissed"].indexOf(decision.kind) >= 0;
+  }
+  // An approved record whose proposed closures are waiting, or were just ruled on from this card.
+  function isProposal() {
+    return Boolean(draft.has_proposals) || Boolean(decision && (decision.kind === "confirmed" || decision.kind === "dismissed"));
+  }
+
   function render() {
     var card = document.getElementById("card");
     card.textContent = "";
@@ -267,10 +279,13 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
     }
 
     var eyebrow = el("div", "eyebrow");
-    eyebrow.appendChild(el("span", "brand", "Orbit · черновик записи"));
+    var proposal = isProposal();
+    eyebrow.appendChild(el("span", "brand", proposal ? "Orbit · сверка записи" : "Orbit · черновик записи"));
     var chip = decision && decision.kind === "approved" ? el("span", "chip ok", "Одобрена")
       : decision && decision.kind === "declined" ? el("span", "chip off", "Отклонена")
-      : el("span", "chip", "На проверке");
+      : decision && decision.kind === "confirmed" ? el("span", "chip ok", "Подтверждено")
+      : decision && decision.kind === "dismissed" ? el("span", "chip off", "Отклонено")
+      : el("span", "chip", proposal ? "Ждёт подтверждения" : "На проверке");
     eyebrow.appendChild(chip);
     card.appendChild(eyebrow);
     card.appendChild(el("h1", null, draft.title));
@@ -278,7 +293,19 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
     if (draft.summary) card.appendChild(el("p", "summary", draft.summary));
 
     var flagged = draft.observations.filter(function (o) { return o.flag || o.critical; }).length;
-    var parts = [
+    var done = decision && decision.kind === "confirmed";
+    var closuresTitle = done ? "Закрыто" : proposal ? "Закроется при подтверждении" : "Закроется при одобрении";
+    var completionsTitle = done ? "Отмечено выполненным" : proposal ? "Отметится выполненным при подтверждении" : "Отметится выполненным при одобрении";
+    var closing = [
+      section(closuresTitle, draft.closures, function (c) {
+        return row(c.name, c.evidence ? "по анализу " + c.evidence : null, el("div", "end sub", "→ " + c.status));
+      }),
+      section(completionsTitle, draft.completions || [], function (c) {
+        return row(c.title, c.reason || null, el("div", "end sub", formatDate(c.done_at)));
+      })
+    ];
+    // The record itself is already on the chart, so a proposal shows only what it would change.
+    var parts = proposal ? closing : [
       section("Анализы", flaggedFirst(draft.observations), function (o) {
         var end = el("div", "end");
         var cls = "value" + (o.critical ? " critical" : o.flag ? " " + o.flag : "");
@@ -295,17 +322,14 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
         var end = el("div", "end sub", c.status);
         return row(c.name, [c.code, c.proposed ? "новый диагноз" : null].filter(Boolean).join(" · ") || null, end);
       }),
-      section("Закроется при одобрении", draft.closures, function (c) {
-        return row(c.name, c.evidence ? "по анализу " + c.evidence : null, el("div", "end sub", "→ " + c.status));
-      })
-    ];
+    ].concat(closing);
     parts.forEach(function (part) { if (part) card.appendChild(part); });
-    if (!draft.observations.length && !draft.findings.length && !draft.conditions.length && !draft.closures.length) {
+    if (!proposal && !draft.observations.length && !draft.findings.length && !draft.conditions.length && !draft.closures.length && !(draft.completions || []).length) {
       card.appendChild(el("p", "placeholder", "В документе не нашлось ни анализов, ни находок, ни диагнозов."));
     }
 
     var unrecognised = draft.observations.filter(function (o) { return !o.recognised; }).length;
-    if (unrecognised && (!decision || decision.kind === "error")) {
+    if (!proposal && unrecognised && (!decision || decision.kind === "error")) {
       card.appendChild(el("div", "warning", unrecognised === 1
         ? "1 показатель не распознан каталогом: при одобрении он не попадёт в карту."
         : unrecognised + " " + plural(unrecognised, "показатель не распознан", "показателя не распознаны", "показателей не распознаны") + " каталогом: при одобрении они не попадут в карту."));
@@ -316,9 +340,15 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
 
   function renderFooter() {
     var footer = el("div", "footer");
-    if (decision && (decision.kind === "approved" || decision.kind === "declined")) {
-      var box = el("div", decision.kind === "approved" ? "result ok" : "result");
-      if (decision.kind === "approved") {
+    if (isSettled()) {
+      var box = el("div", decision.kind === "approved" || decision.kind === "confirmed" ? "result ok" : "result");
+      if (decision.kind === "confirmed") {
+        box.appendChild(el("strong", null, "Подтверждено, в карте"));
+        if (decision.details) box.appendChild(el("p", null, decision.details));
+      } else if (decision.kind === "dismissed") {
+        box.appendChild(el("strong", null, "Отклонено"));
+        box.appendChild(el("p", null, "Диагнозы и чекапы остались как были. Запись по-прежнему одобрена."));
+      } else if (decision.kind === "approved") {
         box.appendChild(el("strong", null, decision.already ? "Запись уже одобрена" : "Одобрено, запись в карте"));
         if (decision.details) box.appendChild(el("p", null, decision.details));
       } else {
@@ -337,11 +367,14 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
       footer.appendChild(error);
     }
 
+    var proposal = isProposal();
     var actions = el("div", "actions");
     var decline = el("button", "action decline" + (confirmTimer ? " confirm" : ""),
-      busy === "decline" ? "Отклоняем…" : confirmTimer ? "Да, отклонить" : "Отклонить");
+      busy === "decline" || busy === "dismiss" ? "Отклоняем…" : confirmTimer ? "Да, отклонить" : "Отклонить");
     decline.type = "button";
-    var approve = el("button", "action approve", busy === "approve" ? "Одобряем…" : "Одобрить");
+    var approve = el("button", "action approve", busy === "approve" || busy === "confirm"
+      ? (proposal ? "Подтверждаем…" : "Одобряем…")
+      : (proposal ? "Подтвердить" : "Одобрить"));
     approve.type = "button";
     decline.disabled = approve.disabled = Boolean(busy);
     decline.addEventListener("click", onDecline);
@@ -383,6 +416,17 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
     busy = null;
     if (result && result.isError) {
       decision = { kind: "error", action: action, message: resultText(result) || "сервер ответил ошибкой" };
+    } else if (action === "confirm") {
+      var confirmed = (result && result.structuredContent) || {};
+      var lines = [];
+      if (confirmed.mentionsConfirmed) lines.push("Закрыто диагнозов: " + confirmed.mentionsConfirmed + ".");
+      if (confirmed.checkupsCompleted) lines.push("Отмечено чекапов: " + confirmed.checkupsCompleted + ".");
+      if (confirmed.closuresLeftPending) lines.push("Закрытий осталось на подтверждении: " + confirmed.closuresLeftPending + ".");
+      decision = { kind: "confirmed", details: lines.join(" ") || null };
+      tellModel("The owner confirmed the proposed closures and checkup completions for \\"" + draft.title + "\\" (record_id " + draft.record_id + ") on the Orbit card; they are on the chart now.");
+    } else if (action === "dismiss") {
+      decision = { kind: "dismissed" };
+      tellModel("The owner declined the proposed closures and checkup completions for \\"" + draft.title + "\\" (record_id " + draft.record_id + ") on the Orbit card; nothing changed. Do not propose them again unless the owner asks.");
     } else if (action === "approve") {
       var outcome = (result && result.structuredContent) || {};
       var notes = [];
@@ -415,7 +459,8 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
   function onApprove() {
     if (busy) return;
     clearConfirm();
-    run("approve", "activate_medical_record");
+    if (isProposal()) run("confirm", "confirm_record_proposals");
+    else run("approve", "activate_medical_record");
   }
   function clearConfirm() {
     if (confirmTimer) { clearTimeout(confirmTimer); confirmTimer = null; }
@@ -428,7 +473,8 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
       return;
     }
     clearConfirm();
-    run("decline", "decline_record_draft");
+    if (isProposal()) run("dismiss", "dismiss_record_proposals");
+    else run("decline", "decline_record_draft");
   }
 
   // The host sizes the frame from what the card reports. The root element's own box is measured:
