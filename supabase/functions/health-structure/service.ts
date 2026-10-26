@@ -104,7 +104,7 @@ export function buildObservationRows(
     // Resolve from the printed label as well as the model's code. The model's code is a hint;
     // an unmatched one used to leave catalog_id null, which set is_applied false, which silently
     // excluded the value from the patient's history with no signal anywhere in the UI.
-    const resolution = resolveObservation(obs.obs_code, obs.obs_name, observationCatalog);
+    const resolution = resolveObservation(obs.obs_code, obs.obs_name, observationCatalog, obs.unit);
     const catalogEntry = resolution.kind === "resolved" ? resolution.entry : null;
     const obsName = asString(obs.obs_name) ?? catalogEntry?.name_en ?? catalogEntry?.name_ru;
     if (!obsName) {
