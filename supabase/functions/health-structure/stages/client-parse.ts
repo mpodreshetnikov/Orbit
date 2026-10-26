@@ -72,7 +72,7 @@ export function parseClientSubmission(
       const entry = resolution.unitMismatch;
       unitMismatches.push({
         entityKind: "observation",
-        reason: `"${observation.obs_name}" ${observation.value} ${observation.unit ?? ""}: the label names ${entry.obs_code} (${entry.name_ru}), which is kept in ${entry.canonical_unit} with no conversion from ${observation.unit}. It is stored unmatched; if it is another analyte, add it with upsert_catalog_entry and re-ingest.`,
+        reason: `"${observation.obs_name}" ${observation.value} ${observation.unit ?? ""}: the label names ${entry.obs_code} (${entry.name_ru}), which is kept in ${entry.canonical_unit} with no conversion from ${observation.unit}. It is stored unmatched. If it is the same analyte, give that entry the unit's conversion (upsert_catalog_entry with accepted_units); if it is another analyte, add it with create_catalog_entries; then re-ingest.`,
       });
     }
     return {
