@@ -54,12 +54,14 @@ describe("registerHealthTools", () => {
         "get_medication",
         "get_observation_history",
         "get_person",
+        "get_upload_links",
         "list_catalog_entries",
         "list_checkups",
         "list_conditions",
         "list_measurements",
         "list_medication_doses",
         "list_medications",
+        "list_pending_records",
         "list_persons",
         "log_dose",
         "search_catalog_entries",
@@ -70,6 +72,7 @@ describe("registerHealthTools", () => {
         "get_ingest_candidates",
         "ingest_medical_document",
         "propose_reconciliation",
+        "remove_medical_record",
         "search_medical_records",
         "search_observations",
         "upsert_catalog_entry",
@@ -109,9 +112,11 @@ describe("registerHealthTools", () => {
     "add_medication",
     "create_medical_record",
     "dismiss_condition_closure",
+    "get_upload_links",
     "ingest_medical_document",
     "log_dose",
     "propose_reconciliation",
+    "remove_medical_record",
     "update_medication",
     "upsert_catalog_entry",
   ];
@@ -123,16 +128,15 @@ describe("registerHealthTools", () => {
     }
   });
 
-  it("marks write tools as mutating but not destructive", () => {
+  it("marks write tools as mutating, and destructive only where they delete", () => {
     for (const name of WRITE_TOOLS) {
       const tool = byName.get(name);
       expect(tool, `${name} should be registered`).toBeDefined();
       expect(tool!.config.annotations?.readOnlyHint, `${name} must not claim to be read-only`).toBe(
         false,
       );
-      // Nothing in this surface deletes data; the client should not warn as if
-      // it might.
-      expect(tool!.config.annotations?.destructiveHint).toBe(false);
+      // Only approval deletes data (the observations nobody matched), so only it warns.
+      expect(tool!.config.annotations?.destructiveHint).toBe(name === "activate_medical_record");
     }
   });
 
@@ -179,7 +183,9 @@ describe("registerHealthTools", () => {
   });
 
   it("does not expose any deletion tool", () => {
-    for (const tool of tools) {
+    // remove_medical_record is the app's own Remove: it sets an unapproved record aside, and the
+    // owner can restore it. Nothing here erases a row.
+    for (const tool of tools.filter((t) => t.name !== "remove_medical_record")) {
       expect(tool.name).not.toMatch(/delete|remove|destroy/);
     }
   });
@@ -220,6 +226,31 @@ describe("registerHealthTools", () => {
     ).toBe(false);
   });
 
+  it("requires a confidence on every extracted row, so a left-out one is not stored as zero", () => {
+    const schema = byName.get("ingest_medical_document")?.config.inputSchema as z.ZodTypeAny;
+    const observation = {
+      obs_name_text: "Витамин В12",
+      value: "704",
+      source_anchor: "Витамин В12 704",
+    };
+    const call = (row: Record<string, unknown>) => ({
+      record_id: "5f0c3a52-2b8e-4c1d-9a7f-3e6b1d2c4a90",
+      source_text: "Витамин В12 704 пг/мл",
+      classification: {
+        record_type: "lab",
+        title: "Витамины",
+        record_date: "2025-10-27",
+        summary: "",
+        keywords: [],
+      },
+      extraction: { observations: [row], findings: [], conditions: [], asserted_absences: [] },
+      reconciliation: { nothing_to_reconcile: true },
+    });
+
+    expect(schema.safeParse(call({ ...observation, confidence: 0.9 })).success).toBe(true);
+    expect(schema.safeParse(call(observation)).success).toBe(false);
+  });
+
   it("validates a medication's schedule against the real union", () => {
     const schema = byName.get("add_medication")?.config.inputSchema as z.ZodTypeAny;
 
@@ -244,6 +275,16 @@ describe("registerHealthTools", () => {
     expect(
       schema.safeParse({ ...base, schedule: { mode: "daily_times", times: ["8am"] } }).success,
     ).toBe(false);
+  });
+
+  it("refuses an argument a tool does not declare", () => {
+    // `status` and `include_drafts` were accepted and ignored, and the agent took the default
+    // answer for the one it asked.
+    const schema = byName.get("search_medical_records")?.config.inputSchema as z.ZodTypeAny;
+    expect(schema.safeParse({ include_incomplete: true }).success).toBe(true);
+    const refused = schema.safeParse({ status: "draft" });
+    expect(refused.success).toBe(false);
+    expect(JSON.stringify(refused.error?.issues)).toContain("status");
   });
 
   it("takes an observation's unit conversions as factors only", () => {

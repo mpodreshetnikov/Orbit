@@ -12,6 +12,8 @@ import {
   getRecordExtractionIssues,
   isIngestableStatus,
   proposeRecordReconciliation,
+  recordPageSizes,
+  removeRecordDraft,
   signPageUploads,
   suggestReconciliation,
   type PageUpload,
@@ -51,7 +53,13 @@ const anchor = z
   .describe(
     "A short snippet copied verbatim from source_text. Anything whose anchor is not found in source_text is refused.",
   );
-const confidence = z.number().min(0).max(1).optional();
+const confidence = z
+  .number()
+  .min(0)
+  .max(1)
+  .describe(
+    "How sure you are of this reading, from 0 to 1. Required: say it, do not leave it out.",
+  );
 
 const observationSchema = z.object({
   obs_name_text: z.string().describe("The analyte label exactly as printed."),
@@ -198,7 +206,7 @@ export function registerDocumentTools(server: McpToolServer): void {
     "create_medical_record",
     {
       title: "Create medical record",
-      description: `Start bringing in a medical document you have read: creates a draft record for the person and returns one upload link per page, with the curl command that uploads it. Upload every page, then call ingest_medical_document with what you read. ${PAGE_RULES} The draft is visible in the app; nothing reaches the chart until the record is approved.`,
+      description: `Start bringing in a medical document you have read: creates a draft record for the person and returns one upload link per page, with the curl command that uploads it. Upload every page, then call ingest_medical_document with what you read. ${PAGE_RULES} Give each page the file name the user gave it, not a placeholder: the app shows it. When an upload fails or its link has expired, call get_upload_links for this record; never create a second record for the same document. The draft is visible in the app; nothing reaches the chart until the record is approved.`,
       inputSchema: z.object({
         ...personSelectorSchema,
         record_type: z.enum(RECORD_TYPES),
@@ -209,7 +217,10 @@ export function registerDocumentTools(server: McpToolServer): void {
         pages: z
           .array(
             z.object({
-              filename: z.string().min(1),
+              filename: z
+                .string()
+                .min(1)
+                .describe("The file's own name, e.g. the one the user uploaded."),
               mime_type: z.enum(ALLOWED_PAGE_MIME_TYPES),
             }),
           )
@@ -241,7 +252,7 @@ export function registerDocumentTools(server: McpToolServer): void {
           `Created draft record "${args.title.trim()}" for ${person.name} (record_id ${recordId}).`,
           `Upload each page with its link (valid for two hours, one upload each):`,
           formatUploads(uploads),
-          `Then call ingest_medical_document with record_id ${recordId}.`,
+          `Then call ingest_medical_document with record_id ${recordId}. If an upload fails, call get_upload_links with this record_id for fresh links to the pages still missing.`,
         ].join("\n"),
         {
           record_id: recordId,
@@ -249,6 +260,68 @@ export function registerDocumentTools(server: McpToolServer): void {
           uploads,
           review_url: reviewUrl(auth, recordId),
         },
+      );
+    }, WRITE_SCOPE),
+  );
+
+  server.registerTool(
+    "get_upload_links",
+    {
+      title: "Get fresh upload links",
+      description:
+        "Fresh upload links for the pages of a draft record that have not been uploaded yet, for when an upload failed or its link expired (links last two hours). The draft keeps its id and the pages already uploaded. Use this instead of creating a second record for the same document.",
+      inputSchema: z.object({ record_id: uuidSchema }),
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    withUserClient<{ record_id: string }>(async (supabase, args) => {
+      const record = await getIngestableRecord(supabase, args.record_id);
+      if (!record) return fail(`No medical record with id ${args.record_id}.`);
+      if (!isIngestableStatus(record.status)) {
+        return fail(
+          `Record ${args.record_id} is ${record.status}; its pages can no longer be replaced.`,
+        );
+      }
+      const missing = await findMissingPages(supabase, record);
+      if (missing.length === 0) {
+        return ok(
+          `All ${record.attachments.length} page(s) of "${record.title}" are uploaded. Call ingest_medical_document with record_id ${record.id}.`,
+          { record_id: record.id, uploads: [] },
+        );
+      }
+      const uploads = await signPageUploads(supabase, missing);
+      return ok(
+        [
+          `${missing.length} of ${record.attachments.length} page(s) of "${record.title}" still need uploading (links valid for two hours, one upload each):`,
+          formatUploads(uploads),
+          `Then call ingest_medical_document with record_id ${record.id}.`,
+        ].join("\n"),
+        { record_id: record.id, uploads },
+      );
+    }, WRITE_SCOPE),
+  );
+
+  server.registerTool(
+    "remove_medical_record",
+    {
+      title: "Remove an unapproved record",
+      description:
+        "Set aside a record nobody has approved, such as a draft you created in this conversation and abandoned (a failed upload, a duplicate of a document already brought in). It is not erased: the owner can restore it in the app. An approved record is refused. For a record you did not create in this conversation, ask the user first.",
+      inputSchema: z.object({ record_id: uuidSchema }),
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    withUserClient<{ record_id: string }>(async (supabase, args) => {
+      const outcome = await removeRecordDraft(supabase, args.record_id);
+      if (outcome.status === "not_found") {
+        return fail(`No medical record with id ${args.record_id}.`);
+      }
+      if (outcome.status === "not_a_draft") {
+        return fail(
+          `Record ${args.record_id} is ${outcome.recordStatus}; only a record nobody has approved can be removed. An approved record is taken off the chart in the app.`,
+        );
+      }
+      return ok(
+        `Removed record ${args.record_id}; it is set aside and can be restored in the app.`,
+        { record_id: args.record_id, status: "removed" },
       );
     }, WRITE_SCOPE),
   );
@@ -432,6 +505,7 @@ export function registerDocumentTools(server: McpToolServer): void {
         findings_to_resolve: decision?.findings_to_resolve ?? [],
         checkups_to_complete: decision?.checkups_to_complete ?? [],
       };
+      await recordPageSizes(supabase, record);
       const { status, payload } = await invokeEdgeFunctionAsUser(auth, "health-ingest", {
         record_id: record.id,
         source_text: args.source_text,
@@ -679,11 +753,25 @@ export function registerDocumentTools(server: McpToolServer): void {
       description:
         "Approve an ingested record, as the owner's Approve button in the app does: unrecognised observations are dropped, proposed diagnoses become conditions, the record's data goes on the chart, closures awaiting confirmation are confirmed unless the measurement they cite no longer holds, and suggested checkup completions are recorded. Only after the owner has agreed to what the record says.",
       inputSchema: z.object({ record_id: uuidSchema }),
-      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+      // Approval deletes the observations nobody matched and cannot be undone here, so a client
+      // asks before it runs rather than letting an agent approve on its own initiative.
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
     },
     withUserClient<{ record_id: string }>(async (supabase, args, auth) => {
       const record = await getIngestableRecord(supabase, args.record_id);
       if (!record) return fail(`No medical record with id ${args.record_id}.`);
+      if (record.status === "active") {
+        // Usually the owner already pressed Approve on the card; that is not an error to retry.
+        const full = await getMedicalRecord(supabase, args.record_id);
+        const when =
+          typeof full?.updated_at === "string"
+            ? full.updated_at.slice(0, 16).replace("T", " ")
+            : null;
+        return ok(
+          `"${record.title}" is already approved${when ? ` (last changed ${when} UTC)` : ""}; nothing to do. Do not call activate_medical_record for it again.`,
+          { record_id: record.id, status: "active", already: true },
+        );
+      }
       if (record.status !== "structure_review") {
         return fail(
           `Record ${args.record_id} is ${record.status}; only a record in review can be approved. Ingest it first.`,
