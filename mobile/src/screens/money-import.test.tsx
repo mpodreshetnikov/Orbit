@@ -165,7 +165,7 @@ describe("a statement import", () => {
     expect(screen.queryByText("Не для всех карт выбран счёт")).toBeNull();
 
     await fireEvent.press(screen.getByText("Подтвердить импорт"));
-    expect(await screen.findByText("Импортировано 0, пропущено дубликатов: 0.")).toBeOnTheScreen();
+    expect(await screen.findByText("Импорт ждёт применения")).toBeOnTheScreen();
     const [preview] = imports();
     const account = (db.tables.money_accounts[0] as { id: string }).id;
     expect(preview!.args).toEqual(
@@ -316,7 +316,8 @@ describe("the import history", () => {
 
   it("shows a completed import without the review, and an empty history its hint", async () => {
     await renderScreens(routes, "/money/import/b-old");
-    expect(await screen.findByText("Импортировано 2, пропущено дубликатов: 0.")).toBeOnTheScreen();
+    expect(await screen.findByText("Готово. Добавлено операций: 2, уже были: 0")).toBeOnTheScreen();
+    expect(screen.getByText(/Вкладку банка можно закрыть/)).toBeOnTheScreen();
     expect(screen.getByText("В этой партии нет импортированных строк.")).toBeOnTheScreen();
     expect(screen.queryByText("Применить пакет")).toBeNull();
 
@@ -325,6 +326,113 @@ describe("the import history", () => {
     expect(
       await screen.findByText("Здесь появятся партии импорта для выбранного человека."),
     ).toBeOnTheScreen();
+  });
+
+  it("rolls an applied import back after a confirmation, and says when it cannot", async () => {
+    const alert = jest.spyOn(Alert, "alert");
+    rpcHandlers.money_rollback_import_batch = () => {
+      const target = db.tables.money_import_batches!.find((row) => row.id === "b-old")!;
+      target.status = "rolled_back";
+      target.meta = { rolled_back_transactions: 2 };
+      return { status: "rolled_back" };
+    };
+    await renderScreens(routes, "/money/import/b-old");
+    alert.mockImplementationOnce((_title, _message, buttons) => {
+      expect(_message).toBe(
+        "Удалим операции, которые добавил этот импорт (2), и позиции чеков, которые он дописал к уже существовавшим операциям. Остальное не тронем. Импорт потом можно запустить заново.",
+      );
+      buttons?.find((button) => button.style === "destructive")?.onPress?.();
+    });
+    await fireEvent.press(await screen.findByText("Откатить импорт"));
+    await waitFor(() =>
+      expect(calls.rpc).toContainEqual({
+        name: "money_rollback_import_batch",
+        args: { p_batch_id: "b-old" },
+      }),
+    );
+    expect(await screen.findByText("Импорт откачен")).toBeOnTheScreen();
+    expect(screen.getByText(/Удалено операций: 2/)).toBeOnTheScreen();
+    expect(screen.getByText("Откачен")).toBeOnTheScreen();
+    expect(screen.queryByText("Откатить импорт")).toBeNull();
+
+    seed({
+      ...db.tables,
+      money_import_batches: [batch("b-old", "completed", "2026-10-01T10:00:00Z")],
+    });
+    fail("money_rollback_import_batch");
+    await renderScreens(routes, "/money/import/b-old");
+    alert.mockImplementationOnce((_title, _message, buttons) =>
+      buttons?.find((button) => button.style === "destructive")?.onPress?.(),
+    );
+    alert.mockImplementationOnce(() => {});
+    await fireEvent.press(await screen.findByText("Откатить импорт"));
+    await waitFor(() =>
+      expect(alert).toHaveBeenLastCalledWith(
+        "Не удалось откатить импорт",
+        "money_rollback_import_batch failed",
+      ),
+    );
+  });
+
+  it("follows a running import until it lands", async () => {
+    seed({
+      ...db.tables,
+      money_import_batches: [
+        { ...batch("b-run", "running", "2026-10-20T10:00:00Z"), parsed_transactions_count: 7 },
+      ],
+    });
+    await renderScreens(routes, "/money/import/b-run");
+    expect(await screen.findByText("Импорт идёт")).toBeOnTheScreen();
+    expect(screen.getByText(/Прочитано операций: 7/)).toBeOnTheScreen();
+    expect(screen.queryByText("Откатить импорт")).toBeNull();
+
+    db.tables.money_import_batches![0] = batch("b-run", "completed", "2026-10-20T10:00:00Z");
+    await act(() => jest.advanceTimersByTimeAsync(3100));
+    expect(await screen.findByText("Готово. Добавлено операций: 2, уже были: 0")).toBeOnTheScreen();
+  });
+
+  it("reviews the imports of a week, a month, chosen days, or all time", async () => {
+    const daysAgo = (days: number) => new Date(NOW.getTime() - days * 86_400_000).toISOString();
+    seed({
+      ...db.tables,
+      money_import_batches: [
+        { ...batch("b-1", "completed", daysAgo(2)), inserted_count: 5 },
+        batch("b-2", "rolled_back", daysAgo(3)),
+        { ...batch("b-3", "completed", daysAgo(20)), inserted_count: 40, error_count: 1 },
+      ],
+    });
+    await renderScreens(routes, "/money/import/history");
+    expect(
+      await screen.findByText("Импортов: 3 · добавлено операций: 45 · уже были: 0 · ошибок: 1"),
+    ).toBeOnTheScreen();
+    expect(screen.getByText("Откачено импортов: 1")).toBeOnTheScreen();
+
+    await fireEvent.press(screen.getByText("Неделя"));
+    expect(
+      await screen.findByText("Импортов: 2 · добавлено операций: 5 · уже были: 0 · ошибок: 0"),
+    ).toBeOnTheScreen();
+    expect(screen.getAllByText(/^\d{2}\.10\.2026/)).toHaveLength(2);
+
+    await fireEvent.press(screen.getByText("Месяц"));
+    expect(
+      await screen.findByText("Импортов: 3 · добавлено операций: 45 · уже были: 0 · ошибок: 1"),
+    ).toBeOnTheScreen();
+
+    await fireEvent.press(screen.getByText("Свой период"));
+    await fireEvent(screen.getByTestId("import-review-from"), "change", {
+      nativeEvent: { timestamp: NOW.getTime() - 25 * 86_400_000 },
+    });
+    await fireEvent(screen.getByTestId("import-review-to"), "change", {
+      nativeEvent: { timestamp: NOW.getTime() - 15 * 86_400_000 },
+    });
+    expect(
+      await screen.findByText("Импортов: 1 · добавлено операций: 40 · уже были: 0 · ошибок: 1"),
+    ).toBeOnTheScreen();
+
+    await fireEvent(screen.getByTestId("import-review-to"), "change", {
+      nativeEvent: { timestamp: NOW.getTime() - 24 * 86_400_000 },
+    });
+    expect(await screen.findByText("За этот период импортов не было.")).toBeOnTheScreen();
   });
 
   it("says when a report is not there", async () => {

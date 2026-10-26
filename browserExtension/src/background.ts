@@ -195,7 +195,8 @@ async function callEdge(
     edge_host: parsedUrl.host,
     edge_path: parsedUrl.pathname,
     edge_scheme: parsedUrl.protocol.replace(":", ""),
-    has_token: typeof token === "string" && token.length > 0,
+    // Not "has_token": the relay refuses any field named like a secret, and dropped the whole event.
+    has_credential: typeof token === "string" && token.length > 0,
     batch_id: payloadBatchId || null,
     session_id: payloadSessionId || null,
     row_count: payloadRowCount,

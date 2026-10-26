@@ -36,7 +36,8 @@ export const ALLOWED_PAGE_MIME_TYPES = [
 export const MAX_PAGE_BYTES = 20 * 1024 * 1024;
 
 /** Statuses a document may be ingested from: never one a person has already approved. */
-const INGESTABLE_STATUSES = new Set(["draft", "ocr_failed", "ocr_review", "structure_review"]);
+const INGESTABLE = ["draft", "ocr_failed", "ocr_review", "structure_review"] as const;
+const INGESTABLE_STATUSES = new Set<string>(INGESTABLE);
 
 const OBSERVATION_RECHECK_COLUMNS =
   "obs_code, is_applied, value_numeric, value_canonical, ref_range_low, ref_range_high, ref_range_low_canonical, ref_range_high_canonical, status";
@@ -326,6 +327,46 @@ export async function dismissConditionClosure(
     .eq("id", conditionRecordId);
   if (updateError) throw new Error(`Failed to dismiss the closure: ${updateError.message}`);
   return { status: "dismissed" };
+}
+
+/**
+ * Decline a record nobody has approved, as the app's Remove does: the record is set aside, not
+ * erased, so it can still be restored from the app. An approved record is refused -- taking a
+ * record off the chart is a decision for the app, not for a card in a chat.
+ */
+export async function removeRecordDraft(
+  supabase: SupabaseClient<Database>,
+  recordId: string,
+): Promise<{ status: "removed" | "not_found" | "not_a_draft"; recordStatus?: string }> {
+  const { data, error } = await supabase
+    .from("medical_records")
+    .select("id, status")
+    .eq("id", recordId)
+    .maybeSingle();
+  if (error) throw new Error(`Failed to load the record: ${error.message}`);
+  if (!data) return { status: "not_found" };
+  if (!INGESTABLE_STATUSES.has(data.status)) {
+    return { status: "not_a_draft", recordStatus: data.status };
+  }
+
+  // Guarded by status too: approved in the app between the read and this write, the record stays.
+  const { data: updated, error: updateError } = await supabase
+    .from("medical_records")
+    .update({ status: "removed", removed_at: new Date().toISOString() })
+    .eq("id", recordId)
+    .in("status", INGESTABLE)
+    .select("id");
+  if (updateError) throw new Error(`Failed to remove the record: ${updateError.message}`);
+  if (!updated || updated.length === 0) {
+    const { data: now } = await supabase
+      .from("medical_records")
+      .select("status")
+      .eq("id", recordId)
+      .maybeSingle();
+    if (!now) return { status: "not_found" };
+    return { status: "not_a_draft", recordStatus: now.status };
+  }
+  return { status: "removed" };
 }
 
 export interface ActivationOutcome {

@@ -5,7 +5,13 @@
 import type { MoneyTransactionType, MoneyTransactionStatus } from "./money";
 
 export type ImportConnectorKind = "file" | "extension";
-export type MoneyImportBatchStatus = "pending" | "running" | "completed" | "failed" | "discarded";
+export type MoneyImportBatchStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "discarded"
+  | "rolled_back";
 export type MoneyImportRangeSelectionMode = "auto" | "preset" | "custom";
 export type MoneyImportRangePresetKey = "1m" | "3m" | "6m" | "1y" | "since_last_import";
 

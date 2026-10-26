@@ -2,11 +2,13 @@ import type { MoneyImportBatchStatus } from "@orbit-types/import";
 import { Badge } from "@/components/ui";
 import { t } from "@/lib/i18n";
 
-const capitalized = (text: string) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
+/** `rolled_back` → `RolledBack`, the suffix of the status's message key. */
+const keySuffix = (status: string) =>
+  status.replace(/(^|_)([a-z])/g, (_match, _sep, letter: string) => letter.toUpperCase());
 
 /** A batch's status as the web's history and report badge it. */
 export function BatchStatus({ status }: { status: MoneyImportBatchStatus }) {
-  return <Badge label={t(`money.importBatchStatus${capitalized(status)}`)} />;
+  return <Badge label={t(`money.importBatchStatus${keySuffix(status)}`)} />;
 }
 
 /** "22.10.2026 14:05", or a dash for none. */
