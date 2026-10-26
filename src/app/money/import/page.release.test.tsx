@@ -4,9 +4,6 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const hookMocks = vi.hoisted(() => ({
-  useMoneyAccounts: vi.fn(),
-  useCreateMoneyAccount: vi.fn(),
-  useMoneyCardsByAccountIds: vi.fn(),
   fetchEdgeFunctionWithTelemetry: vi.fn(),
 }));
 
@@ -32,12 +29,6 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/stores/ui-store", () => ({
   useUIStore: (selector: (state: { selectedPersonId: string | null }) => unknown) =>
     selector({ selectedPersonId: "person-1" }),
-}));
-
-vi.mock("@/hooks", () => ({
-  useMoneyAccounts: (...args: unknown[]) => hookMocks.useMoneyAccounts(...args),
-  useCreateMoneyAccount: (...args: unknown[]) => hookMocks.useCreateMoneyAccount(...args),
-  useMoneyCardsByAccountIds: (...args: unknown[]) => hookMocks.useMoneyCardsByAccountIds(...args),
 }));
 
 // The grants section fetches its own data; this suite is about extension release UX.
@@ -95,28 +86,6 @@ describe("MoneyImportPage release UX", () => {
     routerMock.replace.mockReset();
     routerMock.refresh.mockReset();
     hookMocks.fetchEdgeFunctionWithTelemetry.mockReset();
-    hookMocks.useMoneyAccounts.mockReturnValue({
-      data: [
-        {
-          id: "acc-tbank",
-          owner_person_id: "person-1",
-          source: "tbank",
-          account_kind: "debit",
-          account_label: "Main",
-          currency: "RUB",
-          external_account_id: null,
-          is_active: true,
-          created_at: "2026-01-01T00:00:00.000Z",
-          updated_at: "2026-01-01T00:00:00.000Z",
-        },
-      ],
-      isLoading: false,
-    });
-    hookMocks.useMoneyCardsByAccountIds.mockReturnValue({ data: [] });
-    hookMocks.useCreateMoneyAccount.mockReturnValue({
-      mutateAsync: vi.fn(),
-      isPending: false,
-    });
     getSessionMock.mockResolvedValue({
       data: { session: { access_token: "access-token" } },
     });
@@ -148,7 +117,7 @@ describe("MoneyImportPage release UX", () => {
     try {
       render(<MoneyImportPage />);
       const user = userEvent.setup();
-      await user.click(screen.getByRole("button", { name: /TBank extension/ }));
+      await user.click(screen.getByTestId("import-bank-tbank"));
 
       expect(
         await screen.findByRole("link", { name: "money.importExtensionDownloadLatest" }),
@@ -206,7 +175,7 @@ describe("MoneyImportPage release UX", () => {
     try {
       render(<MoneyImportPage />);
       const user = userEvent.setup();
-      await user.click(screen.getByRole("button", { name: /TBank extension/ }));
+      await user.click(screen.getByTestId("import-bank-tbank"));
 
       expect(await screen.findByText("money.importExtensionUpdateAvailable")).toBeInTheDocument();
       expect(screen.getByText(/money\.importExtensionVersionCurrent/)).toHaveTextContent("1.2.3");
@@ -264,7 +233,7 @@ describe("MoneyImportPage release UX", () => {
     try {
       render(<MoneyImportPage />);
       const user = userEvent.setup();
-      await user.click(screen.getByRole("button", { name: /TBank extension/ }));
+      await user.click(screen.getByTestId("import-bank-tbank"));
 
       await waitFor(() => {
         expect(screen.queryByText("money.importExtensionUpdateAvailable")).not.toBeInTheDocument();

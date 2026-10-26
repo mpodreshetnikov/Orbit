@@ -1,18 +1,18 @@
-import type { ImportParseResult, MoneyImportPreviewResult } from "@orbit-types/import";
-import { formatMoney } from "@orbit-types/money-feed";
+import type { MoneyImportPreviewResult } from "@orbit-types/import";
+import { importBatchRows } from "@orbit-types/money-import-rows";
 import {
-  getAccountHint,
-  importAccountHints,
-  importBatchRows,
-} from "@orbit-types/money-import-rows";
+  importBankOptions,
+  type ImportBankId,
+  type ImportMethodOption,
+} from "@orbit-types/money-import-sources";
 import { TBANK_CSV_SOURCE_ID } from "@orbit-types/money-import-tbank-csv";
 import { useQueryClient } from "@tanstack/react-query";
 import { Stack, useLocalSearchParams, useRouter, type Href } from "expo-router";
 import { FileSpreadsheet, History } from "lucide-react-native";
 import { useEffect, useState } from "react";
-import { Alert, ScrollView, View } from "react-native";
-import { Choice, Field, Section } from "@/components/form";
-import { Button, Card, Text } from "@/components/ui";
+import { Pressable, ScrollView, View } from "react-native";
+import { Section } from "@/components/form";
+import { Badge, Button, Card, Text } from "@/components/ui";
 import {
   moneyImportAction,
   pickStatement,
@@ -20,16 +20,76 @@ import {
   type StatementFile,
 } from "@/features/money/import";
 import { t } from "@/lib/i18n";
-import { useMoneyAccounts, useMoneyCards, usePerson, useSaveAccount } from "@/lib/queries";
-import { space } from "@/theme";
+import { usePerson } from "@/lib/queries";
+import { space, usePalette } from "@/theme";
 
-/** How many of the statement's operations the preview lists before the count says the rest. */
-const PREVIEW_ROWS = 20;
+/** What the web offers, as the phone sees it: the extension runs only in a computer's browser. */
+const BANKS = importBankOptions(
+  [
+    { sourceId: TBANK_CSV_SOURCE_ID, kind: "file" },
+    { sourceId: "tbank_web", kind: "extension" },
+    { sourceId: "alfa_web", kind: "extension" },
+  ],
+  { extension: false },
+);
+
+const BANK_KEYS: Record<ImportBankId, string> = {
+  tbank: "money.importBankTbank",
+  alfa: "money.importBankAlfa",
+  other: "money.importBankOther",
+};
+
+/** A bank or a way to import, greyed and inert where the phone cannot do it. */
+function Option({
+  title,
+  hint,
+  selected,
+  available,
+  chip,
+  testID,
+  onPress,
+}: {
+  title: string;
+  hint: string;
+  selected: boolean;
+  available: boolean;
+  chip?: string;
+  testID: string;
+  onPress: () => void;
+}) {
+  const palette = usePalette();
+  return (
+    <Pressable
+      testID={testID}
+      accessibilityRole="button"
+      accessibilityState={{ selected, disabled: !available }}
+      disabled={!available}
+      onPress={onPress}
+      style={{
+        gap: 2,
+        padding: space.md,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: selected ? palette.primary : palette.border,
+        opacity: available ? 1 : 0.5,
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
+        <Text weight="medium">{title}</Text>
+        {chip ? <Badge label={chip} textTone="mutedForeground" /> : null}
+      </View>
+      <Text size="sm" tone="mutedForeground">
+        {hint}
+      </Text>
+    </Pressable>
+  );
+}
 
 /**
- * "Импорт" — a T-Bank statement brought in from Files, or opened in Orbit from another app with
- * `?file=`: its operations read on the phone, each card given an account, then sent to
- * `money-import` for the batch report, as the web's file import does.
+ * "Импорт" — the bank first, then the way in: on the phone, a statement file brought in from Files
+ * or opened in Orbit from another app with `?file=`. It starts as soon as the file is read: the
+ * server finds each card's account and applies the batch on its own (T-261026-2ew), so the screen
+ * goes straight to the import's page.
  */
 export default function MoneyImportScreen() {
   const router = useRouter();
@@ -37,63 +97,53 @@ export default function MoneyImportScreen() {
   const params = useLocalSearchParams<{ file?: string; name?: string }>();
   const person = usePerson();
   const personId = person.data?.id;
-  const accounts = useMoneyAccounts(personId);
-  const saveAccount = useSaveAccount();
-  const tbank = (accounts.data ?? []).filter((one) => one.source === TBANK_CSV_SOURCE_ID);
-  const cards = useMoneyCards(tbank.map((one) => one.id));
-  const [file, setFile] = useState<StatementFile | null>(null);
-  const [parsed, setParsed] = useState<ImportParseResult | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [defaultAccount, setDefaultAccount] = useState<string | null>(null);
-  const [mapping, setMapping] = useState<Record<string, string>>({});
+  const [bank, setBank] = useState<ImportBankId>("tbank");
+  const [status, setStatus] = useState<string | null>(null);
+  const [errors, setErrors] = useState<string[]>([]);
 
-  const read = async (statement: StatementFile) => {
-    setFile(statement);
-    setParsed(null);
-    setBusy(true);
+  const start = async (statement: StatementFile) => {
+    if (!personId) return;
+    setErrors([]);
+    setStatus(t("money.importFileReading"));
     try {
-      setParsed(await readStatement(statement.uri));
-    } catch {
-      setParsed({ transactions: [], errors: [t("money.importParseError")] });
-    } finally {
-      setBusy(false);
-    }
-  };
-  useEffect(() => {
-    if (params.file) void read({ uri: params.file, name: params.name ?? params.file });
-  }, [params.file, params.name]);
-
-  const byCard = Object.fromEntries(
-    (cards.data ?? []).map((card) => [card.last4, card.account_id]),
-  );
-  const only = tbank.length === 1 ? tbank[0]!.id : null;
-  const accountOf = (hint: string | null) =>
-    (hint ? (mapping[hint] ?? byCard[hint]) : undefined) ?? defaultAccount ?? only;
-  const rows = parsed?.transactions ?? [];
-  const batch = importBatchRows(rows, (row) => accountOf(getAccountHint(row)));
-  const options = tbank.map((one): [string | null, string] => [one.id, one.account_label]);
-
-  const confirm = async () => {
-    if (!batch || !personId) return;
-    setBusy(true);
-    try {
+      const parsed = await readStatement(statement.uri).catch(() => null);
+      if (!parsed) throw new Error(t("money.importParseError"));
+      if (parsed.transactions.length === 0) {
+        // The parser's own reasons are English and technical; the person needs only this.
+        setErrors([t("money.importFileEmpty")]);
+        setStatus(null);
+        return;
+      }
+      setStatus(t("money.importFileUploading", { count: parsed.transactions.length }));
       const result = await moneyImportAction<MoneyImportPreviewResult>({
         action: "preview_rows",
         source: TBANK_CSV_SOURCE_ID,
         payer_person_id: personId,
         import_type: "file",
-        file_path: file?.name ?? null,
-        rows: batch,
+        file_path: statement.name,
+        rows: importBatchRows(parsed.transactions),
       });
-      // The preview is a pending batch: history lists it before it is applied or discarded.
       void client.invalidateQueries({ queryKey: ["money-import-batches"] });
+      void client.invalidateQueries({ queryKey: ["money-feed"] });
       router.replace(`/money/import/${result.batch_id}` as Href);
     } catch (error) {
-      Alert.alert(t("common.error"), (error as Error).message);
-    } finally {
-      setBusy(false);
+      setErrors([(error as Error).message]);
+      setStatus(null);
     }
   };
+  useEffect(() => {
+    if (params.file && personId) {
+      void start({ uri: params.file, name: params.name ?? params.file });
+    }
+    // Once per file handed over, when the person is known.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.file, params.name, personId]);
+
+  const selected = BANKS.find((one) => one.id === bank)!;
+  const methodHint = (method: ImportMethodOption) =>
+    method.kind === "file"
+      ? t("money.importMethodFileHint")
+      : t("money.importMethodExtensionDesktopOnly");
 
   return (
     <>
@@ -102,113 +152,79 @@ export default function MoneyImportScreen() {
         contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={{ padding: space.lg, gap: space.lg, paddingBottom: space.xl * 2 }}
       >
-        <View style={{ flexDirection: "row", gap: space.sm }}>
-          <View style={{ flex: 1 }}>
-            <Button
-              icon={FileSpreadsheet}
-              label={t("money.importUploadFile")}
-              busy={busy && !parsed}
-              onPress={() => void pickStatement().then((picked) => picked && read(picked))}
+        <Button
+          variant="outline"
+          icon={History}
+          label={t("money.importViewHistory")}
+          onPress={() => router.push("/money/import/history" as Href)}
+        />
+
+        <Section title={t("money.importStepBank")}>
+          {BANKS.map((one) => (
+            <Option
+              key={one.id}
+              testID={`import-bank-${one.id}`}
+              title={t(BANK_KEYS[one.id])}
+              hint={
+                one.methods.length === 0
+                  ? t("money.importBankSoon")
+                  : one.available
+                    ? t("money.importMethodFile")
+                    : t("money.importBankDesktopOnly")
+              }
+              selected={one.id === bank}
+              available={one.available}
+              onPress={() => setBank(one.id)}
             />
-          </View>
+          ))}
+        </Section>
+
+        <Section title={t("money.importStepMethod")}>
+          {selected.methods.map((method) => (
+            <Option
+              key={method.kind}
+              testID={`import-method-${method.kind}`}
+              title={t(
+                method.kind === "file" ? "money.importMethodFile" : "money.importMethodExtension",
+              )}
+              hint={methodHint(method)}
+              chip={method.recommended ? t("money.importRecommended") : undefined}
+              selected={method.available}
+              available={method.available}
+              onPress={() => undefined}
+            />
+          ))}
+        </Section>
+
+        <Section title={t("money.importStepFile")}>
+          <Text size="sm" tone="mutedForeground">
+            {t("money.importFileAutoStart")}
+          </Text>
           <Button
-            variant="outline"
-            icon={History}
-            label={t("money.importViewHistory")}
-            onPress={() => router.push("/money/import/history" as Href)}
+            icon={FileSpreadsheet}
+            label={t("money.importUploadFile")}
+            busy={status !== null}
+            disabled={!personId}
+            onPress={() => void pickStatement().then((picked) => picked && start(picked))}
           />
-        </View>
+          {status ? (
+            <Text size="sm" tone="mutedForeground">
+              {status}
+            </Text>
+          ) : null}
+          {errors.map((error) => (
+            <Text key={error} size="sm" tone="destructive">
+              {error}
+            </Text>
+          ))}
+        </Section>
 
-        {parsed ? (
-          <Section title={t("money.importPreview")}>
-            <Text weight="medium">{`${file?.name} · ${rows.length}`}</Text>
-            {(parsed.errors ?? []).map((error) => (
-              <Text key={error} size="sm" tone="destructive">
-                {error}
-              </Text>
-            ))}
-            {rows.slice(0, PREVIEW_ROWS).map((row, index) => (
-              <View key={index} style={{ flexDirection: "row", gap: space.sm }}>
-                <Text size="sm" tone="mutedForeground">
-                  {row.posted_at.slice(0, 10)}
-                </Text>
-                <Text size="sm" style={{ flex: 1 }} numberOfLines={1}>
-                  {row.merchant_name ?? "—"}
-                </Text>
-                <Text size="sm">{formatMoney(row.amount, row.currency, "ru-RU")}</Text>
-              </View>
-            ))}
-            {rows.length > PREVIEW_ROWS ? (
-              <Text size="xs" tone="mutedForeground">{`+${rows.length - PREVIEW_ROWS}`}</Text>
-            ) : null}
-          </Section>
-        ) : null}
-
-        {rows.length ? (
-          <Section title={t("money.accounts")}>
-            {tbank.length ? (
-              <>
-                <Field label={t("money.importDefaultAccount")}>
-                  <Choice
-                    label={t("money.importDefaultAccount")}
-                    value={defaultAccount ?? only}
-                    placeholder={t("money.selectAccount")}
-                    options={options}
-                    onPick={setDefaultAccount}
-                  />
-                </Field>
-                {importAccountHints(rows).map((hint) => (
-                  <Field key={hint} label={`${t("money.importMapAccount")} *${hint}`}>
-                    <Choice
-                      label={`${t("money.importMapAccount")} *${hint}`}
-                      value={accountOf(hint)}
-                      placeholder={t("money.selectAccount")}
-                      options={options}
-                      onPick={(id) => id && setMapping((current) => ({ ...current, [hint]: id }))}
-                    />
-                  </Field>
-                ))}
-              </>
-            ) : (
-              <Card style={{ padding: space.md, gap: space.sm }}>
-                <Text size="sm">{t("money.importNoAccounts")}</Text>
-                <Button
-                  variant="outline"
-                  label={t("money.importCreateTbankAccount")}
-                  busy={saveAccount.isPending}
-                  onPress={() =>
-                    saveAccount.mutate(
-                      {
-                        kind: "account",
-                        personId: personId!,
-                        columns: {
-                          account_label: "T-Bank",
-                          account_kind: "debit",
-                          currency: "RUB",
-                          source: TBANK_CSV_SOURCE_ID,
-                          external_account_id: null,
-                          is_active: true,
-                        },
-                      },
-                      { onError: (error) => Alert.alert(t("common.error"), error.message) },
-                    )
-                  }
-                />
-              </Card>
-            )}
-            {batch ? null : (
-              <Text size="sm" tone="destructive">
-                {t("money.importUnresolvedAccountMapping")}
-              </Text>
-            )}
-            <Button
-              label={t("money.importConfirm")}
-              busy={busy}
-              disabled={!batch}
-              onPress={() => void confirm()}
-            />
-          </Section>
-        ) : null}
+        <Card style={{ padding: space.md, gap: space.xs, opacity: 0.6 }}>
+          <Text weight="medium">{t("money.importAutoStatusTitle")}</Text>
+          <Text size="sm" tone="mutedForeground">
+            {t("money.importAutoDesktopOnly")}
+          </Text>
+        </Card>
       </ScrollView>
     </>
   );

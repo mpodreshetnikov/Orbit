@@ -176,18 +176,15 @@ export function importAccountHints(rows: CanonicalTransactionRow[]): string[] {
   ).sort();
 }
 
-/** The rows as `preview_rows` takes them, or null while a row has no account. */
-export function importBatchRows(
-  rows: CanonicalTransactionRow[],
-  accountOf: (row: CanonicalTransactionRow) => string | null,
-): BatchTransactionRow[] | null {
+/**
+ * The rows as `preview_rows` takes them. No row names an account: the server finds it by the card,
+ * or puts it on the bank's first account (T-261026-2ew), so nobody is asked before an import.
+ */
+export function importBatchRows(rows: CanonicalTransactionRow[]): BatchTransactionRow[] {
   const batch: BatchTransactionRow[] = [];
   for (const row of rows) {
-    const accountId = accountOf(row);
-    if (!accountId) return null;
     const accountHint = getAccountHint(row);
     batch.push({
-      account_id: accountId,
       account_hint: accountHint,
       card_id: row.card_id ?? null,
       source: row.source,

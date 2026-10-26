@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { router } from "expo-router";
-import { ActionSheetIOS, Alert } from "react-native";
+import { Alert } from "react-native";
 import { fetchImportBatch, REPORT_PAGE } from "@/features/money/import";
 import ImportBatchScreen from "@/screens/import-batch-screen";
 import ImportHistoryScreen from "@/screens/import-history-screen";
@@ -64,16 +64,6 @@ const routes = {
   "money/import/[batch]": ImportBatchScreen,
 };
 
-const tbank = (id: string, label: string) => ({
-  id,
-  owner_person_id: PERSON.id,
-  account_label: label,
-  account_kind: "debit",
-  currency: "RUB",
-  source: "tbank",
-  is_active: true,
-});
-
 const batch = (id: string, status: string, created_at: string) => ({
   id,
   payer_person_id: PERSON.id,
@@ -87,12 +77,6 @@ const batch = (id: string, status: string, created_at: string) => ({
   completed_at: status === "completed" ? created_at : null,
   meta: null,
 });
-
-function pickOption(label: string) {
-  jest
-    .spyOn(ActionSheetIOS, "showActionSheetWithOptions")
-    .mockImplementationOnce((options, callback) => callback(options.options.indexOf(label)));
-}
 
 beforeEach(() => {
   jest.useFakeTimers({ now: NOW, advanceTimers: true });
@@ -143,31 +127,14 @@ afterEach(() => {
 const imports = () => calls.rpc.filter((call) => call.name === "money-import");
 
 describe("a statement import", () => {
-  it("reads the file, makes the T-Bank account it needs, and sends the rows for a preview", async () => {
+  it("starts as soon as the file is read, naming no account, and opens the import", async () => {
     await renderScreens(routes, "/money");
     await fireEvent.press(await screen.findByText("Импорт"));
-    await fireEvent.press(await screen.findByText("Загрузить файл"));
+    expect(await screen.findByText("1. БАНК")).toBeOnTheScreen();
+    await fireEvent.press(screen.getByText("Загрузить файл"));
 
-    expect(await screen.findByText("ops.csv · 2")).toBeOnTheScreen();
-    expect(screen.getByText("Кофейня")).toBeOnTheScreen();
-    expect(screen.getByText("Нет счетов T-Bank. Сначала добавьте счёт.")).toBeOnTheScreen();
-    expect(screen.getByText("Не для всех карт выбран счёт")).toBeOnTheScreen();
-
-    await fireEvent.press(screen.getByText("Создать счёт T-Bank"));
-    await waitFor(() =>
-      expect(db.tables.money_accounts).toEqual([
-        expect.objectContaining({ owner_person_id: PERSON.id, source: "tbank" }),
-      ]),
-    );
-    expect(
-      await screen.findByLabelText("Счёт по умолчанию для неизвестных карт: T-Bank"),
-    ).toBeOnTheScreen();
-    expect(screen.queryByText("Не для всех карт выбран счёт")).toBeNull();
-
-    await fireEvent.press(screen.getByText("Подтвердить импорт"));
     expect(await screen.findByText("Импорт ждёт применения")).toBeOnTheScreen();
     const [preview] = imports();
-    const account = (db.tables.money_accounts[0] as { id: string }).id;
     expect(preview!.args).toEqual(
       expect.objectContaining({
         action: "preview_rows",
@@ -177,51 +144,53 @@ describe("a statement import", () => {
         file_path: "ops.csv",
       }),
     );
-    expect((preview!.args as { rows: { account_id: string }[] }).rows).toEqual([
-      expect.objectContaining({ account_id: account, amount: -120.5 }),
-      expect.objectContaining({ account_id: account, amount: -990 }),
+    const rows = (preview!.args as { rows: Record<string, unknown>[] }).rows;
+    expect(rows).toEqual([
+      expect.objectContaining({ account_hint: "1234", amount: -120.5 }),
+      expect.objectContaining({ account_hint: "5678", amount: -990 }),
     ]);
+    expect(rows[0]).not.toHaveProperty("account_id");
+    // The server opens the bank's account when there is none; the phone makes none itself.
+    expect(db.tables.money_accounts).toEqual([]);
   });
 
-  it("maps each card to its account, by the cards known and by hand", async () => {
-    seed({
-      ...db.tables,
-      money_accounts: [tbank("acc-a", "Тинькофф Black"), tbank("acc-b", "Тинькофф Platinum")],
-      money_cards: [{ id: "c1", account_id: "acc-a", last4: "1234", card_label: null }],
+  it("greys out what needs a computer, and the file is the way in", async () => {
+    await renderScreens(routes, "/money/import");
+
+    expect(await screen.findByTestId("import-bank-tbank")).toHaveProp("accessibilityState", {
+      selected: true,
+      disabled: false,
     });
+    expect(screen.getByTestId("import-bank-alfa")).toBeDisabled();
+    expect(screen.getByText("Только из личного кабинета, на компьютере")).toBeOnTheScreen();
+    expect(screen.getByTestId("import-bank-other")).toBeDisabled();
+    expect(screen.getByTestId("import-method-extension")).toBeDisabled();
+    expect(screen.getByText("Нужен браузер на компьютере с расширением Orbit")).toBeOnTheScreen();
+    expect(screen.getByText("рекомендуем")).toBeOnTheScreen();
+    expect(
+      screen.getByText("Настраивается в браузере на компьютере, где стоит расширение Orbit."),
+    ).toBeOnTheScreen();
+  });
+
+  it("imports a file handed over by another app", async () => {
     await renderScreens(routes, "/money/import?file=file%3A%2F%2F%2Fops.csv&name=ops.csv");
 
-    expect(await screen.findByLabelText("Счёт для карты *1234: Тинькофф Black")).toBeOnTheScreen();
-    expect(screen.getByText("Не для всех карт выбран счёт")).toBeOnTheScreen();
-
-    pickOption("Тинькофф Platinum");
-    await fireEvent.press(screen.getByLabelText("Счёт для карты *5678: Выберите счет..."));
-    expect(
-      await screen.findByLabelText("Счёт для карты *5678: Тинькофф Platinum"),
-    ).toBeOnTheScreen();
-
-    await fireEvent.press(screen.getByText("Подтвердить импорт"));
-    await waitFor(() => expect(imports()).toHaveLength(1));
-    expect((imports()[0]!.args as { rows: { account_id: string }[] }).rows).toEqual([
-      expect.objectContaining({ account_id: "acc-a" }),
-      expect.objectContaining({ account_id: "acc-b" }),
-    ]);
+    expect(await screen.findByText("Импорт ждёт применения")).toBeOnTheScreen();
+    expect(imports()).toHaveLength(1);
   });
 
-  it("says when the file cannot be read, and when the preview fails", async () => {
-    seed({ ...db.tables, money_accounts: [tbank("acc-a", "Тинькофф Black")] });
-    const alert = jest.spyOn(Alert, "alert").mockImplementation(() => {});
+  it("says when the file cannot be read, has nothing in it, or the upload fails", async () => {
     mockPicked.current = { name: "gone.csv", uri: "file:///gone.csv" };
     await renderScreens(routes, "/money/import");
     await fireEvent.press(await screen.findByText("Загрузить файл"));
     expect(await screen.findByText("Не удалось прочитать файл.")).toBeOnTheScreen();
 
-    mockPicked.current = null;
+    mockFiles["file:///empty.csv"] = HEADER;
+    mockPicked.current = { name: "empty.csv", uri: "file:///empty.csv" };
     await fireEvent.press(screen.getByText("Загрузить файл"));
-    expect(screen.getByText("gone.csv · 0")).toBeOnTheScreen();
+    expect(await screen.findByText("В файле нет операций.")).toBeOnTheScreen();
 
     mockPicked.current = { name: "ops.csv", uri: "file:///ops.csv" };
-    await fireEvent.press(screen.getByText("Загрузить файл"));
     jest.spyOn(supabase.functions, "invoke").mockResolvedValueOnce({
       data: null,
       error: {
@@ -229,10 +198,8 @@ describe("a statement import", () => {
         context: { json: async () => ({ error: "Пакет уже загружен" }) },
       },
     } as never);
-    await fireEvent.press(await screen.findByText("Подтвердить импорт"));
-    await waitFor(() =>
-      expect(alert).toHaveBeenCalledWith("Что-то пошло не так", "Пакет уже загружен"),
-    );
+    await fireEvent.press(screen.getByText("Загрузить файл"));
+    expect(await screen.findByText("Пакет уже загружен")).toBeOnTheScreen();
   });
 });
 
@@ -253,9 +220,6 @@ describe("the import history", () => {
     expect(await screen.findAllByText(/^\d{2}\.10\.2026/)).toHaveLength(1);
     await act(() => router.push("/money/import"));
     await fireEvent.press(await screen.findByText("Загрузить файл"));
-    await fireEvent.press(await screen.findByText("Создать счёт T-Bank"));
-    await screen.findByLabelText("Счёт по умолчанию для неизвестных карт: T-Bank");
-    await fireEvent.press(screen.getByText("Подтвердить импорт"));
     await screen.findByText("Применить пакет");
     await act(() => router.push("/money/import/history"));
     await waitFor(() => expect(screen.getAllByText(/^\d{2}\.10\.2026/)).toHaveLength(2));
