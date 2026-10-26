@@ -1157,7 +1157,7 @@ describe("MoneyImportPage", () => {
     expect(routerMock.push).not.toHaveBeenCalledWith("/money/import/reports/batch-1");
   });
 
-  it("shows manual-open hint when extension session ack is not received", async () => {
+  it("asks to reload the tabs, and opens no extension page, when the session handoff gets no ack", async () => {
     connectorsState = [
       {
         sourceId: "tbank_web",
@@ -1215,12 +1215,82 @@ describe("MoneyImportPage", () => {
       await user.click(await screen.findByRole("button", { name: "money.importStartImport" }));
 
       expect(
-        await screen.findByText(
-          /money\.importExtension(OpenPopupManual|SessionCreated)/,
-          {},
-          { timeout: 5000 },
-        ),
+        await screen.findByText("money.importExtensionHandoffFailed", {}, { timeout: 5000 }),
       ).toBeInTheDocument();
+      // The session token never goes into a URL: nothing but the bank site may be opened.
+      expect(openSpy).not.toHaveBeenCalled();
+    } finally {
+      postMessageSpy.mockRestore();
+      openSpy.mockRestore();
+    }
+  }, 15_000);
+
+  it("creates no session and opens no tab when the extension stops answering before the start", async () => {
+    connectorsState = [
+      {
+        sourceId: "tbank_web",
+        displayName: "TBank extension",
+        kind: "extension",
+        websiteUrl: "https://example-bank.test",
+      },
+    ];
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        last_imported_at: "2026-02-20T12:00:00.000Z",
+        requires_history_prompt: false,
+        stale_threshold_days: 365,
+        recommended_mode: "auto",
+        window_from: "2026-02-20T12:00:00.000Z",
+        window_to: "2026-03-08T00:00:00.000Z",
+      }),
+    } as Response);
+    hookMocks.useMoneyAccounts.mockReturnValue({
+      data: [makeAccount("tbank", "acc-tbank")],
+      isLoading: false,
+    });
+
+    // Answers while the page loads, then goes quiet -- an extension reloaded under the open tab.
+    let extensionAnswers = true;
+    const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
+    const postMessageSpy = vi.spyOn(window, "postMessage").mockImplementation((message) => {
+      const payload = message as { type?: string };
+      if (payload.type === "MONEY_IMPORT_PING" && extensionAnswers) {
+        window.dispatchEvent(
+          new MessageEvent("message", {
+            data: { source: "orbit-extension", type: "MONEY_IMPORT_PONG" },
+          }),
+        );
+      }
+    });
+
+    try {
+      render(<MoneyImportPage />);
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("button", { name: /TBank extension/ }));
+      const startImportButton = await screen.findByRole("button", {
+        name: "money.importStartImport",
+      });
+      await waitFor(() => {
+        expect(startImportButton).toBeEnabled();
+      });
+      extensionAnswers = false;
+      await user.click(startImportButton);
+
+      expect(
+        await screen.findByText("money.importExtensionNotAnswering", {}, { timeout: 5000 }),
+      ).toBeInTheDocument();
+      expect(screen.getByText("money.importExtensionInactive")).toBeInTheDocument();
+      expect(openSpy).not.toHaveBeenCalled();
+      expect(
+        fetchMock.mock.calls.some(([, init]) =>
+          String((init as RequestInit | undefined)?.body ?? "").includes("create_session"),
+        ),
+      ).toBe(false);
+      expect(postMessageSpy).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "MONEY_IMPORT_START_SESSION" }),
+        "*",
+      );
     } finally {
       postMessageSpy.mockRestore();
       openSpy.mockRestore();
