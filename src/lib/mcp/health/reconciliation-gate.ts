@@ -51,29 +51,59 @@ export interface ReconciliationContext {
  */
 const DECIDING_ANALYTES: Array<{
   analyte: string;
+  /** The catalogue code a closure cites as `supporting_obs_code`. */
+  obsCode: string;
   icdPrefixes: string[];
   conditionPatterns: string[];
   labelPatterns: string[];
 }> = [
   {
     analyte: "vitamin B12",
+    obsCode: "vitamin_b12",
     icdPrefixes: ["E53.8"],
     conditionPatterns: ["b12", "в12", "кобаламин"],
     labelPatterns: ["b12", "в12", "кобаламин", "cobalamin"],
   },
   {
     analyte: "vitamin D (25-OH)",
+    obsCode: "vitamin_d_25oh",
     icdPrefixes: ["E55"],
     conditionPatterns: ["витамин d", "витамин д", "витамина d", "витамина д", "25-oh"],
     labelPatterns: ["витамин d", "витамин д", "25-oh", "25(oh)", "25 oh", "кальцидиол"],
   },
   {
     analyte: "ferritin and haemoglobin",
+    obsCode: "ferritin",
     icdPrefixes: ["D50", "E61.1"],
     conditionPatterns: ["железодефицит", "жда", "iron deficiency"],
     labelPatterns: ["ферритин", "ferritin"],
   },
 ];
+
+function decidesCondition(
+  entry: (typeof DECIDING_ANALYTES)[number],
+  condition: { name: string; code: string | null },
+): boolean {
+  const name = normalizeText(condition.name);
+  const code = (condition.code ?? "").toUpperCase();
+  return (
+    entry.icdPrefixes.some((prefix) => code.startsWith(prefix)) ||
+    entry.conditionPatterns.some((pattern) => name.includes(normalizeText(pattern)))
+  );
+}
+
+/**
+ * Whether a cited lab value is one that decides this condition: B12 for a B12 deficiency, not for
+ * diabetes. Ingest's edge gate makes the same pairing; `propose_reconciliation` does not pass
+ * through it, so it asks here.
+ */
+export function analyteDecidesCondition(
+  obsCode: string,
+  condition: { name: string; code: string | null },
+): boolean {
+  const entry = DECIDING_ANALYTES.find((candidate) => candidate.obsCode === obsCode);
+  return entry ? decidesCondition(entry, condition) : false;
+}
 
 /** Words too common in diagnosis names to say anything about which one a document is about. */
 const GENERIC_WORDS = new Set([
@@ -222,12 +252,9 @@ export function pickReconciliationSuggestions(input: {
     if (condition.current_status !== "active" && condition.current_status !== "suspected") {
       continue;
     }
-    const name = normalizeText(condition.name);
-    const code = (condition.code ?? "").toUpperCase();
     const analyte = DECIDING_ANALYTES.find(
       (entry) =>
-        (entry.icdPrefixes.some((prefix) => code.startsWith(prefix)) ||
-          entry.conditionPatterns.some((pattern) => name.includes(normalizeText(pattern)))) &&
+        decidesCondition(entry, condition) &&
         entry.labelPatterns.some((pattern) => text.includes(normalizeText(pattern))),
     );
     if (analyte) {

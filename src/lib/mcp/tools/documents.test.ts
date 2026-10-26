@@ -23,10 +23,12 @@ const documents = vi.hoisted(() => ({
   getIngestableRecord: vi.fn(),
   getRecordExtractionIssues: vi.fn(),
   isIngestableStatus: vi.fn((status: string) => status !== "active"),
+  proposeRecordReconciliation: vi.fn(),
   signPageUploads: vi.fn(),
   suggestReconciliation: vi.fn(),
 }));
 const records = vi.hoisted(() => ({
+  getMedicalRecord: vi.fn(),
   getRecordConditions: vi.fn(),
   getRecordFindings: vi.fn(),
   getRecordObservations: vi.fn(),
@@ -448,5 +450,81 @@ describe("dismiss_condition_closure", () => {
       ctx,
     );
     expect(result.isError).toBe(true);
+  });
+});
+
+describe("propose_reconciliation", () => {
+  const ACTIVE = {
+    id: RECORD_ID,
+    person_id: "p-1",
+    title: "Витамины",
+    status: "active",
+    record_date: "2026-03-06",
+    ocr_text: "Витамин B12 704 пг/мл",
+  };
+
+  it("is only for an approved record", async () => {
+    records.getMedicalRecord.mockResolvedValue({ ...ACTIVE, status: "structure_review" });
+    const result = await (await handlers()).get("propose_reconciliation")!(
+      { record_id: RECORD_ID, checkups_to_complete: [{ checkup_item_id: "k", reason: "r" }] },
+      ctx,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("ingest_medical_document's reconciliation");
+    expect(documents.proposeRecordReconciliation).not.toHaveBeenCalled();
+  });
+
+  it("dates a completion by the record and says nothing changes before the owner confirms", async () => {
+    records.getMedicalRecord.mockResolvedValue(ACTIVE);
+    documents.proposeRecordReconciliation.mockResolvedValue({
+      proposedClosures: 1,
+      proposedCompletions: 1,
+      refused: [{ id: "k-2", reason: "Витамин D was already done on 2026-03-10" }],
+    });
+    const result = await (await handlers()).get("propose_reconciliation")!(
+      {
+        record_id: RECORD_ID,
+        conditions_to_resolve: [
+          {
+            condition_id: B12_CONDITION.id,
+            source_anchor: "Витамин B12 704",
+            supporting_obs_code: "vitamin_b12",
+          },
+        ],
+        checkups_to_complete: [
+          { checkup_item_id: "k-1", reason: "B12 in the report" },
+          { checkup_item_id: "k-2", done_at: "2026-03-07", reason: "D in the report" },
+        ],
+      },
+      ctx,
+    );
+
+    expect(documents.proposeRecordReconciliation.mock.calls[0][2]).toEqual({
+      conditions: [
+        {
+          condition_id: B12_CONDITION.id,
+          status: "resolved",
+          source_anchor: "Витамин B12 704",
+          supporting_obs_code: "vitamin_b12",
+        },
+      ],
+      checkups: [
+        { checkup_item_id: "k-1", done_at: "2026-03-06", reason: "B12 in the report" },
+        { checkup_item_id: "k-2", done_at: "2026-03-07", reason: "D in the report" },
+      ],
+    });
+    const text = result.content[0].text;
+    expect(text).toContain("1 closure(s), 1 checkup completion(s)");
+    expect(text).toContain("k-2: Витамин D was already done on 2026-03-10");
+    expect(text).toContain("Call show_record_draft now");
+  });
+
+  it("refuses an empty proposal before loading anything", async () => {
+    const result = await (await handlers()).get("propose_reconciliation")!(
+      { record_id: RECORD_ID },
+      ctx,
+    );
+    expect(result.isError).toBe(true);
+    expect(records.getMedicalRecord).not.toHaveBeenCalled();
   });
 });
