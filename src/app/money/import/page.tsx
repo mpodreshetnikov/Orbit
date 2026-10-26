@@ -615,10 +615,11 @@ export default function MoneyImportPage() {
     void refreshExtensionAutoStatus();
   }, [pingExtension, refreshExtensionAutoStatus]);
 
+  // Again for each extension source picked: switching banks clears the last answer.
   useEffect(() => {
     if (!isExtensionConnector) return;
     void checkExtension();
-  }, [checkExtension, isExtensionConnector]);
+  }, [checkExtension, isExtensionConnector, selectedSourceId]);
 
   useEffect(() => {
     if (!isExtensionConnector || !shouldUsePublishedExtensionFlow) {

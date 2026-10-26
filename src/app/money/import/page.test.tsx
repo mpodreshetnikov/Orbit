@@ -390,6 +390,50 @@ describe("MoneyImportPage", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("checks the extension again when another bank is picked", async () => {
+    connectorsState = [
+      { sourceId: "tbank_web", displayName: "TBank extension", kind: "extension" },
+      { sourceId: "alfa_web", displayName: "Alfa Bank Web", kind: "extension" },
+    ];
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        last_imported_at: null,
+        requires_history_prompt: false,
+        stale_threshold_days: 365,
+        recommended_mode: "auto",
+        window_from: "2026-02-20T12:00:00.000Z",
+        window_to: "2026-03-08T00:00:00.000Z",
+      }),
+    } as Response);
+    const pings: string[] = [];
+    const postMessageSpy = vi.spyOn(window, "postMessage").mockImplementation((message) => {
+      const payload = message as { type?: string };
+      if (payload.type !== "MONEY_IMPORT_PING") return;
+      pings.push(payload.type);
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          data: { source: "orbit-extension", type: "MONEY_IMPORT_PONG" },
+        }),
+      );
+    });
+
+    try {
+      render(<MoneyImportPage />);
+      const user = userEvent.setup();
+
+      await user.click(screen.getByTestId("import-bank-tbank"));
+      expect(await screen.findByText("money.importExtensionActive")).toBeInTheDocument();
+      const afterFirst = pings.length;
+
+      await user.click(screen.getByTestId("import-bank-alfa"));
+      await waitFor(() => expect(pings.length).toBeGreaterThan(afterFirst));
+      expect(await screen.findByText("money.importExtensionActive")).toBeInTheDocument();
+    } finally {
+      postMessageSpy.mockRestore();
+    }
+  });
+
   it("starts extension import flow and posts the created session to the extension bridge", async () => {
     connectorsState = [
       {
