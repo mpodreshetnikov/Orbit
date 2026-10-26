@@ -237,7 +237,7 @@ describe("ingest_medical_document", () => {
     expect(text).toContain("record.record_date: replaced_with_default (received март)");
   });
 
-  it("hands the owner the record's review link when the app's origin is known", async () => {
+  it("points to the draft card next, with the review link as the fallback when the origin is known", async () => {
     userClient.invokeEdgeFunctionAsUser.mockResolvedValue({
       status: 200,
       payload: { success: true },
@@ -253,13 +253,15 @@ describe("ingest_medical_document", () => {
     const tool = (await handlers()).get("ingest_medical_document")!;
 
     const linked = await tool(SUBMISSION, withOrigin);
+    expect(linked.content[0].text).toContain("Next: call show_record_draft");
     expect(linked.content[0].text).toContain(`https://orbit.test/health/records/${RECORD_ID}`);
     expect(linked.structuredContent?.review_url).toBe(
       `https://orbit.test/health/records/${RECORD_ID}`,
     );
 
     const unlinked = await tool(SUBMISSION, ctx);
-    expect(unlinked.content[0].text).toContain("leave it for the owner to review in the app");
+    expect(unlinked.content[0].text).toContain("Next: call show_record_draft");
+    expect(unlinked.content[0].text).not.toContain("/health/records/");
     expect(unlinked.structuredContent?.review_url).toBeNull();
   });
 
