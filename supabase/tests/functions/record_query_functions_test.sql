@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(15);
+SELECT plan(16);
 
 SELECT has_function('public', 'get_person_conditions_with_history', ARRAY['uuid']);
 SELECT has_function('public', 'get_record_conditions', ARRAY['uuid']);
@@ -274,6 +274,46 @@ VALUES
     NULL,
     ARRAY[3]
   );
+
+-- A removed record's mention of the same condition is not counted.
+INSERT INTO public.medical_records (
+  id,
+  person_id,
+  created_by_user_id,
+  record_type,
+  record_date,
+  title,
+  status,
+  removed_at
+)
+VALUES (
+  '99999999-1111-0000-0000-000000000000',
+  '88888888-0000-0000-0000-000000000000',
+  '77777777-0000-0000-0000-000000000000',
+  'lab',
+  '2026-03-01'::date,
+  'Discarded upload',
+  'removed',
+  now()
+);
+
+INSERT INTO public.condition_records (condition_id, record_id, status_in_record, source_anchor)
+VALUES (
+  'aaaaaaaa-0000-0000-0000-000000000000',
+  '99999999-1111-0000-0000-000000000000',
+  'active',
+  'anchor-removed'
+);
+
+SELECT is(
+  (
+    SELECT last_mentioned_date
+    FROM public.get_person_conditions_with_history('88888888-0000-0000-0000-000000000000')
+    WHERE id = 'aaaaaaaa-0000-0000-0000-000000000000'
+  ),
+  '2026-02-01'::date,
+  'get_person_conditions_with_history leaves a removed record out of the date range'
+);
 
 SELECT is(
   (

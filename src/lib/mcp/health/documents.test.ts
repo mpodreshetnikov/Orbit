@@ -8,6 +8,7 @@ import {
   findMissingPages,
   signRecordPageLinks,
   proposeRecordReconciliation,
+  recordPageSizes,
   removeRecordDraft,
   storagePathForPage,
   suggestReconciliation,
@@ -18,7 +19,7 @@ import { createSupabaseStub, type StubResult } from "./test-support";
 function stubWithStorage(
   queues: Record<string, StubResult[]>,
   rpcResults: Record<string, StubResult> = {},
-  storedFiles: string[] = [],
+  storedFiles: Array<string | { name: string; metadata: { size: number } }> = [],
 ) {
   const stub = createSupabaseStub(queues, rpcResults);
   const createSignedUploadUrl = vi.fn(async (path: string) => ({
@@ -26,7 +27,7 @@ function stubWithStorage(
     error: null,
   }));
   const list = vi.fn(async () => ({
-    data: storedFiles.map((name) => ({ name })),
+    data: storedFiles.map((file) => (typeof file === "string" ? { name: file } : file)),
     error: null,
   }));
   const createSignedUrls = vi.fn(async (paths: string[]) => ({
@@ -209,6 +210,40 @@ describe("findMissingPages", () => {
     });
     expect(missing.map((page) => page.original_filename)).toEqual(["b.png"]);
     expect(stub.list).toHaveBeenCalledWith("p-1/rec-1", { limit: 1000 });
+  });
+});
+
+describe("recordPageSizes", () => {
+  it("writes the size storage reports onto each uploaded page that lacks it", async () => {
+    const stub = stubWithStorage({ record_attachments: [{ data: null }] }, {}, [
+      { name: "1-a.png", metadata: { size: 2048 } },
+      { name: "2-b.png", metadata: { size: 4096 } },
+    ]);
+    await recordPageSizes(stub.client, {
+      id: "rec-1",
+      person_id: "p-1",
+      status: "draft",
+      title: "x",
+      attachments: [
+        {
+          id: "a-1",
+          original_filename: "a.png",
+          storage_path: "p-1/rec-1/1-a.png",
+          mime_type: "image/png",
+          file_size: null,
+        },
+        {
+          id: "a-2",
+          original_filename: "b.png",
+          storage_path: "p-1/rec-1/2-b.png",
+          mime_type: "image/png",
+          file_size: 4096,
+        },
+      ],
+    });
+
+    expect(stub.argsFor("record_attachments", "update")).toEqual([[{ file_size: 2048 }]]);
+    expect(stub.argsFor("record_attachments", "eq")).toEqual([["id", "a-1"]]);
   });
 });
 

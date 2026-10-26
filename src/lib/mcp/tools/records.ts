@@ -5,6 +5,7 @@ import {
   getRecordConditions,
   getRecordFindings,
   getRecordObservations,
+  listPendingRecords,
   searchMedicalRecords,
 } from "../health/records";
 import { getObservationHistory, searchObservations } from "../health/observations";
@@ -38,11 +39,54 @@ export const RECORD_TYPES = [
  */
 export function registerRecordTools(server: McpToolServer): void {
   server.registerTool(
+    "list_pending_records",
+    {
+      title: "List records not approved yet",
+      description:
+        "List medical records that are not on the chart yet, newest activity first: drafts waiting for pages or an ingest, drafts waiting for the owner's approval, and records a processing step failed on. Use it to find a record id you lost instead of guessing one, and before creating a record for a document that may already have a draft.",
+      inputSchema: z.object({
+        ...personSelectorSchema,
+        limit: z.number().int().min(1).max(100).default(20),
+      }),
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    withUserClient<{ person_id?: string; person_name?: string; limit: number }>(
+      async (supabase, args) => {
+        let personId: string | undefined;
+        if (args.person_id || args.person_name) {
+          const resolution = await resolvePerson(supabase, args);
+          if (resolution.status !== "ok") {
+            return fail(resolution.message, { candidates: resolution.candidates });
+          }
+          personId = resolution.person.id;
+        }
+        const records = await listPendingRecords(supabase, { personId, limit: args.limit });
+        const next: Record<string, string> = {
+          draft: "no document ingested yet: upload its pages and call ingest_medical_document",
+          structure_review: "waiting for the owner: show_record_draft",
+          ocr_failed: "text recognition failed",
+        };
+        return ok(
+          summarizeList(
+            "records not approved yet",
+            records.map(
+              (record) =>
+                `${record.title} — ${record.status}${record.structure_error ? ` (error: ${record.structure_error})` : ""}, updated ${record.updated_at.slice(0, 10)} (id ${record.id})${next[record.status] ? `; ${next[record.status]}` : ""}`,
+            ),
+            records.length,
+          ),
+          { records },
+        );
+      },
+    ),
+  );
+
+  server.registerTool(
     "search_medical_records",
     {
       title: "Search medical records",
       description:
-        "Full-text search across medical documents (title, notes and OCR'd text). Leave the query empty to list recent records. Returns document metadata; use get_medical_record for the contents.",
+        "Full-text search across medical documents (title, notes and OCR'd text). Leave the query empty to list recent records. Returns document metadata without the text; use get_medical_record for the contents. Only approved records unless include_incomplete; list_pending_records lists the ones not approved yet.",
       inputSchema: z.object({
         ...personSelectorSchema,
         ...paginationSchema,
