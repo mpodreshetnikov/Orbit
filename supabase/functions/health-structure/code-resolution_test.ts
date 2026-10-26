@@ -239,3 +239,78 @@ Deno.test("a lipid fraction resolves to its own analyte, and VLDL still to none"
   // entry, so the only correct answer is still no code.
   assertEquals(observationCodeFor("Холестерин ЛПОНП"), null);
 });
+
+Deno.test("a lab's own abbreviation in parentheses names the analyte", () => {
+  // On 2026-10-26 a lab printed every line as `Full name (ABBR)` and these stayed uncoded: the
+  // catalogue answers to the abbreviation exactly, but the long name's words were held against it.
+  assertEquals(observationCodeFor("Аланинаминотрансфераза (АЛТ)"), "alt");
+  assertEquals(observationCodeFor("Аспартатаминотрансфераза (АСТ)"), "ast");
+  assertEquals(observationCodeFor("Средний объем эритроцитов (MCV)"), "mcv");
+  // The other way round, and with the abbreviation typed in Cyrillic.
+  assertEquals(observationCodeFor("MCH (среднее содержание гемоглобина в эритроците)"), "mch");
+  assertEquals(observationCodeFor("Среднее содержание гемоглобина в эритроците (МСН)"), "mch");
+  assertEquals(observationCodeFor("МСН"), "mch");
+  // A parenthesised word that names nothing proves nothing, and a fraction still stays uncoded.
+  assertEquals(observationCodeFor("Холестерин (ЛПОНП)"), null);
+  assertEquals(observationCodeFor("Билирубин (прямой)"), null);
+});
+
+Deno.test("vitamin D printed with a Cyrillic Д resolves", () => {
+  assertEquals(observationCodeFor("Витамин Д"), "vitamin_d_25oh");
+  assertEquals(observationCodeFor("витамин д"), "vitamin_d_25oh");
+});
+
+function entry(
+  obs_code: string,
+  name_ru: string,
+  canonical_unit: string,
+  synonyms: string[],
+  accepted_units: ObservationCatalogItem["accepted_units"] = {},
+): ObservationCatalogItem {
+  return {
+    id: obs_code,
+    obs_code,
+    name_ru,
+    name_en: name_ru,
+    canonical_unit,
+    synonyms_ru: synonyms,
+    synonyms_en: [],
+    accepted_units,
+  };
+}
+
+Deno.test("an abbreviation does not override a long name that names another analyte", () => {
+  const catalog = [
+    entry("bilirubin_total", "Билирубин общий", "umol/L", ["bil"]),
+    entry("bilirubin_direct", "Билирубин прямой", "umol/L", []),
+  ];
+  // The two parts disagree, so the label is ambiguous and stays uncoded; above all it is not
+  // filed into total bilirubin on the strength of `bil`.
+  const result = resolveObservationCode(null, "Билирубин прямой (BIL)", catalog);
+  assertEquals(result.kind, "unresolved");
+});
+
+Deno.test("the printed unit picks between entries the label names", () => {
+  // The defect: PDW printed in fL was filed into the PDW kept in %, where 16.1 fL reads as 16.1 %.
+  const catalog = [
+    entry("pdw_pct", "PDW", "%", ["pdw"], { "%": { factor_to_canonical: 1 } }),
+    entry("pdw", "PDW (fL)", "fL", ["pdw"], { fL: { factor_to_canonical: 1 } }),
+    entry("albumin", "Альбумин", "g/L", ["альбумин"]),
+  ];
+  const codeFor = (label: string, unit: string | null) => {
+    const result = resolveObservationCode(null, label, catalog, unit);
+    return result.kind === "resolved" ? result.entry.obs_code : null;
+  };
+  assertEquals(codeFor("PDW", "fL"), "pdw");
+  assertEquals(codeFor("PDW", "фл"), "pdw");
+  assertEquals(codeFor("PDW", "%"), "pdw_pct");
+  assertEquals(codeFor("PDW", null), "pdw_pct");
+  // An unfamiliar spelling proves nothing, and an entry's own unit fits with no conversion listed.
+  assertEquals(codeFor("PDW", "ед."), "pdw_pct");
+  assertEquals(codeFor("Альбумин", "г/л"), "albumin");
+
+  // A known unit no entry takes leaves the row unmatched, naming the entry it ruled out.
+  const mismatch = resolveObservationCode(null, "Альбумин", catalog, "г/дл");
+  assertEquals(mismatch.kind, "unresolved");
+  if (mismatch.kind === "unresolved") assertEquals(mismatch.unitMismatch?.obs_code, "albumin");
+});

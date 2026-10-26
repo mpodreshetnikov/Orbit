@@ -3,6 +3,7 @@ import type {
   FindingTypeCatalogItem,
   ObservationCatalogItem,
 } from "./types.ts";
+import { unitFitsEntry } from "./unit-conversion.ts";
 
 /**
  * Deterministic resolution of extracted labels to catalogue entries.
@@ -25,7 +26,12 @@ export type ResolutionVia = "code" | "name" | "synonym" | "fuzzy";
 
 export type CodeResolution<T> =
   | { kind: "resolved"; entry: T; via: ResolutionVia; score: number }
-  | { kind: "unresolved"; reason: string };
+  | {
+      kind: "unresolved";
+      reason: string;
+      /** The entry the label named, when the printed unit is what ruled it out. */
+      unitMismatch?: T;
+    };
 
 /**
  * Similarity below this is treated as no match. Tuned to accept ordinary spelling and
@@ -145,7 +151,14 @@ const SPECIMEN_TOKENS = new Set([
 function foldHomoglyphs(value: string): string {
   const cyrillic = "авекмнорстух";
   const latin = "abekmhopctyx";
-  return value.replace(/[авекмнорстух]/g, (char) => latin[cyrillic.indexOf(char)] ?? char);
+  return (
+    value
+      // `Витамин Д` is vitamin D. A Cyrillic Д does not look like a D, so it is not a homoglyph, but
+      // standing alone (or as `Д3`) it names the vitamin and nothing else, and the catalogue spells
+      // it `витамин d`.
+      .replace(/(^|\s)д(\d*)(?=\s|$)/g, "$1d$2")
+      .replace(/[авекмнорстух]/g, (char) => latin[cyrillic.indexOf(char)] ?? char)
+  );
 }
 
 /**
@@ -272,6 +285,61 @@ function resolveByDiscriminatingToken<T>(
   return hasUnexplainedToken(normalizedQuery, winner) ? null : winner;
 }
 
+/** The entries whose name, synonym or code is exactly this text, folded. */
+function exactOwners<T>(text: string, views: CatalogView<T>[]): CatalogView<T>[] {
+  const folded = foldForMatch(text);
+  if (!folded) return [];
+  return views.filter((view) =>
+    [...view.names, ...view.synonyms, view.code].some((entry) => foldForMatch(entry) === folded),
+  );
+}
+
+/** True when every word of the text is short enough to be an abbreviation. */
+function isAbbreviation(text: string): boolean {
+  const tokens = tokensOf(normalize(text));
+  return tokens.length > 0 && tokens.every((token) => token.length < ABBREVIATION_MAX_LENGTH);
+}
+
+/**
+ * The entry a label's parenthesised abbreviation names, when the lab glossed its own label.
+ *
+ * Russian labs print the full name and its abbreviation together, either way round:
+ * `Аланинаминотрансфераза (АЛТ)`, `Средняя концентрация гемоглобина в эритроцитах (МСНС)`,
+ * `MCH (среднее содержание гемоглобина в эритроците)`. The catalogue answers to `алт`, `mchc` and
+ * `mch` exactly, but not to the long name, and the long name's words are what the qualifier check
+ * holds against it, so the whole label stayed uncoded: on 2026-10-26 that left `АЛТ` and most of
+ * the blood count unmatched. The abbreviation is the lab saying which analyte it means.
+ *
+ * Only an abbreviation counts, and only one exactly one entry owns. The other part must not name a
+ * different entry outright either: `Билирубин прямой (BIL)` is direct bilirubin whatever `bil`
+ * belongs to, and it stays for the paths below to decide.
+ */
+function resolveByAbbreviationGloss<T>(
+  nameText: string,
+  views: CatalogView<T>[],
+): CatalogView<T> | null {
+  const match = nameText.match(/^([^()]*)\(([^()]*)\)([^()]*)$/);
+  if (!match) return null;
+  const head = `${match[1]} ${match[3]}`.trim();
+  const gloss = match[2].trim();
+  if (!head || !gloss) return null;
+
+  const named = new Set<CatalogView<T>>();
+  for (const part of [head, gloss]) {
+    const owners = exactOwners(part, views);
+    if (owners.length > 1) return null;
+    // A long part that names an entry outright is an answer too, and it must agree with the
+    // abbreviation or the label is ambiguous.
+    if (owners.length === 1) named.add(owners[0]);
+  }
+  if (named.size !== 1) return null;
+  const winner = [...named][0];
+  const abbreviationNamesIt = [head, gloss].some(
+    (part) => isAbbreviation(part) && exactOwners(part, views)[0] === winner,
+  );
+  return abbreviationNamesIt ? winner : null;
+}
+
 function resolveWithViews<T>(
   modelCode: string | null,
   nameText: string | null,
@@ -291,18 +359,24 @@ function resolveWithViews<T>(
   }
 
   const normalizedName = normalize(nameText);
+  // Folded on both sides, so a homoglyph never decides a whole-label match: `МСН` typed in
+  // Cyrillic is `MCH`, and `Витамин Д` is the catalogue's `витамин d`.
+  const foldedName = foldHomoglyphs(normalizedName);
 
   for (const view of views) {
-    if (view.names.some((name) => normalize(name) === normalizedName)) {
+    if (view.names.some((name) => foldForMatch(name) === foldedName)) {
       return { kind: "resolved", entry: view.entry, via: "name", score: 1 };
     }
   }
 
   for (const view of views) {
-    if (view.synonyms.some((synonym) => normalize(synonym) === normalizedName)) {
+    if (view.synonyms.some((synonym) => foldForMatch(synonym) === foldedName)) {
       return { kind: "resolved", entry: view.entry, via: "synonym", score: 1 };
     }
   }
+
+  const byGloss = resolveByAbbreviationGloss(nameText, views);
+  if (byGloss) return { kind: "resolved", entry: byGloss.entry, via: "synonym", score: 1 };
 
   const byToken = resolveByDiscriminatingToken(normalizedName, views, qualifiersChangeIdentity);
   if (byToken) return { kind: "resolved", entry: byToken.entry, via: "synonym", score: 1 };
@@ -323,26 +397,45 @@ function resolveWithViews<T>(
   return { kind: "unresolved", reason: "no catalogue entry above similarity threshold" };
 }
 
+/** How many entries a printed unit may rule out before the label is reported as unmatched. */
+const UNIT_ALTERNATIVES_TRIED = 3;
+
 export function resolveObservationCode(
   modelCode: string | null,
   nameText: string | null,
   catalog: ObservationCatalogItem[],
+  unit: string | null = null,
 ): CodeResolution<ObservationCatalogItem> {
-  return resolveWithViews(
-    modelCode,
-    nameText,
-    catalog.map((entry) => ({
-      entry,
-      code: entry.obs_code,
-      names: [entry.name_ru, entry.name_en].filter(Boolean),
-      synonyms: [...(entry.synonyms_ru ?? []), ...(entry.synonyms_en ?? [])],
-    })),
-    // An analyte label's qualifier decides which analyte it is. `Холестерин ЛПОНП`, `ЛПВП` and
-    // `ЛПНП` are three different lipids and `Билирубин прямой` is not `Билирубин общий`, so a
-    // qualifier the entry cannot account for means this is not that entry, and the row stays
-    // uncoded rather than joining another analyte's history.
-    true,
-  );
+  let views: CatalogView<ObservationCatalogItem>[] = catalog.map((entry) => ({
+    entry,
+    code: entry.obs_code,
+    names: [entry.name_ru, entry.name_en].filter(Boolean),
+    synonyms: [...(entry.synonyms_ru ?? []), ...(entry.synonyms_en ?? [])],
+  }));
+  // An analyte label's qualifier decides which analyte it is. `Холестерин ЛПОНП`, `ЛПВП` and
+  // `ЛПНП` are three different lipids and `Билирубин прямой` is not `Билирубин общий`, so a
+  // qualifier the entry cannot account for means this is not that entry, and the row stays
+  // uncoded rather than joining another analyte's history.
+  const first = resolveWithViews(modelCode, nameText, views, true);
+  if (first.kind !== "resolved" || unitFitsEntry(first.entry, unit)) return first;
+
+  // The label named an entry the value cannot belong to: `PDW` printed in fL against the entry
+  // kept in %. Another entry the label also answers to may take that unit (`PDW, fL`), so the one
+  // ruled out is set aside and the label resolved again; failing that, the row stays unmatched and
+  // says which entry its unit ruled out, instead of joining a history it cannot be compared with.
+  let candidate: CodeResolution<ObservationCatalogItem> = first;
+  for (let attempt = 0; attempt < UNIT_ALTERNATIVES_TRIED; attempt++) {
+    if (candidate.kind !== "resolved") break;
+    const ruledOut = candidate.entry;
+    views = views.filter((view) => view.entry !== ruledOut);
+    candidate = resolveWithViews(modelCode, nameText, views, true);
+    if (candidate.kind === "resolved" && unitFitsEntry(candidate.entry, unit)) return candidate;
+  }
+  return {
+    kind: "unresolved",
+    reason: `printed unit does not fit ${first.entry.obs_code} (kept in ${first.entry.canonical_unit})`,
+    unitMismatch: first.entry,
+  };
 }
 
 export function resolveFindingTypeCode(

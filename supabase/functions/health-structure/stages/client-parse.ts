@@ -57,23 +57,34 @@ export function parseClientSubmission(
     context,
   );
 
+  const unitMismatches: StageRejection[] = [];
+  const observations = extract.value.observations.map((observation) => {
+    // The client leaves codes null and prints labels as they are; the lab-closure gate reads
+    // `obs_code`, so it is resolved here by the same catalogue lookup the observation rows use,
+    // never taken from the caller.
+    const resolution = resolveObservation(
+      null,
+      observation.obs_name,
+      context.observationCatalog,
+      observation.unit,
+    );
+    if (resolution.kind === "unresolved" && resolution.unitMismatch) {
+      const entry = resolution.unitMismatch;
+      unitMismatches.push({
+        entityKind: "observation",
+        reason: `"${observation.obs_name}" ${observation.value} ${observation.unit ?? ""}: the label names ${entry.obs_code} (${entry.name_ru}), which is kept in ${entry.canonical_unit} with no conversion from ${observation.unit}. It is stored unmatched; if it is another analyte, add it with upsert_catalog_entry and re-ingest.`,
+      });
+    }
+    return {
+      ...observation,
+      obs_code: resolution.kind === "resolved" ? resolution.entry.obs_code : null,
+    };
+  });
+
   return {
     structured: {
       ...classify.value,
-      observations: extract.value.observations.map((observation) => {
-        // The client leaves codes null and prints labels as they are; the lab-closure gate reads
-        // `obs_code`, so it is resolved here by the same catalogue lookup the observation rows use,
-        // never taken from the caller.
-        const resolution = resolveObservation(
-          null,
-          observation.obs_name,
-          context.observationCatalog,
-        );
-        return {
-          ...observation,
-          obs_code: resolution.kind === "resolved" ? resolution.entry.obs_code : null,
-        };
-      }),
+      observations,
       // Codes are resolved from the printed labels, as for observations: a valid but wrong code from
       // the caller would otherwise win over the grounded label in `buildFindingRows`.
       findings: extract.value.findings.map((finding) => ({
@@ -93,6 +104,7 @@ export function parseClientSubmission(
       ...extract.rejected,
       ...reconcile.rejected,
       ...findingGate.rejected,
+      ...unitMismatches,
     ],
   };
 }
