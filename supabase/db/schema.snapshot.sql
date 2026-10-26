@@ -916,7 +916,9 @@ CREATE TABLE "public"."record_attachments" (
     "original_filename" "text" NOT NULL,
     "file_size" bigint,
     "sort_order" integer DEFAULT 0 NOT NULL,
-    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "content_sha256" "text",
+    CONSTRAINT "record_attachments_content_sha256_format_check" CHECK ((("content_sha256" IS NULL) OR ("content_sha256" ~ '^[0-9a-f]{64}$'::"text")))
 );
 
 
@@ -2451,6 +2453,13 @@ CREATE INDEX "idx_persons_kind" ON "public"."persons" USING "btree" ("kind");
 --
 
 CREATE INDEX "idx_push_subscriptions_auth_user_id" ON "public"."push_subscriptions" USING "btree" ("auth_user_id");
+
+
+--
+-- Name: idx_record_attachments_content_sha256; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_record_attachments_content_sha256" ON "public"."record_attachments" USING "btree" ("content_sha256") WHERE ("content_sha256" IS NOT NULL);
 
 
 --

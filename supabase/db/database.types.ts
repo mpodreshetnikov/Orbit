@@ -2371,6 +2371,7 @@ export type Database = {
       }
       record_attachments: {
         Row: {
+          content_sha256: string | null
           created_at: string
           file_size: number | null
           id: string
@@ -2381,6 +2382,7 @@ export type Database = {
           storage_path: string
         }
         Insert: {
+          content_sha256?: string | null
           created_at?: string
           file_size?: number | null
           id?: string
@@ -2391,6 +2393,7 @@ export type Database = {
           storage_path: string
         }
         Update: {
+          content_sha256?: string | null
           created_at?: string
           file_size?: number | null
           id?: string

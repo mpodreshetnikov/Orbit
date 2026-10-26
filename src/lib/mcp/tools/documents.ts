@@ -6,6 +6,7 @@ import {
   activateMedicalRecord,
   createDraftRecord,
   dismissConditionClosure,
+  findDuplicatePages,
   findMissingPages,
   getIngestCandidates,
   getIngestableRecord,
@@ -16,6 +17,7 @@ import {
   removeRecordDraft,
   signPageUploads,
   suggestReconciliation,
+  type DuplicatePage,
   type PageUpload,
 } from "../health/documents";
 import {
@@ -129,6 +131,13 @@ function formatUploads(uploads: PageUpload[]): string {
     .join("\n");
 }
 
+function formatDuplicate(duplicate: DuplicatePage): string {
+  if (!duplicate.record_id) {
+    return `- ${duplicate.filename} is the same file as ${duplicate.page_filename} in this document.`;
+  }
+  return `- ${duplicate.filename} is ${duplicate.page_filename} of "${duplicate.record_title}"${duplicate.record_date ? ` (${duplicate.record_date})` : ""}, ${duplicate.record_status}, record_id ${duplicate.record_id}.`;
+}
+
 function formatSuggestion(item: ReconciliationSuggestion): string {
   const id = item.kind === "condition" ? `condition_id ${item.id}` : `checkup_item_id ${item.id}`;
   return `- ${item.kind}: ${item.label} -- ${item.reason} (${id})`;
@@ -222,11 +231,24 @@ export function registerDocumentTools(server: McpToolServer): void {
                 .min(1)
                 .describe("The file's own name, e.g. the one the user uploaded."),
               mime_type: z.enum(ALLOWED_PAGE_MIME_TYPES),
+              sha256: z
+                .string()
+                .regex(/^[0-9a-fA-F]{64}$/)
+                .optional()
+                .describe(
+                  "The file's SHA-256 in hex (e.g. from sha256sum). With it the server reports a document this person already has; without it the page is not compared.",
+                ),
             }),
           )
           .min(1)
           .max(30)
           .describe("The files of the document, in page order."),
+        allow_duplicate: z
+          .boolean()
+          .optional()
+          .describe(
+            "true to bring the pages in although the person already has the same files. Only when the user wants a second copy.",
+          ),
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
@@ -236,15 +258,34 @@ export function registerDocumentTools(server: McpToolServer): void {
       record_type: (typeof RECORD_TYPES)[number];
       title: string;
       record_date?: string;
-      pages: Array<{ filename: string; mime_type: (typeof ALLOWED_PAGE_MIME_TYPES)[number] }>;
+      pages: Array<{
+        filename: string;
+        mime_type: (typeof ALLOWED_PAGE_MIME_TYPES)[number];
+        sha256?: string;
+      }>;
+      allow_duplicate?: boolean;
     }>(async (supabase, person, args, auth) => {
+      const pages = args.pages.map((page) => ({ ...page, sha256: page.sha256?.toLowerCase() }));
+      if (!args.allow_duplicate) {
+        const duplicates = await findDuplicatePages(supabase, person.id, pages);
+        if (duplicates.length > 0) {
+          return fail(
+            [
+              `Not created: ${duplicates.length} page(s) are files ${person.name} already has.`,
+              ...duplicates.map(formatDuplicate),
+              "If this is that document, do not bring it in again; a draft is continued with get_upload_links and ingest_medical_document. If the user wants a second copy, call again with allow_duplicate: true.",
+            ].join("\n"),
+            { person_id: person.id, duplicates },
+          );
+        }
+      }
       const { recordId, uploads } = await createDraftRecord(supabase, {
         personId: person.id,
         userId: auth.authUserId,
         recordType: args.record_type,
         recordDate: args.record_date ?? null,
         title: args.title.trim(),
-        pages: args.pages,
+        pages,
       });
 
       return ok(
