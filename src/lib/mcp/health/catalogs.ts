@@ -176,3 +176,162 @@ export async function upsertCatalogEntry(
   }
   return data as unknown as Record<string, unknown>;
 }
+
+/**
+ * Create several entries in one call, never touching one that exists.
+ *
+ * `upsertCatalogEntry` overwrites an existing entry's synonyms with whatever it is given, which is
+ * the wrong thing to do in bulk: an agent filling the gaps a document showed on 2026-10-26 made 89
+ * calls, one entry at a time, and any of them could have wiped a list it did not know about. Here
+ * an existing code is reported back and left alone; `addCatalogSynonyms` is how it grows.
+ */
+export async function createCatalogEntries(
+  supabase: SupabaseClient<Database>,
+  params: { kind: CatalogKind; entries: Array<Record<string, unknown>> },
+): Promise<{ created: Array<Record<string, unknown>>; existing: string[] }> {
+  const spec = getCatalogSpec(params.kind);
+  const codes = params.entries.map((entry) => String(entry[spec.codeColumn]));
+  const repeated = codes.find((code, index) => codes.indexOf(code) !== index);
+  if (repeated) {
+    throw new Error(`${spec.codeColumn} "${repeated}" appears twice in this batch.`);
+  }
+
+  const { data: found, error: lookupError } = await supabase
+    .from(spec.table)
+    .select(spec.codeColumn)
+    .in(spec.codeColumn, codes);
+  if (lookupError) {
+    throw new Error(`Failed to look up ${spec.label}: ${lookupError.message}`);
+  }
+  const existing = new Set(
+    ((found ?? []) as unknown as Array<Record<string, unknown>>).map((row) =>
+      String(row[spec.codeColumn]),
+    ),
+  );
+  const fresh = params.entries.filter((entry) => !existing.has(String(entry[spec.codeColumn])));
+  if (fresh.length === 0) return { created: [], existing: [...existing] };
+
+  const { data, error } = await supabase
+    .from(spec.table)
+    .insert(fresh as never)
+    .select(spec.columns);
+  if (error) {
+    throw new Error(`Failed to create ${spec.label} entries: ${error.message}`);
+  }
+  return {
+    created: (data ?? []) as unknown as Array<Record<string, unknown>>,
+    existing: [...existing],
+  };
+}
+
+/** What adding synonyms to one entry did. */
+export interface SynonymChange {
+  code: string;
+  /** No entry has this code; nothing was written for it. */
+  missing: boolean;
+  added: string[];
+  already_present: string[];
+  /** Wordings another entry already answers to, refused so the matcher never has to choose. */
+  refused: Array<{ synonym: string; owner: string }>;
+}
+
+/**
+ * Fold a wording the way the server's matcher compares labels: case, `ё`, punctuation and spacing
+ * carry no meaning (`Гамма-ГТ` is `гамма гт`).
+ */
+function foldWording(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/ё/g, "е")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+/**
+ * Append wordings to existing entries' synonyms and report exactly what changed.
+ *
+ * A wording another entry already answers to (by name or synonym) is refused, not added: two
+ * entries answering to `pdw` is how PDW in fL got filed into the PDW kept in %, and the matcher
+ * takes whichever it meets first. Stored lower-cased, as the catalogue keeps them.
+ */
+export async function addCatalogSynonyms(
+  supabase: SupabaseClient<Database>,
+  params: {
+    kind: CatalogKind;
+    items: Array<{ code: string; synonyms_ru?: string[]; synonyms_en?: string[] }>;
+  },
+): Promise<SynonymChange[]> {
+  const spec = getCatalogSpec(params.kind);
+  if (!spec.hasSynonyms) {
+    throw new Error(`The ${spec.label} catalog has no synonyms.`);
+  }
+
+  const { data, error } = await supabase
+    .from(spec.table)
+    .select(`id, ${spec.codeColumn}, name_ru, name_en, synonyms_ru, synonyms_en`);
+  if (error) {
+    throw new Error(`Failed to read ${spec.label}: ${error.message}`);
+  }
+  const rows = (data ?? []) as unknown as Array<Record<string, unknown>>;
+
+  const owners = new Map<string, string>();
+  for (const row of rows) {
+    const code = String(row[spec.codeColumn]);
+    for (const wording of [
+      row.name_ru,
+      row.name_en,
+      ...((row.synonyms_ru as string[] | null) ?? []),
+      ...((row.synonyms_en as string[] | null) ?? []),
+    ]) {
+      if (typeof wording === "string" && !owners.has(foldWording(wording))) {
+        owners.set(foldWording(wording), code);
+      }
+    }
+  }
+
+  const changes: SynonymChange[] = [];
+  for (const item of params.items) {
+    const row = rows.find((candidate) => String(candidate[spec.codeColumn]) === item.code);
+    const change: SynonymChange = {
+      code: item.code,
+      missing: !row,
+      added: [],
+      already_present: [],
+      refused: [],
+    };
+    changes.push(change);
+    if (!row) continue;
+
+    const next = {
+      synonyms_ru: [...((row.synonyms_ru as string[] | null) ?? [])],
+      synonyms_en: [...((row.synonyms_en as string[] | null) ?? [])],
+    };
+    for (const column of ["synonyms_ru", "synonyms_en"] as const) {
+      for (const raw of item[column] ?? []) {
+        const synonym = raw.trim().toLowerCase();
+        const folded = foldWording(synonym);
+        if (!folded) continue;
+        const owner = owners.get(folded);
+        if (owner === item.code) {
+          change.already_present.push(synonym);
+        } else if (owner) {
+          change.refused.push({ synonym, owner });
+        } else {
+          next[column].push(synonym);
+          owners.set(folded, item.code);
+          change.added.push(synonym);
+        }
+      }
+    }
+    if (change.added.length === 0) continue;
+
+    const { error: updateError } = await supabase
+      .from(spec.table)
+      .update(next as never)
+      .eq("id", row.id as string);
+    if (updateError) {
+      throw new Error(`Failed to add synonyms to ${item.code}: ${updateError.message}`);
+    }
+  }
+  return changes;
+}

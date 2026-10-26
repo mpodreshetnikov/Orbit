@@ -292,9 +292,9 @@ export function registerDocumentTools(server: McpToolServer): void {
       description: [
         "Submit what you read from a record's uploaded pages. The server runs its own checks on it, the same ones the app's pipeline runs: every entity's source_anchor must appear verbatim in source_text; lab names are matched to the observation catalogue and values converted to canonical units; a condition closure is accepted only when this document's own in-range measurement supports it, and is left pending confirmation; a finding closure is accepted only when an asserted absence in this document covers it.",
         "Print names and units as written. Put a finding the document says is NOT there (e.g. 'конкременты не выявлены') in extraction.asserted_absences, never in findings.",
-        "Before submitting findings or absences, look up each finding type and body site with search_catalog_entries (catalogs finding_type and body_site). The server codes them from their labels, and a label no entry carries stays uncoded: it cannot be tracked over time, and uncoded findings at different sites merge into one history. When an entry is missing, add it first with upsert_catalog_entry, putting the document's wording in its Russian synonyms; when one exists under another wording, add that wording as a synonym. One finding per site.",
+        "Before submitting findings or absences, look up each finding type and body site with search_catalog_entries (catalogs finding_type and body_site). The server codes them from their labels, and a label no entry carries stays uncoded: it cannot be tracked over time, and uncoded findings at different sites merge into one history. When entries are missing, add them first with create_catalog_entries (several in one call), putting the document's wording in their Russian synonyms; when one exists under another wording, add that wording with add_catalog_synonyms. One finding per site.",
         "Every submission carries reconciliation, decided now and not after approval: the conditions this document resolves, the findings it settles and the checkups it completes (ids from get_ingest_candidates), the server's suggestions you rule out in not_applicable with a reason, or nothing_to_reconcile: true when it closes nothing. A submission without that decision, or that leaves a server suggestion unruled, is refused before anything is stored, and the refusal lists what the server thinks the document may close.",
-        "The record moves to review, not to the chart. The reply lists what was stored, what was refused and why, observations the catalogue did not recognise (dropped at approval unless added with upsert_catalog_entry and the document re-ingested), and closures awaiting confirmation. Re-submitting replaces the previous submission for this record.",
+        "The record moves to review, not to the chart. The reply lists what was stored, what was refused and why, observations the catalogue did not recognise (dropped at approval unless added with create_catalog_entries or add_catalog_synonyms and the document re-ingested), and closures awaiting confirmation. Re-submitting replaces the previous submission for this record.",
       ].join(" "),
       inputSchema: z.object({
         record_id: uuidSchema,
@@ -472,7 +472,7 @@ export function registerDocumentTools(server: McpToolServer): void {
       ];
       if (unmatched.length > 0) {
         lines.push(
-          `Not recognised by the observation catalogue (dropped at approval unless added with upsert_catalog_entry and re-ingested):`,
+          `Not recognised by the observation catalogue (dropped at approval unless added with create_catalog_entries, all of them in one call, or given as a wording to an existing entry with add_catalog_synonyms, and re-ingested):`,
           ...unmatched.map((row) =>
             `- ${String(row.obs_name)} ${String(row.value_text ?? "")} ${String(row.unit ?? "")}`.trimEnd(),
           ),
@@ -480,7 +480,7 @@ export function registerDocumentTools(server: McpToolServer): void {
       }
       if (uncoded.length > 0) {
         lines.push(
-          `Findings the catalogues did not recognise (add the finding type or body site with upsert_catalog_entry, with this wording as a synonym, and re-ingest; uncoded, they cannot be tracked over time):`,
+          `Findings the catalogues did not recognise (add the finding type or body site with create_catalog_entries, or this wording to an existing one with add_catalog_synonyms, and re-ingest; uncoded, they cannot be tracked over time):`,
           ...uncoded.map(
             (row) =>
               `- ${String(row.finding_type_text)}${row.finding_code ? "" : " (no finding type)"}${row.body_site_text ? ` at ${String(row.body_site_text)}` : ""}${row.site_code ? "" : " (no body site)"}`,

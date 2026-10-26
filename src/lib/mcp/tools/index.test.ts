@@ -63,6 +63,8 @@ describe("registerHealthTools", () => {
         "list_persons",
         "log_dose",
         "search_catalog_entries",
+        "add_catalog_synonyms",
+        "create_catalog_entries",
         "search_findings",
         "get_finding_history",
         "get_ingest_candidates",
@@ -101,7 +103,9 @@ describe("registerHealthTools", () => {
 
   const WRITE_TOOLS = [
     "activate_medical_record",
+    "add_catalog_synonyms",
     "add_measurement",
+    "create_catalog_entries",
     "add_medication",
     "create_medical_record",
     "dismiss_condition_closure",
@@ -239,6 +243,28 @@ describe("registerHealthTools", () => {
     // Times must be real 24-hour clock values.
     expect(
       schema.safeParse({ ...base, schedule: { mode: "daily_times", times: ["8am"] } }).success,
+    ).toBe(false);
+  });
+
+  it("takes an observation's unit conversions as factors only", () => {
+    const schema = byName.get("upsert_catalog_entry")?.config.inputSchema as z.ZodTypeAny;
+    const entry = {
+      catalog: "observation",
+      obs_code: "vitamin_d_25oh",
+      name_en: "25(OH) Vitamin D",
+      name_ru: "25(OH) витамин D",
+      canonical_unit: "nmol/L",
+    };
+    expect(
+      schema.safeParse({
+        entry: { ...entry, accepted_units: { "ng/mL": { factor_to_canonical: 2.5 } } },
+      }).success,
+    ).toBe(true);
+    // A formula is a string the server evaluates; it is not something to take from a chat.
+    expect(
+      schema.safeParse({
+        entry: { ...entry, accepted_units: { "ng/mL": { formula_to_canonical: "x * 2.5" } } },
+      }).success,
     ).toBe(false);
   });
 
