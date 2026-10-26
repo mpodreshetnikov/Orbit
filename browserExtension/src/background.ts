@@ -24,6 +24,7 @@ import {
   parseReleaseInfo,
   SELF_UPDATE_ALARM,
   SELF_UPDATE_PERIOD_MINUTES,
+  SELF_UPDATE_TIMEOUTS_MS,
   type NativeHostReply,
   type SelfUpdater,
 } from "./core/self-update.js";
@@ -393,6 +394,7 @@ const selfUpdater: Promise<SelfUpdater> = (async () => {
     fetchLatest: async () => {
       const response = await fetch(`${appOrigin}/api/extension-release/latest`, {
         cache: "no-store",
+        signal: AbortSignal.timeout(SELF_UPDATE_TIMEOUTS_MS.fetch),
       });
       if (!response.ok) return null;
       return parseReleaseInfo(await response.json());
