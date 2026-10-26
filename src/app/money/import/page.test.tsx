@@ -1297,6 +1297,87 @@ describe("MoneyImportPage", () => {
     }
   }, 15_000);
 
+  it("offers a reload, and creates no session, when the extension was updated under the open tab", async () => {
+    connectorsState = [
+      {
+        sourceId: "tbank_web",
+        displayName: "TBank extension",
+        kind: "extension",
+        websiteUrl: "https://example-bank.test",
+      },
+    ];
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        last_imported_at: "2026-02-20T12:00:00.000Z",
+        requires_history_prompt: false,
+        stale_threshold_days: 365,
+        recommended_mode: "auto",
+        window_from: "2026-02-20T12:00:00.000Z",
+        window_to: "2026-03-08T00:00:00.000Z",
+      }),
+    } as Response);
+    hookMocks.useMoneyAccounts.mockReturnValue({
+      data: [makeAccount("tbank", "acc-tbank")],
+      isLoading: false,
+    });
+
+    // Answers while the page loads; after an update the old content script reports itself stale.
+    let extensionAnswers = true;
+    const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
+    const postMessageSpy = vi.spyOn(window, "postMessage").mockImplementation((message) => {
+      const payload = message as { type?: string };
+      if (payload.type === "MONEY_IMPORT_PING") {
+        window.dispatchEvent(
+          new MessageEvent("message", {
+            data: extensionAnswers
+              ? { source: "orbit-extension", type: "MONEY_IMPORT_PONG" }
+              : {
+                  source: "orbit-extension",
+                  type: "MONEY_IMPORT_BRIDGE_STALE",
+                  reason: "Extension context invalidated.",
+                },
+          }),
+        );
+      }
+    });
+
+    try {
+      render(<MoneyImportPage />);
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("button", { name: /TBank extension/ }));
+      const startImportButton = await screen.findByRole("button", {
+        name: "money.importStartImport",
+      });
+      await waitFor(() => {
+        expect(startImportButton).toBeEnabled();
+      });
+      extensionAnswers = false;
+      await user.click(startImportButton);
+
+      expect(
+        await screen.findByText("money.importExtensionStaleReload", {}, { timeout: 5000 }),
+      ).toBeInTheDocument();
+      expect(screen.getByText("money.importExtensionInactive")).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "money.importAttentionReload" }),
+      ).toBeInTheDocument();
+      expect(openSpy).not.toHaveBeenCalled();
+      expect(
+        fetchMock.mock.calls.some(([, init]) =>
+          String((init as RequestInit | undefined)?.body ?? "").includes("create_session"),
+        ),
+      ).toBe(false);
+      expect(postMessageSpy).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "MONEY_IMPORT_START_SESSION" }),
+        "*",
+      );
+    } finally {
+      postMessageSpy.mockRestore();
+      openSpy.mockRestore();
+    }
+  }, 15_000);
+
   it("covers money-import helper functions and progress computation branches", async () => {
     const { callMoneyImportAction, computeProgressPercent, getAccessToken, getFunctionUrl } =
       await import("./money-import-client");

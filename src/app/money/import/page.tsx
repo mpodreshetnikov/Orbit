@@ -106,6 +106,7 @@ import {
   getFunctionUrl,
 } from "./money-import-client";
 import { getAppEnvironmentKind } from "./extension-release-client";
+import { probeExtension, reloadPage } from "@/lib/money/extension-bridge";
 import type {
   MoneyImportRangePresetKey,
   MoneyImportRangeSelectionMeta,
@@ -981,11 +982,18 @@ export default function MoneyImportPage() {
     try {
       // The extension can stop answering after the page loaded -- reloaded, updated, disabled --
       // so ask again before a session is created and the bank is opened for nothing.
-      const pingResult = await pingExtension();
-      if (!pingResult.active) {
+      const probe = await probeExtension();
+      if (probe !== "alive") {
         setExtensionActive(false);
         setInstalledExtensionVersion(null);
-        setExtensionStatusMessage(t("money.importExtensionNotAnswering"));
+        // A stale bridge is the extension updated under this tab: only a reload brings it back.
+        setExtensionStatusMessage(
+          t(
+            probe === "stale"
+              ? "money.importExtensionStaleReload"
+              : "money.importExtensionNotAnswering",
+          ),
+        );
         return;
       }
 
@@ -1050,7 +1058,6 @@ export default function MoneyImportPage() {
     extensionRangeChoice,
     isTbankExtensionConnector,
     loadExtensionImportContext,
-    pingExtension,
     selectedPersonId,
     selectedConnector,
     selectedConnectorSourceLabel,
@@ -1669,6 +1676,12 @@ export default function MoneyImportPage() {
               >
                 {extensionStatusMessage}
               </p>
+            )}
+
+            {extensionStatusMessage && extensionActive === false && (
+              <Button type="button" size="sm" onClick={() => reloadPage()}>
+                {t("money.importAttentionReload")}
+              </Button>
             )}
 
             {activeSessionId && (
