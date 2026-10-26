@@ -162,7 +162,15 @@ describe("a statement import", () => {
       disabled: false,
     });
     expect(screen.getByTestId("import-bank-alfa")).toBeDisabled();
-    expect(screen.getByText("Только из личного кабинета, на компьютере")).toBeOnTheScreen();
+    expect(
+      screen.getByText("Альфа-Банк: Только из личного кабинета, на компьютере"),
+    ).toBeOnTheScreen();
+    expect(screen.getByText("Другой банк: Скоро: выписка любого банка")).toBeOnTheScreen();
+    expect(await screen.findByTestId("import-last")).toHaveTextContent(
+      "Последний импорт 1 окт. · T-Bank · 2 операции",
+    );
+    await fireEvent.press(screen.getByText("Где взять выписку T-Bank?"));
+    expect(screen.getByText("2. Выписка, формат CSV, период")).toBeOnTheScreen();
     expect(screen.getByTestId("import-bank-other")).toBeDisabled();
     expect(screen.getByTestId("import-method-extension")).toBeDisabled();
     expect(screen.getByText("Нужен браузер на компьютере с расширением Orbit")).toBeOnTheScreen();

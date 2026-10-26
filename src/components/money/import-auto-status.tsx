@@ -176,14 +176,15 @@ export function MoneyImportAutoStatus({
   selectedPersonId,
   sourceLabels,
   onRefresh,
-}: MoneyImportAutoStatusProps) {
+  children,
+}: MoneyImportAutoStatusProps & { children?: React.ReactNode }) {
   const grant = status?.grant ?? null;
   const grantIsForSelectedPerson = Boolean(grant && grant.person_id === selectedPersonId);
   return (
-    <Card data-testid="money-import-auto-status">
+    <Card className="rounded-xl" data-testid="money-import-auto-status">
       <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
         <CardTitle className="text-base">{t("money.importAutoStatusTitle")}</CardTitle>
-        <Button type="button" size="sm" variant="outline" onClick={onRefresh}>
+        <Button type="button" size="sm" variant="ghost" onClick={onRefresh}>
           {t("common.refresh")}
         </Button>
       </CardHeader>
@@ -241,6 +242,7 @@ export function MoneyImportAutoStatus({
             })}
           </>
         )}
+        {children ? <div className="border-t pt-3">{children}</div> : null}
       </CardContent>
     </Card>
   );

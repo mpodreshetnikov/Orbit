@@ -1,18 +1,17 @@
 import type { MoneyImportPreviewResult } from "@orbit-types/import";
 import { importBatchRows } from "@orbit-types/money-import-rows";
 import {
+  importBankOfSource,
   importBankOptions,
   type ImportBankId,
-  type ImportMethodOption,
 } from "@orbit-types/money-import-sources";
 import { TBANK_CSV_SOURCE_ID } from "@orbit-types/money-import-tbank-csv";
 import { useQueryClient } from "@tanstack/react-query";
 import { Stack, useLocalSearchParams, useRouter, type Href } from "expo-router";
-import { FileSpreadsheet, History } from "lucide-react-native";
-import { useEffect, useState } from "react";
+import { ChevronDown, ChevronRight, FileSpreadsheet, FileUp, History } from "lucide-react-native";
+import { useEffect, useState, type ReactNode } from "react";
 import { Pressable, ScrollView, View } from "react-native";
-import { Section } from "@/components/form";
-import { Badge, Button, Card, Text } from "@/components/ui";
+import { Badge, Button, Card, Icon, Text } from "@/components/ui";
 import {
   moneyImportAction,
   pickStatement,
@@ -20,7 +19,7 @@ import {
   type StatementFile,
 } from "@/features/money/import";
 import { t } from "@/lib/i18n";
-import { usePerson } from "@/lib/queries";
+import { useImportBatches, usePerson } from "@/lib/queries";
 import { space, usePalette } from "@/theme";
 
 /** What the web offers, as the phone sees it: the extension runs only in a computer's browser. */
@@ -39,7 +38,83 @@ const BANK_KEYS: Record<ImportBankId, string> = {
   other: "money.importBankOther",
 };
 
-/** A bank or a way to import, greyed and inert where the phone cannot do it. */
+const BANK_MARKS: Record<ImportBankId, { letter: string; surface: string; ink: string }> = {
+  tbank: { letter: "Т", surface: "#ffdd2d", ink: "#171717" },
+  alfa: { letter: "А", surface: "#ef3124", ink: "#ffffff" },
+  other: { letter: "…", surface: "#f5f5f5", ink: "#737373" },
+};
+
+/** A step's name over its choices, as the web page sets it: small, grey, upper case. */
+function Step({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <View style={{ gap: 10 }}>
+      <Text size="xs" weight="semibold" tone="mutedForeground">
+        {title.toUpperCase()}
+      </Text>
+      {children}
+    </View>
+  );
+}
+
+/** A bank as a pill with its mark, greyed and inert where the phone cannot import from it. */
+function BankPill({
+  id,
+  selected,
+  available,
+  onPress,
+}: {
+  id: ImportBankId;
+  selected: boolean;
+  available: boolean;
+  onPress: () => void;
+}) {
+  const palette = usePalette();
+  const mark = BANK_MARKS[id];
+  return (
+    <Pressable
+      testID={`import-bank-${id}`}
+      accessibilityRole="button"
+      accessibilityState={{ selected, disabled: !available }}
+      disabled={!available}
+      onPress={onPress}
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: space.sm,
+        height: 44,
+        paddingHorizontal: 14,
+        borderRadius: 10,
+        borderWidth: selected ? 2 : 1,
+        borderColor: selected ? palette.primary : palette.border,
+        backgroundColor: available ? palette.card : palette.muted,
+      }}
+    >
+      <View
+        style={{
+          width: 24,
+          height: 24,
+          borderRadius: 6,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: available ? mark.surface : palette.border,
+        }}
+      >
+        <Text
+          size="xs"
+          weight="bold"
+          style={{ color: available ? mark.ink : palette.mutedForeground }}
+        >
+          {mark.letter}
+        </Text>
+      </View>
+      <Text size="sm" weight="medium" tone={available ? "foreground" : "mutedForeground"}>
+        {t(BANK_KEYS[id])}
+      </Text>
+    </Pressable>
+  );
+}
+
+/** A way to import, greyed and inert where the phone cannot do it. */
 function Option({
   title,
   hint,
@@ -47,7 +122,6 @@ function Option({
   available,
   chip,
   testID,
-  onPress,
 }: {
   title: string;
   hint: string;
@@ -55,7 +129,6 @@ function Option({
   available: boolean;
   chip?: string;
   testID: string;
-  onPress: () => void;
 }) {
   const palette = usePalette();
   return (
@@ -64,19 +137,27 @@ function Option({
       accessibilityRole="button"
       accessibilityState={{ selected, disabled: !available }}
       disabled={!available}
-      onPress={onPress}
       style={{
-        gap: 2,
-        padding: space.md,
-        borderRadius: 8,
-        borderWidth: 1,
+        gap: space.xs,
+        padding: 14,
+        borderRadius: 12,
+        borderWidth: selected ? 2 : 1,
         borderColor: selected ? palette.primary : palette.border,
-        opacity: available ? 1 : 0.5,
+        backgroundColor: available ? palette.card : palette.muted,
       }}
     >
-      <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
-        <Text weight="medium">{title}</Text>
-        {chip ? <Badge label={chip} textTone="mutedForeground" /> : null}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
+        <Text weight="semibold" tone={available ? "foreground" : "mutedForeground"}>
+          {title}
+        </Text>
+        {chip ? (
+          <Badge
+            label={chip}
+            textTone={available ? "infoText" : "mutedForeground"}
+            surface={available ? palette.infoSurface : undefined}
+            border={available ? palette.infoBorder : undefined}
+          />
+        ) : null}
       </View>
       <Text size="sm" tone="mutedForeground">
         {hint}
@@ -100,6 +181,9 @@ export default function MoneyImportScreen() {
   const [bank, setBank] = useState<ImportBankId>("tbank");
   const [status, setStatus] = useState<string | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
+  const [howTo, setHowTo] = useState(false);
+  const palette = usePalette();
+  const batches = useImportBatches(personId);
   // Rows the parser could not read never reach the server, so the import's page cannot tell of them.
   const [skipped, setSkipped] = useState<{ batchId: string; rows: number } | null>(null);
 
@@ -150,10 +234,8 @@ export default function MoneyImportScreen() {
   }, [params.file, params.name, personId]);
 
   const selected = BANKS.find((one) => one.id === bank)!;
-  const methodHint = (method: ImportMethodOption) =>
-    method.kind === "file"
-      ? t("money.importMethodFileHint")
-      : t("money.importMethodExtensionDesktopOnly");
+  const unavailable = BANKS.filter((one) => !one.available);
+  const last = batches.data?.find((one) => one.status === "completed");
 
   return (
     <>
@@ -162,6 +244,18 @@ export default function MoneyImportScreen() {
         contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={{ padding: space.lg, gap: space.lg, paddingBottom: space.xl * 2 }}
       >
+        {last ? (
+          <Text size="sm" tone="mutedForeground" testID="import-last">
+            {t("money.importLastImport", {
+              date: new Date(last.created_at).toLocaleDateString("ru-RU", {
+                day: "numeric",
+                month: "short",
+              }),
+              bank: t(BANK_KEYS[importBankOfSource(last.source)]),
+              count: last.inserted_count,
+            })}
+          </Text>
+        ) : null}
         <Button
           variant="outline"
           icon={History}
@@ -169,27 +263,30 @@ export default function MoneyImportScreen() {
           onPress={() => router.push("/money/import/history" as Href)}
         />
 
-        <Section title={t("money.importStepBank")}>
-          {BANKS.map((one) => (
-            <Option
-              key={one.id}
-              testID={`import-bank-${one.id}`}
-              title={t(BANK_KEYS[one.id])}
-              hint={
+        <Step title={t("money.importStepBank")}>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}>
+            {BANKS.map((one) => (
+              <BankPill
+                key={one.id}
+                id={one.id}
+                selected={one.id === bank}
+                available={one.available}
+                onPress={() => setBank(one.id)}
+              />
+            ))}
+          </View>
+          {unavailable.map((one) => (
+            <Text key={one.id} size="xs" tone="mutedForeground">
+              {`${t(BANK_KEYS[one.id])}: ${
                 one.methods.length === 0
                   ? t("money.importBankSoon")
-                  : one.available
-                    ? t("money.importMethodFile")
-                    : t("money.importBankDesktopOnly")
-              }
-              selected={one.id === bank}
-              available={one.available}
-              onPress={() => setBank(one.id)}
-            />
+                  : t("money.importBankDesktopOnly")
+              }`}
+            </Text>
           ))}
-        </Section>
+        </Step>
 
-        <Section title={t("money.importStepMethod")}>
+        <Step title={t("money.importStepMethod")}>
           {selected.methods.map((method) => (
             <Option
               key={method.kind}
@@ -197,19 +294,40 @@ export default function MoneyImportScreen() {
               title={t(
                 method.kind === "file" ? "money.importMethodFile" : "money.importMethodExtension",
               )}
-              hint={methodHint(method)}
+              hint={
+                method.kind === "file"
+                  ? t("money.importMethodFileHint")
+                  : t("money.importMethodExtensionDesktopOnly")
+              }
               chip={method.recommended ? t("money.importRecommended") : undefined}
               selected={method.available}
               available={method.available}
-              onPress={() => undefined}
             />
           ))}
-        </Section>
+        </Step>
 
-        <Section title={t("money.importStepFile")}>
-          <Text size="sm" tone="mutedForeground">
-            {t("money.importFileAutoStart")}
-          </Text>
+        <Card style={{ padding: space.lg, gap: space.md, borderRadius: 12 }}>
+          <Pressable
+            accessibilityRole="button"
+            disabled={!personId || status !== null}
+            onPress={() => void pickStatement().then((picked) => picked && start(picked))}
+            style={{
+              alignItems: "center",
+              gap: space.sm,
+              paddingVertical: space.xl,
+              paddingHorizontal: space.md,
+              borderRadius: 10,
+              borderWidth: 2,
+              borderStyle: "dashed",
+              borderColor: palette.border,
+            }}
+          >
+            <Icon icon={FileUp} size={28} tone="mutedForeground" />
+            <Text weight="semibold">{t("money.importFileChoose")}</Text>
+            <Text size="sm" tone="mutedForeground" style={{ textAlign: "center" }}>
+              {t("money.importFileAutoStart")}
+            </Text>
+          </Pressable>
           <Button
             icon={FileSpreadsheet}
             label={t("money.importUploadFile")}
@@ -237,10 +355,42 @@ export default function MoneyImportScreen() {
               />
             </View>
           ) : null}
-        </Section>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ expanded: howTo }}
+            onPress={() => setHowTo((open) => !open)}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: space.xs,
+              paddingVertical: space.xs,
+            }}
+          >
+            <Icon icon={howTo ? ChevronDown : ChevronRight} size={16} tone="mutedForeground" />
+            <Text size="sm" weight="medium">
+              {t("money.importFileHowTo")}
+            </Text>
+          </Pressable>
+          {howTo
+            ? (["1", "2", "3"] as const).map((step) => (
+                <Text key={step} size="sm" tone="mutedForeground">
+                  {`${step}. ${t(`money.importFileHowToStep${step}`)}`}
+                </Text>
+              ))
+            : null}
+        </Card>
 
-        <Card style={{ padding: space.md, gap: space.xs, opacity: 0.6 }}>
-          <Text weight="medium">{t("money.importAutoStatusTitle")}</Text>
+        <Card
+          style={{
+            padding: space.lg,
+            gap: space.xs,
+            borderRadius: 12,
+            backgroundColor: palette.muted,
+          }}
+        >
+          <Text weight="semibold" tone="mutedForeground">
+            {t("money.importAutoStatusTitle")}
+          </Text>
           <Text size="sm" tone="mutedForeground">
             {t("money.importAutoDesktopOnly")}
           </Text>

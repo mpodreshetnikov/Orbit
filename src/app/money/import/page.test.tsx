@@ -60,10 +60,21 @@ vi.mock("@/hooks/use-money-import-grants", () => ({
   useRevokeMoneyImportGrant: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
+const recentImportsState: { rows: Array<Record<string, unknown>> } = { rows: [] };
+
 vi.mock("@/lib/supabase", () => ({
   createClient: () => ({
     auth: {
       getSession: (...args: unknown[]) => getSessionMock(...args),
+    },
+    from: () => {
+      const query = {
+        select: () => query,
+        eq: () => query,
+        order: () => query,
+        limit: async () => ({ data: recentImportsState.rows, error: null }),
+      };
+      return query;
     },
   }),
 }));
@@ -138,6 +149,7 @@ describe("MoneyImportPage", () => {
   beforeEach(() => {
     selectedPersonIdState = "person-1";
     connectorsState = [];
+    recentImportsState.rows = [];
     window.localStorage.clear();
 
     fetchMock.mockReset();
@@ -199,6 +211,25 @@ describe("MoneyImportPage", () => {
     expect(screen.getByTestId("import-auto-panel")).toHaveTextContent(
       "money.importGrantsCollapsed",
     );
+  });
+
+  it("says when the last import was, and when each bank was last imported", async () => {
+    connectorsState = [
+      makeFileConnector("tbank", async () => ({ transactions: [] })),
+      { sourceId: "alfa_web", displayName: "Alfa Bank Web", kind: "extension" },
+    ];
+    recentImportsState.rows = [
+      { source: "tbank_web", created_at: "2026-10-24T11:05:00Z", inserted_count: 128 },
+      { source: "tbank", created_at: "2026-10-01T09:00:00Z", inserted_count: 4 },
+    ];
+
+    render(<MoneyImportPage />);
+
+    expect(await screen.findByTestId("import-last")).toHaveTextContent(
+      /money\.importLastImport .*money\.importBankTbank 128/,
+    );
+    expect(screen.getByTestId("import-bank-tbank")).toHaveTextContent("money.importBankLast");
+    expect(screen.getByTestId("import-bank-alfa")).toHaveTextContent("money.importBankNever");
   });
 
   it("greys out on a phone what needs the extension, and puts the file first", async () => {
@@ -418,6 +449,7 @@ describe("MoneyImportPage", () => {
     const user = userEvent.setup();
 
     await user.click(screen.getByTestId("import-bank-tbank"));
+    expect(await screen.findByText("money.importExtensionActive")).toBeInTheDocument();
     expect(await screen.findByText("money.importStepPeriod")).toBeInTheDocument();
     const startImportButton = await screen.findByRole("button", {
       name: "money.importStartImport",
