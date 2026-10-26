@@ -12,7 +12,16 @@ name: Импорт
 - tapOn: "Загрузить файл"
 - extendedWaitUntil: { visible: "(Cancel|Отменить|Отмена)", timeout: 15000 }
 - takeScreenshot: import-02-picker
+# The picker can take the first Cancel while it is still settling and stay open: cancel again while
+# it is on view, and wait for the screen underneath.
+- waitForAnimationToEnd
 - tapOn: "(Cancel|Отменить|Отмена)"
+- runFlow:
+    when:
+      visible: "Recents"
+    commands:
+      - tapOn: "(Cancel|Отменить|Отмена)"
+- extendedWaitUntil: { visible: "История импортов", timeout: 10000 }
 - tapOn: "История импортов"
 - extendedWaitUntil: { visible: ".*tbank · Файл.*", timeout: 10000 }
 - takeScreenshot: import-03-history
