@@ -150,7 +150,7 @@ export function registerCheckupProposalApp(server: Pick<McpServer, "registerTool
     {
       title: "Propose a new checkup",
       description:
-        'Propose new scheduled checkups for a person, e.g. a follow-up a document asks for ("контроль через 3 месяца") or a screening they lack, shown as a card the owner adds them from. Nothing is scheduled until the owner presses Add on the card; wait for them. Check list_checkups first: a checkup they already have is refused, so complete it (ingest\'s checkups_to_complete or propose_reconciliation) instead of proposing it again.',
+        'Propose new scheduled checkups for a person, e.g. a follow-up a document asks for ("контроль через 3 месяца") or a screening they lack, shown as a card the owner adds them from. Nothing is scheduled until the owner presses Add on the card; end your turn and wait: when they press a button the card posts a short message from them in the chat, and the outcome is in your context. Check list_checkups first: a checkup they already have is refused, so complete it (ingest\'s checkups_to_complete or propose_reconciliation) instead of proposing it again.',
       inputSchema: z.object({
         ...personSelectorSchema,
         checkups: z.array(proposedCheckupSchema).min(1).max(10),
@@ -176,7 +176,7 @@ export function registerCheckupProposalApp(server: Pick<McpServer, "registerTool
       const lines: string[] = [];
       if (review.accepted.length > 0) {
         lines.push(
-          `Showing ${review.accepted.length} proposed checkup(s) for ${person.name} on a card: ${review.accepted.map((item) => `"${item.input.title}" first due ${item.first_due_at}`).join(", ")}. Nothing is scheduled until the owner presses Add on the card; wait for them.`,
+          `Showing ${review.accepted.length} proposed checkup(s) for ${person.name} on a card: ${review.accepted.map((item) => `"${item.input.title}" first due ${item.first_due_at}`).join(", ")}. Nothing is scheduled until the owner presses Add on the card; end your turn and wait: when they press a button the card posts a short message from them in the chat, and the outcome is in your context.`,
         );
       }
       if (review.refused.length > 0) {

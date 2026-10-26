@@ -90,6 +90,7 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
   .result.ok strong { color: var(--color-text-success); }
   .result.bad strong { color: var(--color-text-danger); }
   .result p { margin: 4px 0 0; color: var(--color-text-secondary); font-size: 13px; }
+  .position { margin-top: -6px; margin-bottom: 4px; font-size: 12px; color: var(--color-text-tertiary); }
   .placeholder { color: var(--color-text-secondary); padding: 8px 0; }
 </style>
 </head>
@@ -104,10 +105,16 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
   var draft = null;
   var checkups = null; // the checkup_proposal view, in the card's third mode
   var recordId = null;
+  var thenRecordIds = [];
   var decision = null; // { kind: "approved" | "declined" | "confirmed" | "dismissed" | "error", ... }
   var busy = null;
   var expanded = false;
   var confirmTimer = null;
+  // Several drafts on one card: [{ record_id, title }], the one shown, and what was decided on each.
+  var queue = null;
+  var queueIndex = 0;
+  var outcomes = [];
+  var queueDone = false;
 
   function send(message) { window.parent.postMessage(message, "*"); }
   // A request that outlives its timeout stays pending, so an answer that arrives later still lands.
@@ -141,6 +148,7 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
     if (data.method === "ui/notifications/tool-input") {
       var args = data.params && data.params.arguments;
       if (args && args.record_id) recordId = args.record_id;
+      if (args && Array.isArray(args.then_record_ids)) thenRecordIds = args.then_record_ids;
     } else if (data.method === "ui/notifications/tool-result") {
       takeResult(data.params);
     } else if (data.method === "ui/notifications/host-context-changed") {
@@ -182,11 +190,17 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
     var proposed = result && result.structuredContent && result.structuredContent.checkup_proposal;
     if (proposed) { checkups = proposed; render(); return; }
     var view = result && result.structuredContent && result.structuredContent.draft;
+    var listed = result && result.structuredContent && result.structuredContent.queue;
+    if (!queue && listed && listed.length > 1) queue = listed;
     if (view) {
       draft = view;
       recordId = view.record_id;
       if (!decision && view.status === "active" && !view.has_proposals) decision = { kind: "approved", already: true };
       if (!decision && view.status === "removed") decision = { kind: "declined", already: true };
+      // Decided in Orbit while the card waited: the summary says so rather than count it unseen.
+      if (decision && decision.already && inQueue() && !outcomes[queueIndex]) {
+        outcomes[queueIndex] = { record_id: view.record_id, title: view.title, kind: "already" };
+      }
     } else if (result && result.isError) {
       decision = { kind: "load-error", message: resultText(result) };
     }
@@ -278,9 +292,18 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
     card.textContent = "";
     if (checkups) { renderCheckups(card); return; }
     if (!draft) {
-      card.appendChild(el("p", "placeholder", decision && decision.kind === "load-error"
+      var failed = decision && decision.kind === "load-error";
+      card.appendChild(el("p", "placeholder", failed
         ? "Не удалось загрузить черновик: " + (decision.message || "без текста")
         : "Загружаем черновик…"));
+      // One failed load must not strand the rest of the queue or the summary of what was decided.
+      if (failed && inQueue() && !queueDone) {
+        card.appendChild(el("div", "position", (queueIndex + 1) + " из " + queue.length));
+        var retry = el("button", "action", "Повторить");
+        retry.type = "button";
+        retry.addEventListener("click", loadQueued);
+        card.appendChild(queueActions(retry));
+      }
       return;
     }
 
@@ -294,6 +317,7 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
       : el("span", "chip", proposal ? "Ждёт подтверждения" : "На проверке");
     eyebrow.appendChild(chip);
     card.appendChild(eyebrow);
+    if (inQueue()) card.appendChild(el("div", "position", (queueIndex + 1) + " из " + queue.length));
     card.appendChild(el("h1", null, draft.title));
     card.appendChild(el("div", "meta", [draft.person_name, draft.type_label, formatDate(draft.record_date)].filter(Boolean).join(" · ")));
     if (draft.summary) card.appendChild(el("p", "summary", draft.summary));
@@ -362,6 +386,7 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
         box.appendChild(el("p", null, "Черновик убран из записей. Вернуть его можно в Orbit, в удалённых записях."));
       }
       footer.appendChild(box);
+      if (inQueue() && !queueDone) footer.appendChild(queueActions());
       footer.appendChild(renderLinks(false));
       return footer;
     }
@@ -413,9 +438,79 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
     return links;
   }
 
+  function inQueue() { return Boolean(queue) && queue.length > 1; }
+  var OUTCOME_LABELS = { approved: "одобрено", declined: "отклонено", confirmed: "сверка подтверждена", dismissed: "сверка отклонена", already: "уже решено в Orbit" };
+  // Each decision reaches the model as it happens; the chat gets one line, when the owner is done
+  // with the whole queue, so Claude does not take a turn in the middle of it.
+  function noteOutcome(kind) {
+    if (!inQueue()) return false;
+    outcomes[queueIndex] = { record_id: draft.record_id, title: draft.title, kind: kind };
+    if (queueIndex >= queue.length - 1) finishQueue();
+    return true;
+  }
+  function finishQueue() {
+    var done = outcomes.filter(Boolean);
+    var counts = {};
+    done.forEach(function (o) { counts[o.kind] = (counts[o.kind] || 0) + 1; });
+    var left = queue.filter(function (q, i) { return !outcomes[i]; });
+    tellModel("The owner went through the queued drafts on the Orbit card. " +
+      done.map(function (o) { return "\\"" + o.title + "\\" (record_id " + o.record_id + "): " + (o.kind === "already" ? "already decided in Orbit before the card reached it" : o.kind); }).join("; ") + "." +
+      (left.length ? " Not reviewed yet: " + left.map(function (q) { return "\\"" + q.title + "\\" (record_id " + q.record_id + ")"; }).join("; ") + "." : ""));
+    tellChat("Разобрал записи в карточке: " + Object.keys(counts).map(function (k) { return OUTCOME_LABELS[k] + " " + counts[k]; }).join(", ") +
+      (left.length ? ", не смотрел " + left.length : "") + ".");
+    queueDone = true;
+    render();
+  }
+  // Закончить is always there, so the last draft ends the queue even if it was decided elsewhere.
+  function queueActions(extra) {
+    var actions = el("div", "actions");
+    actions.style.marginTop = "10px";
+    var stop = el("button", "action decline", "Закончить");
+    stop.type = "button";
+    stop.addEventListener("click", finishQueue);
+    actions.appendChild(stop);
+    if (extra) actions.appendChild(extra);
+    if (queueIndex < queue.length - 1) {
+      var next = el("button", "action approve", "Дальше: " + (queueIndex + 2) + " из " + queue.length);
+      next.type = "button";
+      next.addEventListener("click", nextInQueue);
+      actions.appendChild(next);
+    }
+    return actions;
+  }
+  function nextInQueue() {
+    queueIndex += 1;
+    loadQueued();
+  }
+  function loadQueued() {
+    draft = null;
+    decision = null;
+    expanded = false;
+    render();
+    var index = queueIndex;
+    var id = queue[index].record_id;
+    recordId = id;
+    request("tools/call", { name: "show_record_draft", arguments: { record_id: id } }, 60000, function (late) {
+      if (!draft && index === queueIndex && late.result) takeResult(late.result);
+    }).then(function (result) {
+      if (index === queueIndex) takeResult(result);
+    }, function (error) {
+      if (index !== queueIndex) return;
+      decision = { kind: "load-error", message: error.message };
+      render();
+    });
+  }
+
   function tellModel(textValue) {
     if (!hostCaps.updateModelContext) return;
     request("ui/update-model-context", { content: [{ type: "text", text: textValue }] }, 10000).catch(function () {});
+  }
+  // Model context alone does not start a turn: on 2026-10-26 the owner approved on the card and
+  // then had to type "Дальше" before Claude moved on. A short line in the owner's voice does, and
+  // it reaches the chat after the context that explains it.
+  function tellChat(textValue) {
+    if (!hostCaps.message) return;
+    request("ui/message", { role: "user", content: [{ type: "text", text: textValue }] }, 30000).catch(function () {});
   }
 
   function settle(action, result) {
@@ -431,9 +526,11 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
       var left = confirmed.closuresLeftPending || 0;
       decision = { kind: "confirmed", partial: left > 0, details: lines.join(" ") || null };
       tellModel("The owner confirmed the proposed closures and checkup completions for \\"" + draft.title + "\\" (record_id " + draft.record_id + ") on the Orbit card: " + (confirmed.mentionsConfirmed || 0) + " closure(s) and " + (confirmed.checkupsCompleted || 0) + " checkup completion(s) are on the chart now." + (left ? " " + left + " closure(s) did NOT reach the chart: the measurement they cite is no longer in range on this record, so they still await confirmation and the condition keeps its status." : ""));
+      if (!noteOutcome("confirmed")) tellChat((left ? "Подтвердил сверку частично: " : "Подтвердил сверку: ") + "«" + draft.title + "».");
     } else if (action === "dismiss") {
       decision = { kind: "dismissed" };
       tellModel("The owner declined the proposed closures and checkup completions for \\"" + draft.title + "\\" (record_id " + draft.record_id + ") on the Orbit card; nothing changed. Do not propose them again unless the owner asks.");
+      if (!noteOutcome("dismissed")) tellChat("Отклонил сверку: «" + draft.title + "».");
     } else if (action === "approve") {
       var outcome = (result && result.structuredContent) || {};
       var notes = [];
@@ -443,9 +540,11 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
       if (outcome.closuresLeftPending) notes.push("Закрытий осталось на подтверждении: " + outcome.closuresLeftPending + ".");
       decision = { kind: "approved", details: notes.join(" ") || null };
       tellModel("The owner approved the record draft \\"" + draft.title + "\\" (record_id " + draft.record_id + ") on the Orbit card; it is on the chart now. Do not call activate_medical_record again.");
+      if (!noteOutcome("approved")) tellChat("Одобрил запись «" + draft.title + "».");
     } else {
       decision = { kind: "declined" };
       tellModel("The owner declined the record draft \\"" + draft.title + "\\" (record_id " + draft.record_id + ") on the Orbit card; it was set aside. Do not approve it.");
+      if (!noteOutcome("declined")) tellChat("Отклонил запись «" + draft.title + "».");
     }
     render();
   }
@@ -540,6 +639,7 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
     if (busy) return;
     decision = { kind: "skipped" };
     tellModel("The owner chose not to add the proposed checkup(s) " + checkupTitles() + " on the Orbit card. Do not schedule them.");
+    tellChat("Не стал добавлять чекапы.");
     render();
   }
   // The server's reasons are for the model; the owner reads the gist.
@@ -569,6 +669,7 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
         ? "The owner pressed Add on the Orbit card; scheduled now: " + added.map(function (t) { return "\\"" + t + "\\""; }).join(", ") + "." +
           (refused.length ? " Not added: " + refused.map(function (r) { return "\\"" + r.title + "\\" (" + r.reason + ")"; }).join(", ") + "; those are NOT scheduled." : "")
         : "The owner pressed Add on the Orbit card, but nothing was scheduled: " + refused.map(function (r) { return "\\"" + r.title + "\\" (" + r.reason + ")"; }).join(", ") + ".");
+      tellChat(added.length ? "Добавил в расписание: " + added.join(", ") + "." : "Чекапы не добавились.");
     }
     render();
   }
@@ -615,11 +716,12 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
     if (window.ResizeObserver) new ResizeObserver(reportSize).observe(document.documentElement);
     // A host that delivers the input but not the result: fetch the draft by the card's own call.
     setTimeout(function () {
-      if (draft || !recordId) return;
-      request("tools/call", { name: "show_record_draft", arguments: { record_id: recordId } }, 30000, function (late) {
+      if (draft || !recordId || queueIndex > 0) return;
+      var args = thenRecordIds.length ? { record_id: recordId, then_record_ids: thenRecordIds } : { record_id: recordId };
+      request("tools/call", { name: "show_record_draft", arguments: args }, 30000, function (late) {
         if (!draft && late.result) takeResult(late.result);
       }).then(takeResult, function () {});
-    }, 6000);
+    }, 2000);
   }, function () {
     document.getElementById("card").textContent = "";
     document.getElementById("card").appendChild(el("p", "placeholder", "Карточка не смогла связаться с Claude. Черновик можно открыть в Orbit."));

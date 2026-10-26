@@ -17,7 +17,10 @@ const documents = vi.hoisted(() => ({
   applyRecordProposals: vi.fn(),
   dismissRecordProposals: vi.fn(),
 }));
-const persons = vi.hoisted(() => ({ name: "Максим" as string | null }));
+const persons = vi.hoisted(() => ({
+  name: "Максим" as string | null,
+  queued: [] as Array<{ id: string; title: string | null; status: string }>,
+}));
 
 vi.mock("../health/records", () => records);
 vi.mock("../health/documents", () => documents);
@@ -28,6 +31,7 @@ vi.mock("../supabase-user-client", () => ({
         eq: () => ({
           maybeSingle: async () => ({ data: persons.name ? { name: persons.name } : null }),
         }),
+        in: async () => ({ data: persons.queued, error: null }),
       }),
     }),
   })),
@@ -363,12 +367,31 @@ describe("registerRecordDraftApp", () => {
 
     expect(result.isError).toBeUndefined();
     expect(result.content[0].text).toContain('Showing the draft of "Общий анализ крови"');
-    expect(result.content[0].text).toContain("wait for them");
+    expect(result.content[0].text).toContain("posts a short message from them in the chat");
     expect(result.structuredContent?.draft).toMatchObject({
       record_id: RECORD_ID,
       person_name: "Максим",
       review_url: `https://orbit.test/health/records/${RECORD_ID}`,
     });
+  });
+
+  it("queues further drafts on the same card, leaving out ones already decided", async () => {
+    const second = "22222222-2222-4222-8222-222222222222";
+    const decided = "33333333-3333-4333-8333-333333333333";
+    persons.queued = [
+      { id: decided, title: "УЗИ", status: "active" },
+      { id: second, title: "Биохимия", status: "structure_review" },
+    ];
+    const result = await register()
+      .tools.get("show_record_draft")!
+      .handler({ record_id: RECORD_ID, then_record_ids: [second, decided, RECORD_ID] }, ctx);
+
+    expect(result.structuredContent?.queue).toEqual([
+      { record_id: RECORD_ID, title: "Общий анализ крови" },
+      { record_id: second, title: "Биохимия" },
+    ]);
+    expect(result.content[0].text).toContain('goes through 1 more draft(s): "Биохимия"');
+    persons.queued = [];
   });
 
   it("refuses a record that has not been ingested yet", async () => {
@@ -412,6 +435,40 @@ describe("registerRecordDraftApp", () => {
 });
 
 describe("RECORD_DRAFT_HTML", () => {
+  it("starts the model's turn with a chat message after a decision", () => {
+    // Model context alone does not start a turn, so each outcome also posts a line in the chat.
+    expect(RECORD_DRAFT_HTML).toContain('request("ui/message", { role: "user"');
+    for (const line of [
+      "Одобрил запись «",
+      "Отклонил запись «",
+      "Подтвердил сверку",
+      "Отклонил сверку: «",
+      "Добавил в расписание: ",
+    ]) {
+      expect(RECORD_DRAFT_HTML).toContain(line);
+    }
+  });
+
+  it("holds the chat message for a queue until the owner is through it", () => {
+    expect(RECORD_DRAFT_HTML).toContain("Разобрал записи в карточке: ");
+    expect(RECORD_DRAFT_HTML).toContain('if (!noteOutcome("approved")) tellChat(');
+    expect(RECORD_DRAFT_HTML).toContain('" из " + queue.length');
+  });
+
+  it("never strands a queue: a failed load can be retried and the last draft can always finish", () => {
+    expect(RECORD_DRAFT_HTML).toContain('"Повторить"');
+    expect(RECORD_DRAFT_HTML).toContain("if (failed && inQueue() && !queueDone)");
+    expect(RECORD_DRAFT_HTML).toContain(
+      "if (inQueue() && !queueDone) footer.appendChild(queueActions());",
+    );
+    expect(RECORD_DRAFT_HTML).toContain('kind: "already"');
+  });
+
+  it("keeps the queued ids when the card fetches its own draft", () => {
+    expect(RECORD_DRAFT_HTML).toContain("thenRecordIds = args.then_record_ids");
+    expect(RECORD_DRAFT_HTML).toContain("then_record_ids: thenRecordIds");
+  });
+
   it("ships a script that parses", () => {
     // The page is a template literal, so one wrong escape breaks the whole card with no other sign.
     const start = RECORD_DRAFT_HTML.indexOf("<script>") + "<script>".length;
