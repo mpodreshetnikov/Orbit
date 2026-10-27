@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ChevronRight } from "lucide-react";
 import { format } from "date-fns";
 import { createClient } from "@/lib/supabase";
 import { useUIStore } from "@/stores/ui-store";
@@ -16,6 +16,7 @@ import {
   summarizeImportBatches,
   type ImportReviewPeriod,
 } from "@/types/money-import-review";
+import { importBankOfSource } from "@/types/money-import-sources";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -47,6 +48,14 @@ function getImportTypeLabel(
   if (importType === "file") return t("money.importHistoryImportTypeFile");
   if (importType === "web_export") return t("money.importHistoryImportTypeWebExport");
   return importType;
+}
+
+/** The bank by name where the page knows it, the raw source id otherwise. */
+function bankLabel(source: string, t: ReturnType<typeof useTranslations>): string {
+  const bank = importBankOfSource(source);
+  if (bank === "tbank") return t("money.importBankTbank");
+  if (bank === "alfa") return t("money.importBankAlfa");
+  return source;
 }
 
 /** The window an import covered, so two batches from one unattended visit read as two windows. */
@@ -276,80 +285,49 @@ export default function MoneyImportHistoryPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="rounded-lg border overflow-hidden overflow-x-auto">
-          <table className="w-full min-w-[980px] text-sm" data-testid="import-history-table">
-            <thead>
-              <tr className="border-b bg-muted/50">
-                <th className="px-4 py-3 text-left font-medium">
-                  {t("money.importHistoryCreatedAt")}
-                </th>
-                <th className="px-4 py-3 text-left font-medium">
-                  {t("money.importHistorySource")}
-                </th>
-                <th className="px-4 py-3 text-left font-medium">
-                  {t("money.importHistoryImportType")}
-                </th>
-                <th className="px-4 py-3 text-left font-medium">
-                  {t("money.importHistoryStatus")}
-                </th>
-                <th className="px-4 py-3 text-right font-medium">
-                  {t("money.importHistoryParsedRows")}
-                </th>
-                <th className="px-4 py-3 text-left font-medium">
-                  {t("money.importHistoryResults")}
-                </th>
-                <th className="px-4 py-3 text-left font-medium">
-                  {t("money.importHistoryCompletedAt")}
-                </th>
-                <th className="px-4 py-3 text-right font-medium">
-                  {t("money.importHistoryAction")}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {visibleBatches.map((batch) => (
-                <tr key={batch.id} className="border-b last:border-b-0">
-                  <td className="px-4 py-3 whitespace-nowrap text-muted-foreground">
-                    <div>{formatDateTime(batch.created_at)}</div>
-                    <div className="text-xs">{batch.id}</div>
-                  </td>
-                  <td className="px-4 py-3">{batch.source}</td>
-                  <td className="px-4 py-3">
-                    <div>{getImportTypeLabel(batch.import_type, batch.meta, t)}</div>
-                    {formatWindow(batch.window_from, batch.window_to) && (
-                      <div className="text-xs text-muted-foreground">
-                        {formatWindow(batch.window_from, batch.window_to)}
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <BatchStatusBadge status={batch.status} t={t} />
-                  </td>
-                  <td className="px-4 py-3 text-right tabular-nums">
-                    {batch.parsed_transactions_count}
-                  </td>
-                  <td className="px-4 py-3">
-                    {t("money.importHistoryResultsSummary", {
-                      inserted: batch.inserted_count,
-                      skipped: batch.skipped_count,
-                      errors: batch.error_count,
-                    })}
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap text-muted-foreground">
-                    {formatDateTime(batch.completed_at)}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <Button variant="outline" size="sm" asChild>
-                      <Link href={`/money/import/reports/${batch.id}`}>
-                        {t("money.importOpenReport")}
-                      </Link>
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        // One card per import, as the iOS app has it: a table of eight columns overflowed a phone and
+        // a laptop alike.
+        <ul className="space-y-2" data-testid="import-history-cards">
+          {visibleBatches.map((batch) => {
+            const window = formatWindow(batch.window_from, batch.window_to);
+            return (
+              <li key={batch.id}>
+                <Link
+                  href={`/money/import/reports/${batch.id}`}
+                  className="flex items-center gap-3 rounded-xl border bg-card p-4 transition-colors hover:bg-muted/50"
+                >
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="flex-1 font-semibold">
+                        {formatDateTime(batch.created_at)}
+                      </span>
+                      <BatchStatusBadge status={batch.status} t={t} />
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      {[
+                        bankLabel(batch.source, t),
+                        getImportTypeLabel(batch.import_type, batch.meta, t),
+                        window,
+                        `${t("money.importHistoryParsedRows")}: ${batch.parsed_transactions_count}`,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {t("money.importResultsSummary", {
+                        inserted: batch.inserted_count,
+                        skipped: batch.skipped_count,
+                      })}
+                      {batch.error_count > 0 &&
+                        ` ${t("money.importHistoryErrors", { count: batch.error_count })}`}
+                    </p>
+                  </div>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
       )}
     </div>
   );

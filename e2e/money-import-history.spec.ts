@@ -153,11 +153,16 @@ test.describe("money import history flow", () => {
       await expect(page).toHaveURL(/\/money\/import\/history$/);
       await expect(page.getByRole("heading", { level: 1, name: "Import history" })).toBeVisible();
 
+      // Each import is a card linking to its report; the batch id is in the link, not the text.
+      const card = (batchId: string) =>
+        page
+          .getByTestId("import-history-cards")
+          .locator(`a[href="/money/import/reports/${batchId}"]`);
       for (const batchId of seed.selectedBatchIds) {
-        await expect(page.getByText(batchId)).toBeVisible();
+        await expect(card(batchId)).toBeVisible();
       }
       for (const batchId of seed.otherBatchIds) {
-        await expect(page.getByText(batchId)).toHaveCount(0);
+        await expect(card(batchId)).toHaveCount(0);
       }
 
       await page
