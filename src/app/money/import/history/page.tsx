@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { ArrowLeft } from "lucide-react";
@@ -8,9 +8,26 @@ import { format } from "date-fns";
 import { createClient } from "@/lib/supabase";
 import { useUIStore } from "@/stores/ui-store";
 import type { MoneyImportBatch, MoneyImportBatchStatus } from "@/types";
+import {
+  IMPORT_REVIEW_PERIODS,
+  batchesInWindow,
+  feedQueryForReviewPeriod,
+  importReviewWindow,
+  summarizeImportBatches,
+  type ImportReviewPeriod,
+} from "@/types/money-import-review";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+
+const REVIEW_PERIOD_KEYS: Record<ImportReviewPeriod, string> = {
+  week: "money.importReviewPeriodWeek",
+  month: "money.importReviewPeriodMonth",
+  custom: "money.importReviewPeriodCustom",
+  all: "money.importReviewPeriodAll",
+};
 
 function formatDateTime(value: string | null): string {
   if (!value) return "-";
@@ -68,6 +85,10 @@ function BatchStatusBadge({
     return <Badge variant="outline">{t("money.importBatchStatusDiscarded")}</Badge>;
   }
 
+  if (status === "rolled_back") {
+    return <Badge variant="outline">{t("money.importBatchStatusRolledBack")}</Badge>;
+  }
+
   return <Badge variant="secondary">{t("money.importBatchStatusPending")}</Badge>;
 }
 
@@ -77,6 +98,16 @@ export default function MoneyImportHistoryPage() {
   const [batches, setBatches] = useState<MoneyImportBatch[]>([]);
   const [loading, setLoading] = useState(() => Boolean(selectedPersonId));
   const [error, setError] = useState<string | null>(null);
+  const [period, setPeriod] = useState<ImportReviewPeriod>("all");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  const custom = useMemo(() => ({ from: customFrom, to: customTo }), [customFrom, customTo]);
+  const visibleBatches = useMemo(
+    () => batchesInWindow(batches, importReviewWindow(period, new Date(), custom)),
+    [batches, period, custom],
+  );
+  const summary = useMemo(() => summarizeImportBatches(visibleBatches), [visibleBatches]);
+  const feedQuery = feedQueryForReviewPeriod(period, custom);
 
   useEffect(() => {
     if (!selectedPersonId) {
@@ -157,6 +188,86 @@ export default function MoneyImportHistoryPage() {
         </Button>
       </div>
 
+      {batches.length > 0 && (
+        <Card data-testid="import-review">
+          <CardContent className="space-y-3 p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="mr-1 text-sm font-medium">{t("money.importReviewTitle")}</span>
+              {IMPORT_REVIEW_PERIODS.map((value) => (
+                <Button
+                  key={value}
+                  type="button"
+                  size="sm"
+                  variant={period === value ? "default" : "outline"}
+                  className="rounded-full"
+                  aria-pressed={period === value}
+                  onClick={() => setPeriod(value)}
+                >
+                  {t(REVIEW_PERIOD_KEYS[value])}
+                </Button>
+              ))}
+            </div>
+            {period === "custom" && (
+              <div className="flex flex-wrap gap-3">
+                <div className="space-y-1">
+                  <Label htmlFor="import-review-from">{t("money.importReviewFrom")}</Label>
+                  <Input
+                    id="import-review-from"
+                    type="date"
+                    value={customFrom}
+                    onChange={(event) => setCustomFrom(event.target.value)}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="import-review-to">{t("money.importReviewTo")}</Label>
+                  <Input
+                    id="import-review-to"
+                    type="date"
+                    value={customTo}
+                    onChange={(event) => setCustomTo(event.target.value)}
+                  />
+                </div>
+              </div>
+            )}
+            <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+              <div className="space-y-0.5" data-testid="import-review-summary">
+                <p>
+                  {summary.imports === 0
+                    ? t("money.importReviewEmpty")
+                    : t("money.importReviewSummary", {
+                        imports: summary.imports,
+                        inserted: summary.inserted,
+                        skipped: summary.skipped,
+                        errors: summary.errors,
+                      })}
+                </p>
+                {(summary.rolledBack > 0 || summary.failed > 0) && (
+                  <p className="text-muted-foreground">
+                    {[
+                      summary.rolledBack > 0
+                        ? t("money.importReviewRolledBack", { count: summary.rolledBack })
+                        : null,
+                      summary.failed > 0
+                        ? t("money.importReviewFailed", { count: summary.failed })
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </p>
+                )}
+              </div>
+              {feedQuery && (
+                <Button variant="outline" size="sm" asChild>
+                  <Link href={`/money/transactions?${feedQuery}`}>
+                    {t("money.importReviewOpenFeed")}
+                  </Link>
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {batches.length === 0 ? (
         <Card className="border-dashed">
           <CardContent className="space-y-2 p-8 text-center">
@@ -196,7 +307,7 @@ export default function MoneyImportHistoryPage() {
               </tr>
             </thead>
             <tbody>
-              {batches.map((batch) => (
+              {visibleBatches.map((batch) => (
                 <tr key={batch.id} className="border-b last:border-b-0">
                   <td className="px-4 py-3 whitespace-nowrap text-muted-foreground">
                     <div>{formatDateTime(batch.created_at)}</div>

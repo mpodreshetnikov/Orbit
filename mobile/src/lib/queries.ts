@@ -9,6 +9,7 @@ import * as Haptics from "expo-haptics";
 import type { CheckupItem, CheckupItemStatus } from "@orbit-types/checkup";
 import type { checkupColumns } from "@orbit-types/checkup-form";
 import type { UpdateConditionInput } from "@orbit-types/condition";
+import { importStillSettling } from "@orbit-types/money-import-review";
 import type { RoutingChoice } from "@orbit-types/notification-routing";
 import type { FindingSummary } from "@orbit-types/finding";
 import type {
@@ -81,7 +82,12 @@ import {
 } from "@/features/money/transactions";
 import { fetchCards, saveAccount, saveCard, type AccountColumns } from "@/features/money/accounts";
 import { saveCategory, type CategoryColumns } from "@/features/money/categories";
-import { fetchImportBatch, fetchImportBatches, moneyImportAction } from "@/features/money/import";
+import {
+  fetchImportBatch,
+  fetchImportBatches,
+  moneyImportAction,
+  rollbackImportBatch,
+} from "@/features/money/import";
 import {
   fetchCheckupReminders,
   fetchHousehold,
@@ -824,8 +830,34 @@ export function useImportBatches(personId: string | undefined) {
   });
 }
 
+/** How often a batch still being read is asked again, so its screen follows the import live. */
+const RUNNING_IMPORT_REFRESH_MS = 3000;
+
 export function useImportBatch(id: string) {
-  return useQuery({ queryKey: ["money-import-batch", id], queryFn: () => fetchImportBatch(id) });
+  return useQuery({
+    queryKey: ["money-import-batch", id],
+    queryFn: () => fetchImportBatch(id),
+    refetchInterval: (query) => {
+      const batch = query.state.data?.batch;
+      return batch && importStillSettling(batch, new Date()) ? RUNNING_IMPORT_REFRESH_MS : false;
+    },
+  });
+}
+
+/** Undo an applied import; the feed and the history follow. */
+export function useRollbackImportBatch() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => rollbackImportBatch(id),
+    onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
+    onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: ["money-import-batch"] });
+      void client.invalidateQueries({ queryKey: ["money-import-batches"] });
+      void client.invalidateQueries({ queryKey: ["money-feed"] });
+      void client.invalidateQueries({ queryKey: ["money-feed-summary"] });
+    },
+  });
 }
 
 /** Apply a batch's rows to the transactions, or mark it as not applied. */

@@ -202,7 +202,7 @@ Deno.test(
 );
 
 Deno.test(
-  "previewRowsAction applies a batch the extension marked unattended, once it is complete",
+  "previewRowsAction applies every batch, a file's included, once it is complete",
   async () => {
     const applied: string[] = [];
     const applyPendingBatch = async (batchId: string) => {
@@ -212,7 +212,7 @@ Deno.test(
       });
     };
 
-    // A person's batch: pending, waiting for their "Apply".
+    // A file import lands as the extension's do: nobody confirms it (T-261026-2ew).
     const manual = createRepositoryMock({
       batch: {
         id: "batch-manual",
@@ -237,11 +237,40 @@ Deno.test(
       ),
       200,
     );
-    assertEquals(manualPayload.auto_applied, false);
-    assertEquals(applied, []);
-    assertEquals(manual.state.batch?.status, "pending");
+    assertEquals(manualPayload.auto_applied, true);
+    assertEquals(applied, ["batch-manual"]);
 
-    // The extension's batch: nobody started it, so nobody would come back to apply it.
+    // A batch a person started in the extension: applied without asking them (T-261026-2ew).
+    const attended = createRepositoryMock({
+      batch: {
+        id: "batch-attended",
+        status: "running",
+        parsed_transactions_count: 0,
+        inserted_count: 0,
+        skipped_count: 0,
+        error_count: 0,
+        meta: { parse_strategy: "full" },
+      },
+    });
+    const attendedPayload = await assertJsonResponse<{ auto_applied: boolean }>(
+      await previewRowsAction(
+        {
+          batch_id: "batch-attended",
+          payer_person_id: "person-1",
+          source: "tbank_web",
+          import_type: "web_export",
+          rows: [txRow({ external_id: "w-1" })],
+        },
+        userAuth,
+        { repository: attended.repository, applyPendingBatch },
+      ),
+      200,
+    );
+    assertEquals(attendedPayload.auto_applied, true);
+    assertEquals(applied, ["batch-manual", "batch-attended"]);
+    applied.length = 0;
+
+    // The extension's unattended batch: nobody started it, so nobody would come back to apply it.
     const unattended = createRepositoryMock({
       batch: {
         id: "batch-auto",
@@ -302,7 +331,7 @@ Deno.test(
     assertEquals(chunkPayload.auto_applied, false);
     assertEquals(applied, ["batch-auto"]);
 
-    // A preview with a row error is what a person is for: the batch stays pending, unapplied.
+    // A preview with a row error is applied too: the errored row lands nowhere and is listed.
     const withErrors = createRepositoryMock({
       batch: {
         id: "batch-errors",
@@ -331,9 +360,8 @@ Deno.test(
       200,
     );
     assertEquals(errorsPayload.error_count, 1);
-    assertEquals(errorsPayload.auto_applied, false);
-    assertEquals(applied, ["batch-auto"]);
-    assertEquals(withErrors.state.batch?.status, "pending");
+    assertEquals(errorsPayload.auto_applied, true);
+    assertEquals(applied, ["batch-auto", "batch-errors"]);
 
     // An apply whose own rows error is still an applied batch; the count is reported.
     const rowErrors = createRepositoryMock({

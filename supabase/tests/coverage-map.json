@@ -109,6 +109,9 @@
     "supabase/db/functions/money_update_transaction_with_lines.sql": [
       "supabase/tests/functions/money_update_transaction_with_lines_test.sql"
     ],
+    "supabase/db/functions/money_rollback_import_batch.sql": [
+      "supabase/tests/functions/money_rollback_import_batch_test.sql"
+    ],
     "supabase/db/functions/money_preview_category_rule_pipeline.sql": [
       "supabase/tests/functions/money_category_rule_pipeline_test.sql"
     ],

@@ -31,19 +31,11 @@ export interface PreviewRowsDeps {
   now?: () => Date;
   telemetry?: EdgeTelemetry;
   /**
-   * Applies a pending batch as a person's "Apply" would. Called for the final chunk of a batch
-   * the extension marked unattended: nobody started it, so nobody would come back to apply
-   * it, and the first live run left two batches waiting on a review the owner never asked for.
+   * Applies a pending batch as a person's "Apply" would. Called for the final chunk of every
+   * batch, a file's or one the extension reads: an import is undone by rolling it back, not
+   * reviewed before it lands (T-261026-2ew).
    */
   applyPendingBatch?: (batchId: string) => Promise<Response>;
-}
-
-function isUnattendedBatchMeta(meta: unknown): boolean {
-  return (
-    Boolean(meta) &&
-    typeof meta === "object" &&
-    (meta as Record<string, unknown>).unattended === true
-  );
 }
 
 type RowErrorSignature =
@@ -720,22 +712,16 @@ export async function previewRowsAction(
   // session as failed, and a completed batch must not be reported as one that was not.
   //
   // The batch goes through the same apply a person's click does, with the decisions the
-  // preview suggested. Only a batch whose preview raised no row error: a row that could not
-  // be normalised or matched to an account is exactly what a person is for, and the batch
-  // stays pending for them. An apply whose rows error after that is still an applied batch --
-  // the report shows the rows -- and is reported as such. An apply that throws has already
+  // preview suggested. Every batch is applied, a file's as much as one the extension reads, rows
+  // that errored in the preview included: those rows land nowhere and the import's page lists
+  // them, and a wrong import is rolled back rather than held for review (T-261026-2ew). An apply
+  // that throws has already
   // discarded the preview and may have written part of the batch, so the batch is marked
   // failed and the request fails with it: the extension then leaves this window unlanded and
   // the next run reads it again, with duplicates refused by their import hash.
   let autoApplied = false;
   let autoApplyErrorCount: number | null = null;
-  const accumulatedErrorCount = Number(patch.error_count) || 0;
-  if (
-    patch.status === "pending" &&
-    isUnattendedBatchMeta(patch.meta) &&
-    deps.applyPendingBatch &&
-    accumulatedErrorCount === 0
-  ) {
+  if (patch.status === "pending" && deps.applyPendingBatch) {
     try {
       const applied = await deps.applyPendingBatch(batchId);
       autoApplied = applied.status < 400;

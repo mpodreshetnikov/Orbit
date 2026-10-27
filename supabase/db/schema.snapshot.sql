@@ -620,7 +620,7 @@ CREATE TABLE "public"."money_import_batches" (
     "skipped_count" integer DEFAULT 0 NOT NULL,
     "error_count" integer DEFAULT 0 NOT NULL,
     "completed_at" timestamp with time zone,
-    CONSTRAINT "money_import_batches_status_check" CHECK (("status" = ANY (ARRAY['pending'::"text", 'running'::"text", 'completed'::"text", 'failed'::"text", 'discarded'::"text"])))
+    CONSTRAINT "money_import_batches_status_check" CHECK (("status" = ANY (ARRAY['pending'::"text", 'running'::"text", 'completed'::"text", 'failed'::"text", 'discarded'::"text", 'rolled_back'::"text"])))
 );
 
 

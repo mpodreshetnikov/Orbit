@@ -6,13 +6,32 @@ name: Импорт
 - openLink: exp://127.0.0.1:8081/--/money/import
 - tapOn: { text: "Open", optional: true }
 - extendedWaitUntil:
-    visible: "Загрузить файл"
+    visible: "История импортов"
     timeout: 60000
 - takeScreenshot: import-01-start
-- tapOn: "Загрузить файл"
-- extendedWaitUntil: { visible: "(Cancel|Отменить|Отмена)", timeout: 15000 }
+# The file card sits under the bank and the way in: bring its drop area on screen, then open it.
+# The area is one button, so its label runs on into the hint under the title.
+- scrollUntilVisible:
+    element: "Выберите файл выписки.*"
+    direction: DOWN
+- takeScreenshot: import-01-file
+- tapOn: "Выберите файл выписки.*"
+# The system picker slides up empty and fills in once Files has loaded, which on a busy runner has
+# taken longer than 15 s: give it a minute.
+- extendedWaitUntil: { visible: "(Cancel|Отменить|Отмена)", timeout: 60000 }
 - takeScreenshot: import-02-picker
+# The picker can take the first Cancel while it is still settling and stay open: cancel again while
+# it is on view, and wait for the screen underneath.
+- waitForAnimationToEnd
 - tapOn: "(Cancel|Отменить|Отмена)"
+- runFlow:
+    when:
+      visible: "Recents"
+    commands:
+      - tapOn: "(Cancel|Отменить|Отмена)"
+- scrollUntilVisible:
+    element: "История импортов"
+    direction: UP
 - tapOn: "История импортов"
 - extendedWaitUntil: { visible: ".*tbank · Файл.*", timeout: 10000 }
 - takeScreenshot: import-03-history

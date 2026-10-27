@@ -15,6 +15,7 @@ import { createAttentionRefresher, type RefreshOptions } from "./core/attention-
 import { runScheduledImport, tryCompleteSessionAsFailed } from "./core/import-runner.js";
 import { activeImportRuns } from "./core/active-runs.js";
 import { keepWorkerAliveDuringRuns } from "./core/keepalive.js";
+import { reconnectAppTabs } from "./core/app-tab-bridge.js";
 import { createSessionJanitor } from "./core/session-janitor.js";
 import { needsRearmAtStart, sweepAlarmSchedule } from "./core/auto-import-alarm.js";
 import { chooseReplacementTab, shouldAdoptRequestTab } from "./core/attention-policy.js";
@@ -199,7 +200,8 @@ async function callEdge(
     edge_host: parsedUrl.host,
     edge_path: parsedUrl.pathname,
     edge_scheme: parsedUrl.protocol.replace(":", ""),
-    has_token: typeof token === "string" && token.length > 0,
+    // Not "has_token": the relay refuses any field named like a secret, and dropped the whole event.
+    has_credential: typeof token === "string" && token.length > 0,
     batch_id: payloadBatchId || null,
     session_id: payloadSessionId || null,
     row_count: payloadRowCount,
@@ -818,6 +820,23 @@ chrome.runtime.onInstalled?.addListener((details) => {
   void rearmAutoImportAlarmAtStart();
 });
 
+// An Orbit tab open across an install or an update has no bridge of this version: without one
+// the page cannot hear the extension until it is reloaded. Firefox's own injection is left alone.
+chrome.runtime.onInstalled?.addListener((details) => {
+  if (details.reason !== "install" && details.reason !== "update") return;
+  if (!Array.isArray(APP_ORIGIN_PATTERNS) || APP_ORIGIN_PATTERNS.length === 0) return;
+  void reconnectAppTabs({
+    queryAppTabs: () => chrome.tabs.query({ url: APP_ORIGIN_PATTERNS }),
+    sendToTab: (tabId, message) => chrome.tabs.sendMessage(tabId, message),
+    injectContentScript: async (tabId) => {
+      await chrome.scripting.executeScript({ target: { tabId }, files: ["content-script.js"] });
+    },
+  }).then((injected) => {
+    if (injected.length === 0) return;
+    telemetry.info("app_tabs_reconnected", { reason: details.reason, tabs: injected.length });
+  });
+});
+
 // The browser's start is the one moment a page opening by itself reads as a reminder rather
 // than an interruption, and the badge has to be drawn again in any case.
 chrome.runtime.onStartup?.addListener(() => {
@@ -885,6 +904,7 @@ chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendRe
   const answersAtOnce =
     message.type === "MONEY_IMPORT_RUN" && message.origin === "source_page_overlay";
   if (answersAtOnce) sendResponse({ ok: true, accepted: true });
+  let answered = answersAtOnce;
   void (async () => {
     try {
       const response = await routeBackgroundMessage(
@@ -932,7 +952,12 @@ chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendRe
         },
       );
 
+      // The page waits on this answer to say the handoff worked. The session is stored by now;
+      // the widget sync below waits for the bank tab the page just opened to finish loading,
+      // which outlasted the page's wait and sent it down a dead fallback (2026-10-25).
       if (message.type === "MONEY_IMPORT_START_SESSION") {
+        sendResponse(response);
+        answered = true;
         const session =
           message.session && typeof message.session === "object"
             ? (message.session as Record<string, unknown>)
@@ -962,7 +987,7 @@ chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendRe
         await refreshAttention("message", { mayOpenPage: false });
       }
 
-      if (!answersAtOnce) sendResponse(response);
+      if (!answered) sendResponse(response);
     } catch (error) {
       const messageText = error instanceof Error ? error.message : "Unknown extension error";
       const diagnostics = extractErrorDiagnostics(error);
@@ -991,7 +1016,7 @@ chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendRe
           diagnostics,
         });
       }
-      if (!answersAtOnce) sendResponse({ ok: false, error: messageText, diagnostics });
+      if (!answered) sendResponse({ ok: false, error: messageText, diagnostics });
     }
   })();
 

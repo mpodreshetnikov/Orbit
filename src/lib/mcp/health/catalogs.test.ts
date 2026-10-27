@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  addCatalogSynonyms,
   CATALOG_SPECS,
+  createCatalogEntries,
   getCatalogSpec,
   listCatalogEntries,
   searchCatalogEntries,
@@ -254,5 +256,133 @@ describe("upsertCatalogEntry", () => {
     await expect(
       upsertCatalogEntry(stub.client, { kind: "observation", values: {} }),
     ).rejects.toThrow(/no row returned/);
+  });
+});
+
+describe("createCatalogEntries", () => {
+  it("inserts only the codes that do not exist and reports the rest", async () => {
+    const stub = createSupabaseStub({
+      observation_catalog: [{ data: [{ obs_code: "alt" }] }, { data: [{ obs_code: "wbc" }] }],
+    });
+
+    const result = await createCatalogEntries(stub.client, {
+      kind: "observation",
+      entries: [
+        { obs_code: "alt", name_ru: "АЛТ" },
+        { obs_code: "wbc", name_ru: "Лейкоциты" },
+      ],
+    });
+
+    expect(stub.argsFor("observation_catalog", "in")).toEqual([["obs_code", ["alt", "wbc"]]]);
+    // A field one entry leaves out takes its column default, not NULL.
+    expect(stub.argsFor("observation_catalog", "insert")).toEqual([
+      [[{ obs_code: "wbc", name_ru: "Лейкоциты" }], { defaultToNull: false }],
+    ]);
+    expect(result).toEqual({ created: [{ obs_code: "wbc" }], existing: ["alt"] });
+  });
+
+  it("writes nothing when every code exists", async () => {
+    const stub = createSupabaseStub({ observation_catalog: [{ data: [{ obs_code: "alt" }] }] });
+    const result = await createCatalogEntries(stub.client, {
+      kind: "observation",
+      entries: [{ obs_code: "alt" }],
+    });
+    expect(stub.argsFor("observation_catalog", "insert")).toHaveLength(0);
+    expect(result).toEqual({ created: [], existing: ["alt"] });
+  });
+
+  it("refuses a batch that names one code twice", async () => {
+    const stub = createSupabaseStub({});
+    await expect(
+      createCatalogEntries(stub.client, {
+        kind: "observation",
+        entries: [{ obs_code: "wbc" }, { obs_code: "wbc" }],
+      }),
+    ).rejects.toThrow('obs_code "wbc" appears twice');
+    expect(stub.calls).toHaveLength(0);
+  });
+});
+
+describe("addCatalogSynonyms", () => {
+  const rows = [
+    {
+      id: "o-alt",
+      obs_code: "alt",
+      name_ru: "АЛТ",
+      name_en: "ALT",
+      synonyms_ru: ["алт"],
+      synonyms_en: ["alt"],
+    },
+    {
+      id: "o-pdw",
+      obs_code: "pdw_pct",
+      name_ru: "PDW, %",
+      name_en: "PDW, %",
+      synonyms_ru: ["pdw"],
+      synonyms_en: [],
+    },
+  ];
+
+  it("appends new wordings, keeps the old ones and says what it did", async () => {
+    const stub = createSupabaseStub({ observation_catalog: [{ data: rows }, { data: null }] });
+
+    const changes = await addCatalogSynonyms(stub.client, {
+      kind: "observation",
+      items: [
+        { code: "alt", synonyms_ru: ["Аланинаминотрансфераза", "АЛТ", "PDW"] },
+        { code: "ldl_c", synonyms_ru: ["лпнп"] },
+      ],
+    });
+
+    expect(stub.argsFor("observation_catalog", "update")).toEqual([
+      [{ synonyms_ru: ["алт", "аланинаминотрансфераза"], synonyms_en: ["alt"] }],
+    ]);
+    expect(stub.argsFor("observation_catalog", "eq")).toEqual([["id", "o-alt"]]);
+    expect(changes).toEqual([
+      {
+        code: "alt",
+        missing: false,
+        added: ["аланинаминотрансфераза"],
+        already_present: ["алт"],
+        refused: [{ synonym: "pdw", owner: "pdw_pct" }],
+      },
+      { code: "ldl_c", missing: true, added: [], already_present: [], refused: [] },
+    ]);
+  });
+
+  it("keeps every addition when one code comes twice in a batch", async () => {
+    const stub = createSupabaseStub({
+      observation_catalog: [{ data: rows }, { data: null }, { data: null }],
+    });
+    const changes = await addCatalogSynonyms(stub.client, {
+      kind: "observation",
+      items: [
+        { code: "alt", synonyms_ru: ["first"] },
+        { code: "alt", synonyms_ru: ["second"] },
+      ],
+    });
+
+    expect(stub.argsFor("observation_catalog", "update")).toEqual([
+      [{ synonyms_ru: ["алт", "first"], synonyms_en: ["alt"] }],
+      [{ synonyms_ru: ["алт", "first", "second"], synonyms_en: ["alt"] }],
+    ]);
+    expect(changes.map((change) => change.added)).toEqual([["first"], ["second"]]);
+  });
+
+  it("folds punctuation and ё when it compares wordings", async () => {
+    const stub = createSupabaseStub({ observation_catalog: [{ data: rows }] });
+    const changes = await addCatalogSynonyms(stub.client, {
+      kind: "observation",
+      items: [{ code: "pdw_pct", synonyms_ru: ["PDW %"] }],
+    });
+    expect(changes[0].already_present).toEqual(["pdw %"]);
+    expect(stub.argsFor("observation_catalog", "update")).toHaveLength(0);
+  });
+
+  it("refuses the measurement catalog, which has no synonyms", async () => {
+    const stub = createSupabaseStub({});
+    await expect(
+      addCatalogSynonyms(stub.client, { kind: "measurement", items: [{ code: "weight" }] }),
+    ).rejects.toThrow("has no synonyms");
   });
 });

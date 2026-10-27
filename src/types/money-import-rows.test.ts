@@ -55,12 +55,11 @@ describe("the batch", () => {
     expect(importAccountHints(rows)).toEqual(["1111", "2222"]);
   });
 
-  it("is built once every row has an account, with the card kept in its payload", () => {
-    expect(importBatchRows(rows, (one) => (one.account_hint ? "acc" : null))).toBeNull();
-    const batch = importBatchRows(rows, () => "acc")!;
+  it("names no account and keeps the card in its payload, for the server to resolve", () => {
+    const batch = importBatchRows(rows);
     expect(batch).toHaveLength(3);
+    expect(batch[0]).not.toHaveProperty("account_id");
     expect(batch[0]).toMatchObject({
-      account_id: "acc",
       account_hint: "2222",
       card_id: null,
       external_id: null,

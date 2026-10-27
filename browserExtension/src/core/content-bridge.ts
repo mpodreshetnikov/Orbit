@@ -1,5 +1,6 @@
 const WEBAPP_SOURCE = "orbit-webapp";
 const BRIDGE_SOURCE = "orbit-extension";
+export const CONTENT_BRIDGE_PROBE = "ORBIT_CONTENT_BRIDGE_PROBE";
 
 type RuntimeSendMessage = (
   message: Record<string, unknown>,
@@ -22,6 +23,20 @@ export interface ContentBridgeDeps {
   nowMs?: () => number;
   /** A structured warning; the console in a content script, which has no extension to relay to. */
   onWarning?: (event: string, attrs: Record<string, unknown>) => void;
+}
+
+const BRIDGE_INSTALLED_KEY = "__orbitContentBridgeInstalled";
+
+/**
+ * True for the first caller in this isolated world, false after. The manifest's injection and
+ * the background's re-injection after an update can both reach a tab that was loading at the
+ * time, and two bridges would forward every request twice -- two bank tabs for one click. An
+ * orphaned script from before the update lives in another world and does not count.
+ */
+export function claimContentBridge(scope: Record<string, unknown>): boolean {
+  if (scope[BRIDGE_INSTALLED_KEY]) return false;
+  scope[BRIDGE_INSTALLED_KEY] = true;
+  return true;
 }
 
 export function createContentBridge(deps: ContentBridgeDeps) {
@@ -232,8 +247,16 @@ export function createContentBridge(deps: ContentBridgeDeps) {
 
   function handleRuntimeMessage(
     message: (Record<string, unknown> & { type?: string }) | null,
+    _sender?: unknown,
+    sendResponse?: (response: unknown) => void,
   ): void {
     if (!message || typeof message !== "object") return;
+    // The background asks before it injects this script into an open tab, so a tab that already
+    // has a live bridge -- Firefox injects on install by itself -- never gets a second one.
+    if (message.type === CONTENT_BRIDGE_PROBE) {
+      sendResponse?.({ alive: true });
+      return;
+    }
     if (
       ![
         "MONEY_IMPORT_PROGRESS",

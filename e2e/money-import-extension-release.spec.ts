@@ -154,7 +154,7 @@ test.describe("money import extension release flow", () => {
 
     await devLogin(page);
     await setSelectedPerson(page, personId);
-    await page.getByRole("button", { name: /T-Bank Web/ }).click();
+    await page.getByTestId("import-bank-tbank").click();
 
     await expect(
       page.getByText("Download the latest production extension package and install it in Chrome."),
@@ -225,7 +225,7 @@ test.describe("money import extension release flow", () => {
 
       await devLogin(page);
       await setSelectedPerson(page, personId);
-      await page.getByRole("button", { name: /T-Bank Web/ }).click();
+      await page.getByTestId("import-bank-tbank").click();
 
       await expect(
         page.getByText("A newer extension build is available. Download it before the next import."),
@@ -270,7 +270,7 @@ test.describe("money import extension release flow in Firefox", () => {
     });
     await devLogin(page);
     await setSelectedPerson(page, personId);
-    await page.getByRole("button", { name: /T-Bank Web/ }).click();
+    await page.getByTestId("import-bank-tbank").click();
   }
 
   test("offers the signed add-on, not the Chrome archive", async ({ page }) => {

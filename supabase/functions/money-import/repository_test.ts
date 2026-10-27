@@ -436,19 +436,69 @@ Deno.test("repository resolveAccountIdForRow uses card hint when multiple accoun
   assertEquals(resolved, "acc-2");
 });
 
-Deno.test("repository resolveAccountIdForRow throws when no accounts found", async () => {
+Deno.test(
+  "repository resolveAccountIdForRow opens an account for a bank imported the first time",
+  async () => {
+    let inserted: Record<string, unknown> | null = null;
+    const repository = createRepositoryWithClients({
+      adminClient: {
+        from: (table: string) => {
+          assertEquals(table, "money_accounts");
+          return {
+            select: () => ({
+              eq: () => ({
+                eq: async () => ({ data: [], error: null }),
+              }),
+            }),
+            insert: (values: Record<string, unknown>) => {
+              inserted = values;
+              return {
+                select: () => ({
+                  single: async () => ({ data: { id: "acc-new" }, error: null }),
+                }),
+              };
+            },
+          };
+        },
+      },
+    });
+
+    const resolved = await repository.resolveAccountIdForRow(
+      "person-1",
+      {
+        posted_at: "2026-01-01T00:00:00.000Z",
+        amount: 10,
+        transaction_type: "expense",
+      },
+      "tbank",
+    );
+
+    assertEquals(resolved, "acc-new");
+    assertEquals(inserted, {
+      owner_person_id: "person-1",
+      source: "tbank",
+      account_kind: "debit",
+      account_label: "T-Bank",
+      currency: "RUB",
+    });
+  },
+);
+
+Deno.test("repository resolveAccountIdForRow says why it could not open an account", async () => {
   const repository = createRepositoryWithClients({
     adminClient: {
-      from: (table: string) => {
-        assertEquals(table, "money_accounts");
-        return {
-          select: () => ({
-            eq: () => ({
-              eq: async () => ({ data: [], error: null }),
-            }),
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: async () => ({ data: [], error: null }),
           }),
-        };
-      },
+        }),
+        insert: () => ({
+          select: () => ({
+            single: async () => ({ data: null, error: { message: "insert refused" } }),
+          }),
+        }),
+      }),
     },
   });
 
@@ -456,16 +506,59 @@ Deno.test("repository resolveAccountIdForRow throws when no accounts found", asy
     () =>
       repository.resolveAccountIdForRow(
         "person-1",
-        {
-          posted_at: "2026-01-01T00:00:00.000Z",
-          amount: 10,
-          transaction_type: "expense",
-        },
-        "tbank",
+        { posted_at: "2026-01-01T00:00:00.000Z", amount: 10, transaction_type: "expense" },
+        "other_bank",
       ),
-    "No money account found for source tbank",
+    "insert refused",
   );
 });
+
+Deno.test(
+  "repository resolveAccountIdForRow puts an unknown card on the oldest account when no default is given",
+  async () => {
+    const repository = createRepositoryWithClients({
+      adminClient: {
+        from: (table: string) => {
+          if (table === "money_accounts") {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: async () => ({
+                    data: [
+                      { id: "acc-new", created_at: "2026-05-01T00:00:00.000Z" },
+                      { id: "acc-old", created_at: "2026-01-01T00:00:00.000Z" },
+                    ],
+                    error: null,
+                  }),
+                }),
+              }),
+            };
+          }
+          return {
+            select: () => ({
+              eq: () => ({
+                in: async () => ({ data: [], error: null }),
+              }),
+            }),
+          };
+        },
+      },
+    });
+
+    const resolved = await repository.resolveAccountIdForRow(
+      "person-1",
+      {
+        posted_at: "2026-01-01T00:00:00.000Z",
+        amount: 10,
+        transaction_type: "expense",
+        raw_payload: { account_hint: "**** 9999" },
+      },
+      "tbank_web",
+    );
+
+    assertEquals(resolved, "acc-old");
+  },
+);
 
 Deno.test(
   "repository resolveAccountIdForRow uses default account fallback when card hint is unresolved",

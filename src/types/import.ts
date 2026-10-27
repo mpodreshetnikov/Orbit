@@ -5,7 +5,13 @@
 import type { MoneyTransactionType, MoneyTransactionStatus } from "./money";
 
 export type ImportConnectorKind = "file" | "extension";
-export type MoneyImportBatchStatus = "pending" | "running" | "completed" | "failed" | "discarded";
+export type MoneyImportBatchStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "discarded"
+  | "rolled_back";
 export type MoneyImportRangeSelectionMode = "auto" | "preset" | "custom";
 export type MoneyImportRangePresetKey = "1m" | "3m" | "6m" | "1y" | "since_last_import";
 
@@ -166,7 +172,8 @@ export type MoneyImportConnector = MoneyFileImportConnector | MoneyExtensionImpo
 
 /** Row shape sent to money-import Edge Function preview/apply actions. */
 export interface BatchTransactionRow {
-  account_id: string;
+  /** Left out by the import pages: the server resolves the account by the card. */
+  account_id?: string | null;
   account_hint?: string | null;
   card_id?: string | null;
   source: string;

@@ -91,6 +91,21 @@ export function buildCheckupSuggestions(
     });
 }
 
+/**
+ * Stamp rows a millisecond apart, in the order the document printed them.
+ *
+ * The readers (`get_record_observations`, `get_record_findings`) order by `created_at`, and a batch
+ * insert gives every row the same one, so a lab came back in no particular order: the owner's card
+ * on 2026-10-26 listed a blood count interleaved with hormones. The extraction keeps the printed
+ * order; this carries it to the readers without a new column.
+ */
+export function inDocumentOrder(
+  rows: Record<string, unknown>[],
+  now: number = Date.now(),
+): Record<string, unknown>[] {
+  return rows.map((row, index) => ({ ...row, created_at: new Date(now + index).toISOString() }));
+}
+
 export function buildObservationRows(
   recordId: string,
   structured: StructuredDataWithEntities,
@@ -104,7 +119,7 @@ export function buildObservationRows(
     // Resolve from the printed label as well as the model's code. The model's code is a hint;
     // an unmatched one used to leave catalog_id null, which set is_applied false, which silently
     // excluded the value from the patient's history with no signal anywhere in the UI.
-    const resolution = resolveObservation(obs.obs_code, obs.obs_name, observationCatalog);
+    const resolution = resolveObservation(obs.obs_code, obs.obs_name, observationCatalog, obs.unit);
     const catalogEntry = resolution.kind === "resolved" ? resolution.entry : null;
     const obsName = asString(obs.obs_name) ?? catalogEntry?.name_en ?? catalogEntry?.name_ru;
     if (!obsName) {
@@ -406,7 +421,10 @@ export async function runHealthStructureService(
       attrs: { issue_count: (parseOutcome.issues ?? []).length },
     });
 
-    await deps.repository.replaceRecordObservations(input.recordId, observationBuild.rows);
+    await deps.repository.replaceRecordObservations(
+      input.recordId,
+      inDocumentOrder(observationBuild.rows),
+    );
     if (observationBuild.droppedInvalidCount > 0) {
       telemetry?.warn("health_structure_invalid_observations_dropped", {
         record_id: input.recordId,
@@ -436,7 +454,7 @@ export async function runHealthStructureService(
       findingTypeCatalog,
       bodySiteCatalog,
     );
-    await deps.repository.replaceRecordFindings(input.recordId, findingBuild.rows);
+    await deps.repository.replaceRecordFindings(input.recordId, inDocumentOrder(findingBuild.rows));
     if (findingBuild.droppedInvalidCount > 0) {
       telemetry?.warn("health_structure_invalid_findings_dropped", {
         record_id: input.recordId,

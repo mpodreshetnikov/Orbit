@@ -611,7 +611,12 @@ function extractOperationsInPage(input: {
       data: unknown;
       blockedReason: string | null;
     }> {
-      const response = await fetch(url, init);
+      // As the page asks it: Firefox runs a content script's own fetch as the extension's and
+      // offers the page's as `content.fetch`; Chrome runs it as the page's already.
+      const pageContent = (globalThis as { content?: { fetch?: typeof fetch } }).content;
+      const pageFetch =
+        typeof pageContent?.fetch === "function" ? pageContent.fetch.bind(pageContent) : fetch;
+      const response = await pageFetch(url, init);
       const status = typeof response.status === "number" ? response.status : null;
       const statusKey = String(status ?? "unknown");
       debugMeta.response_status_histogram[statusKey] =

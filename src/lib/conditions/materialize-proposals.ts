@@ -126,7 +126,23 @@ async function resolveOrCreateCondition(
   }
 
   const byName = await findByName(deps, proposal.name);
-  if (byName) return byName;
+  if (byName) {
+    // The chart's row may predate any code. A document that names it with a verified code is
+    // the first chance to give it one; a code the row already has is never overwritten.
+    if (verifiedCode) {
+      const { error } = await deps.supabase
+        .from("conditions")
+        .update({
+          code: verifiedCode,
+          icd_name_en: icdLookup?.found ? icdLookup.name_en : null,
+          icd_name_ru: icdLookup?.found ? icdLookup.name_ru : null,
+        })
+        .eq("id", byName)
+        .is("code", null);
+      if (error) throw new ProposalMaterializationError(error.message);
+    }
+    return byName;
+  }
 
   const { data, error } = await deps.supabase
     .from("conditions")

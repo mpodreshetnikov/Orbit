@@ -47,8 +47,9 @@ export function resolveObservation(
   obsCode: string | null,
   obsName: string | null,
   catalog: ObservationCatalogItem[],
+  unit: string | null = null,
 ): CodeResolution<ObservationCatalogItem> {
-  return resolveObservationCode(obsCode, obsName, catalog);
+  return resolveObservationCode(obsCode, obsName, catalog, unit);
 }
 
 export function resolveFindingType(
