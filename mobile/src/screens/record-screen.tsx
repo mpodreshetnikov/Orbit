@@ -217,17 +217,29 @@ function AttachmentRow({ attachment }: { attachment: RecordAttachment }) {
   );
 }
 
+/** "3.5–5.5", "≥ 3.5" or "≤ 5.5": whatever bounds the document gave, or nothing. */
+function oneSidedRange({
+  ref_range_low: low,
+  ref_range_high: high,
+}: RecordObservationWithCatalog): string | null {
+  if (low !== null && high !== null) return rangeText(low, high);
+  if (low !== null) return `≥ ${low}`;
+  if (high !== null) return `≤ ${high}`;
+  return null;
+}
+
 /** A result read from the document: its value against its range, coloured by its status. */
 function ObservationRow({ observation }: { observation: RecordObservationWithCatalog }) {
   const palette = usePalette();
   const router = useRouter();
   const name = observation.catalog_name_ru ?? observation.obs_name;
-  const value = shownValue(observation.value_numeric, observation.value_text);
-  const range =
-    observation.ref_range_text ??
-    (observation.ref_range_low !== null || observation.ref_range_high !== null
-      ? rangeText(observation.ref_range_low, observation.ref_range_high)
-      : null);
+  // As extracted, at its own precision: a 0.04 is not a 0.0.
+  const value =
+    observation.value_numeric !== null
+      ? String(observation.value_numeric)
+      : shownValue(null, observation.value_text);
+  const range = observation.ref_range_text ?? oneSidedRange(observation);
+  const status = observation.status && observation.status !== "unknown" ? observation.status : null;
   const code = observation.obs_code;
   const content = (
     <>
@@ -241,11 +253,7 @@ function ObservationRow({ observation }: { observation: RecordObservationWithCat
           </Text>
         ) : null}
       </View>
-      <Text
-        size="sm"
-        weight="semibold"
-        tone={observation.status ? statusTone(observation.status) : "foreground"}
-      >
+      <Text size="sm" weight="semibold" tone={status ? statusTone(status) : "foreground"}>
         {observation.unit ? `${value} ${observation.unit}` : value}
       </Text>
       {code ? <Icon icon={ChevronRight} size={16} /> : null}

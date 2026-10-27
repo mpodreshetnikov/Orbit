@@ -1002,7 +1002,17 @@ export function useSaveRecord() {
     onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
     onSettled: (_data, _error, { id }) => {
       void client.invalidateQueries({ queryKey: ["record", id] });
-      void client.invalidateQueries({ queryKey: ["records"] });
+      // A document's title and date also order and label results, findings and conditions.
+      for (const family of [
+        "records",
+        "observations",
+        "findings",
+        "active-records",
+        "condition",
+        "completions",
+      ]) {
+        void client.invalidateQueries({ queryKey: [family] });
+      }
     },
   });
 }

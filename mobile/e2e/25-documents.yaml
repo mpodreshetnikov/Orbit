@@ -9,7 +9,7 @@ name: Документы
     text: "Open"
     optional: true
 - extendedWaitUntil:
-    visible: "Annual Blood Test Results"
+    visible: "Annual Blood Test Results.*" # A row reads as one element: match the whole of it.
     timeout: 60000
 - takeScreenshot: documents-01-health
 - tapOn: "Все документы"
@@ -18,7 +18,7 @@ name: Документы
     timeout: 20000
 - takeScreenshot: documents-02-list
 - tapOn:
-    text: "Annual Blood Test Results"
+    text: "Annual Blood Test Results.*"
     retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: "Заметки"

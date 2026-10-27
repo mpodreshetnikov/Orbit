@@ -37,18 +37,30 @@ function check<T>({ data, error }: { data: T; error: { message: string } | null 
   return data;
 }
 
-/** The person's approved documents, newest first; one without a date sorts last. */
+/** One read's worth of rows: the API's cap, so a longer list is read page by page. */
+const PAGE = 1000;
+
+/**
+ * The person's approved documents, newest first; one without a date sorts last. All of them, page by
+ * page, since the list is searched on the phone.
+ */
 export async function fetchRecords(personId: string): Promise<MedicalRecord[]> {
-  const rows = check(
-    await supabase
-      .from("medical_records")
-      .select("*")
-      .eq("person_id", personId)
-      .eq("status", "active")
-      .order("record_date", { ascending: false, nullsFirst: false })
-      .order("created_at", { ascending: false }),
-  );
-  return (rows ?? []) as MedicalRecord[];
+  const all: MedicalRecord[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const rows = check(
+      await supabase
+        .from("medical_records")
+        .select("*")
+        .eq("person_id", personId)
+        .eq("status", "active")
+        .order("record_date", { ascending: false, nullsFirst: false })
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, from + PAGE - 1),
+    );
+    all.push(...((rows ?? []) as MedicalRecord[]));
+    if ((rows?.length ?? 0) < PAGE) return all;
+  }
 }
 
 /** The web records list's search: by title, notes, summary and keywords, and by type. */

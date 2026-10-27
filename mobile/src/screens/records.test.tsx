@@ -97,6 +97,32 @@ function seedRecords() {
       status: "normal",
     },
     {
+      id: "o-3",
+      obs_code: null,
+      obs_name: "CRP",
+      catalog_name_ru: null,
+      value_numeric: 0.04,
+      value_text: null,
+      unit: "мг/л",
+      ref_range_low: null,
+      ref_range_high: 5,
+      ref_range_text: null,
+      status: "unknown",
+    },
+    {
+      id: "o-4",
+      obs_code: null,
+      obs_name: "Ферритин",
+      catalog_name_ru: null,
+      value_numeric: 40,
+      value_text: null,
+      unit: null,
+      ref_range_low: 30,
+      ref_range_high: null,
+      ref_range_text: null,
+      status: null,
+    },
+    {
       id: "o-2",
       obs_code: null,
       obs_name: "Цвет",
@@ -180,6 +206,17 @@ describe("Health tab documents", () => {
     expect(await screen.findByText("МРТ колена")).toBeOnTheScreen();
   });
 
+  it("reads every page of a long list, so an old document can be found", async () => {
+    const many = Array.from({ length: 1000 }, (_, index) =>
+      record(`r-${index}`, `Анализ ${index}`, { record_date: "2026-10-20" }),
+    );
+    seed({ persons: [PERSON], medical_records: [...many, UNDATED] });
+    await renderScreens(routes, "/health/records");
+    await screen.findByText("Анализ 0");
+    await fireEvent.press(screen.getByText("Другое"));
+    expect(await screen.findByText("Старая выписка")).toBeOnTheScreen();
+  });
+
   it("says when the list is empty and when nothing matches", async () => {
     seed({ persons: [PERSON], medical_records: [MRI] });
     await renderScreens(routes, "/health/records");
@@ -208,6 +245,13 @@ describe("A document", () => {
     expect(await screen.findByText("Киста")).toBeOnTheScreen();
     expect(screen.getByText(/Печень · 4/)).toBeOnTheScreen();
     expect(await screen.findByText("page-1.jpg")).toBeOnTheScreen();
+  });
+
+  it("shows a result at its own precision against whichever bound it has", async () => {
+    await renderScreens(routes, "/health/records/r-blood");
+    expect(await screen.findByText("0.04 мг/л")).toBeOnTheScreen();
+    expect(screen.getByText("≤ 5")).toBeOnTheScreen();
+    expect(screen.getByText("≥ 30")).toBeOnTheScreen();
   });
 
   it("opens a page through a signed link", async () => {
