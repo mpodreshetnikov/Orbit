@@ -2,9 +2,10 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
+import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { importBankOfSource } from "@/types/money-import-sources";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -32,22 +33,53 @@ interface MoneyImportGrantsProps {
   }) => Promise<boolean>;
 }
 
-function describeGrantState(
-  grant: MoneyImportGrant,
-  t: MoneyImportGrantsProps["t"],
-  nowMs: number,
-): { label: string; tone: "active" | "inactive" } {
-  if (grant.revoked_at) return { label: t("money.importGrantRevoked"), tone: "inactive" };
+type GrantState = "active" | "expired" | "revoked";
+
+function grantState(grant: MoneyImportGrant, nowMs: number): GrantState {
+  if (grant.revoked_at) return "revoked";
   if (grant.expires_at) {
     // A present expiry that cannot be read is not "no expiry". `timestamptz` accepts `infinity`,
     // which parses to NaN here, and the Edge Function's isGrantUsable already refuses such a
     // grant — so reading it as Active would make the screen disagree with authentication.
     const expiresAtMs = new Date(grant.expires_at).getTime();
-    if (!Number.isFinite(expiresAtMs) || expiresAtMs <= nowMs) {
-      return { label: t("money.importGrantExpired"), tone: "inactive" };
-    }
+    if (!Number.isFinite(expiresAtMs) || expiresAtMs <= nowMs) return "expired";
   }
-  return { label: t("money.importGrantActive"), tone: "active" };
+  return "active";
+}
+
+const STATE_ORDER: Record<GrantState, number> = { active: 0, expired: 1, revoked: 2 };
+
+function timeOf(value: string | null): number {
+  const ms = value ? new Date(value).getTime() : Number.NaN;
+  return Number.isFinite(ms) ? ms : Number.NEGATIVE_INFINITY;
+}
+
+/** Keys in use first, the most recently used on top; expired after them, revoked at the end. */
+export function orderGrants(grants: MoneyImportGrant[], nowMs: number): MoneyImportGrant[] {
+  return [...grants].sort(
+    (a, b) =>
+      STATE_ORDER[grantState(a, nowMs)] - STATE_ORDER[grantState(b, nowMs)] ||
+      timeOf(b.last_used_at) - timeOf(a.last_used_at) ||
+      timeOf(b.created_at) - timeOf(a.created_at),
+  );
+}
+
+/** When the key last let the extension in: today and yesterday by time, older ones by date. */
+function describeLastUse(
+  lastUsedAt: string | null,
+  t: MoneyImportGrantsProps["t"],
+  nowMs: number,
+): string {
+  const used = lastUsedAt ? new Date(lastUsedAt) : null;
+  if (!used || !Number.isFinite(used.getTime())) return t("money.importGrantNeverUsed");
+  const time = format(used, "HH:mm");
+  const today = new Date(nowMs);
+  today.setHours(0, 0, 0, 0);
+  const dayMs = 86_400_000;
+  if (used.getTime() >= today.getTime()) return t("money.importGrantUsedToday", { time });
+  if (used.getTime() >= today.getTime() - dayMs)
+    return t("money.importGrantUsedYesterday", { time });
+  return t("money.importGrantUsedOn", { date: format(used, "dd.MM.yyyy") });
 }
 
 /**
@@ -92,9 +124,26 @@ export function MoneyImportGrants({
     return () => clearInterval(timer);
   }, []);
   const visibleGrants = useMemo(
-    () => (personId ? (grants ?? []).filter((grant) => grant.person_id === personId) : []),
-    [grants, personId],
+    () =>
+      personId
+        ? orderGrants(
+            (grants ?? []).filter((grant) => grant.person_id === personId),
+            nowMs,
+          )
+        : [],
+    [grants, personId, nowMs],
   );
+  const sourceLabels = useMemo(
+    () => new Map(availableSources.map((source) => [source.sourceId, source.label])),
+    [availableSources],
+  );
+  // A key names the banks it may import from, by the names the rest of the page uses.
+  const bankName = (sourceId: string) => {
+    const bank = importBankOfSource(sourceId);
+    if (bank === "tbank") return t("money.importBankTbank");
+    if (bank === "alfa") return t("money.importBankAlfa");
+    return sourceLabels.get(sourceId) ?? sourceId;
+  };
 
   const toggleSource = (sourceId: string) => {
     setSelectedSources((current) =>
@@ -228,42 +277,8 @@ export function MoneyImportGrants({
 
   return (
     <Card data-testid="money-import-grants">
-      <CardHeader>
-        <CardTitle className="text-base">{t("money.importGrantsTitle")}</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <p className="text-sm text-muted-foreground">{t("money.importGrantsDescription")}</p>
-
-        <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
-          <div className="space-y-1">
-            <Label htmlFor="money-import-grant-label">{t("money.importGrantLabel")}</Label>
-            <Input
-              id="money-import-grant-label"
-              value={label}
-              onChange={(event) => setLabel(event.target.value)}
-              placeholder={t("money.importGrantLabelPlaceholder")}
-            />
-          </div>
-          <Button
-            type="button"
-            onClick={() => void handleCreate()}
-            disabled={!personId || createGrant.isPending}
-          >
-            {createGrant.isPending ? t("common.loading") : t("money.importGrantCreate")}
-          </Button>
-        </div>
-
-        <div className="flex flex-wrap gap-4">
-          {availableSources.map((source) => (
-            <label key={source.sourceId} className="flex items-center gap-2 text-sm">
-              <Checkbox
-                checked={selectedSources.includes(source.sourceId)}
-                onCheckedChange={() => toggleSource(source.sourceId)}
-              />
-              {source.label}
-            </label>
-          ))}
-        </div>
+      <CardContent className="space-y-4 p-0">
+        <p className="text-xs text-muted-foreground">{t("money.importGrantsDescription")}</p>
 
         {delivering && (
           <p className="text-sm text-muted-foreground" data-testid="money-import-grant-delivering">
@@ -321,38 +336,74 @@ export function MoneyImportGrants({
           <p className="text-sm text-muted-foreground">{t("money.importGrantsEmpty")}</p>
         )}
 
-        {visibleGrants.map((grant) => {
-          const state = describeGrantState(grant, t, nowMs);
-          return (
-            <div
-              key={grant.id}
-              className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2"
-            >
-              <div className="space-y-0.5">
-                <div className="text-sm font-medium">{grant.label}</div>
-                <div className="text-xs text-muted-foreground">
-                  {grant.allowed_sources.join(", ") || "-"}
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <Badge variant={state.tone === "active" ? "default" : "secondary"}>
-                  {state.label}
-                </Badge>
-                {!grant.revoked_at && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => void handleRevoke(grant.id)}
-                    disabled={revokeGrant.isPending}
-                  >
-                    {t("money.importGrantRevoke")}
-                  </Button>
-                )}
-              </div>
-            </div>
-          );
-        })}
+        {visibleGrants.length > 0 && (
+          <ul className="divide-y rounded-lg border" data-testid="money-import-grant-list">
+            {visibleGrants.map((grant) => {
+              const state = grantState(grant, nowMs);
+              const banks = grant.allowed_sources.map((sourceId) => bankName(sourceId)).join(", ");
+              return (
+                <li
+                  key={grant.id}
+                  className={`flex items-center gap-3 px-3 py-2 ${state === "active" ? "" : "text-muted-foreground"}`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium">{grant.label}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {state === "revoked"
+                        ? t("money.importGrantRevoked")
+                        : state === "expired"
+                          ? t("money.importGrantExpired")
+                          : describeLastUse(grant.last_used_at, t, nowMs)}
+                      {banks && <span className="whitespace-nowrap"> · {banks}</span>}
+                    </div>
+                  </div>
+                  {!grant.revoked_at && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
+                      onClick={() => void handleRevoke(grant.id)}
+                      disabled={revokeGrant.isPending}
+                    >
+                      {t("money.importGrantRevoke")}
+                    </Button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
+          <div className="space-y-1">
+            <Label htmlFor="money-import-grant-label">{t("money.importGrantLabel")}</Label>
+            <Input
+              id="money-import-grant-label"
+              value={label}
+              onChange={(event) => setLabel(event.target.value)}
+              placeholder={t("money.importGrantLabelPlaceholder")}
+            />
+          </div>
+          <Button
+            type="button"
+            onClick={() => void handleCreate()}
+            disabled={!personId || createGrant.isPending}
+          >
+            {createGrant.isPending ? t("common.loading") : t("money.importGrantCreate")}
+          </Button>
+        </div>
+
+        <div className="flex flex-wrap gap-4">
+          {availableSources.map((source) => (
+            <label key={source.sourceId} className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={selectedSources.includes(source.sourceId)}
+                onCheckedChange={() => toggleSource(source.sourceId)}
+              />
+              {source.label}
+            </label>
+          ))}
+        </div>
       </CardContent>
     </Card>
   );
