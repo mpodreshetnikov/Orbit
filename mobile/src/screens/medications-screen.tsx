@@ -60,16 +60,23 @@ export default function MedicationsScreen({ top }: { top?: ReactNode }) {
     return (
       <>
         {header}
-        <Placeholder
-          message={(person.error ?? regimens.error)?.message ?? t("common.error")}
-          action={
-            <Button
-              variant="outline"
-              label={t("common.retry")}
-              onPress={() => void (person.error ? person.refetch() : regimens.refetch())}
-            />
-          }
-        />
+        {/* The switch stays above the error, so failed courses still leave the doses a tap away. */}
+        <ScrollView
+          contentInsetAdjustmentBehavior="automatic"
+          contentContainerStyle={{ flexGrow: 1, padding: space.lg }}
+        >
+          {top}
+          <Placeholder
+            message={(person.error ?? regimens.error)?.message ?? t("common.error")}
+            action={
+              <Button
+                variant="outline"
+                label={t("common.retry")}
+                onPress={() => void (person.error ? person.refetch() : regimens.refetch())}
+              />
+            }
+          />
+        </ScrollView>
       </>
     );
   }

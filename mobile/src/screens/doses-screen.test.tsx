@@ -157,6 +157,23 @@ describe("DosesScreen", () => {
     expect(await screen.findByText("Vitamin D3")).toBeOnTheScreen();
   });
 
+  it("keeps the switch to the courses when the doses fail", async () => {
+    fail("med_dose_events");
+    await renderScreens(routes, "/medications");
+    expect(await screen.findByText("med_dose_events is unavailable")).toBeOnTheScreen();
+    await fireEvent.press(screen.getByRole("tab", { name: "Курсы" }));
+    expect(await screen.findByText("Омепразол")).toBeOnTheScreen();
+  });
+
+  it("keeps the switch back to the doses when the courses fail", async () => {
+    fail("med_regimens");
+    await renderScreens(routes, "/medications");
+    await fireEvent.press(await screen.findByRole("tab", { name: "Курсы" }));
+    expect(await screen.findByText("med_regimens is unavailable")).toBeOnTheScreen();
+    await fireEvent.press(screen.getByRole("tab", { name: "Приёмы" }));
+    expect(await screen.findByText(/Приёмы на сегодня · Max/)).toBeOnTheScreen();
+  });
+
   it("switches the tab to the courses and back", async () => {
     await renderScreens(routes, "/medications");
     await screen.findByText("Vitamin D3");

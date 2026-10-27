@@ -13,12 +13,14 @@ const blocksKey = (userId: string) => `orbit.today.blocks.${userId}`;
 
 /**
  * Which blocks this phone shows on "Сегодня" for the account. Every block is shown until it is turned
- * off, and a block added later starts shown: only what was turned off is stored as off.
+ * off, and a block added later starts shown: only what was turned off is stored as off. Every block
+ * is shown, too, when the stored choice cannot be read.
  */
 export async function readTodayBlocks(userId: string): Promise<TodayBlocks> {
-  const stored = await AsyncStorage.getItem(blocksKey(userId));
-  if (!stored) return ALL_SHOWN;
   try {
+    // A phone that cannot read its own preference shows every block rather than nothing.
+    const stored = await AsyncStorage.getItem(blocksKey(userId));
+    if (!stored) return ALL_SHOWN;
     const parsed = JSON.parse(stored) as Partial<Record<string, unknown>>;
     return Object.fromEntries(
       TODAY_BLOCKS.map((block) => [block, parsed[block] !== false]),

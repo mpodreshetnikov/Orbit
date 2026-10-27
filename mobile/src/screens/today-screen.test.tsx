@@ -8,7 +8,7 @@ import MedicationsHomeScreen from "@/screens/medications-home-screen";
 import SettingsScreen from "@/screens/settings-screen";
 import TodayScreen from "@/screens/today-screen";
 import { calls, fail, failOnce, fakeSession, seed, setSession } from "../../test/fake-supabase";
-import { household, NOW, PERSON, USER_ID } from "../../test/fixtures";
+import { dose, household, NOW, PERSON, USER_ID, VITAMIN_D } from "../../test/fixtures";
 import { renderScreens } from "../../test/render";
 
 jest.mock("@/lib/supabase", () => jest.requireActual("../../test/fake-supabase"));
@@ -117,6 +117,32 @@ describe("TodayScreen", () => {
     await renderScreens(routes, "/today");
     expect(await screen.findByText("Все приёмы на сегодня отмечены")).toBeOnTheScreen();
     expect(await screen.findByText("Нет просроченных и ближайших чек-апов")).toBeOnTheScreen();
+  });
+
+  it("does not count a past one-off left unanswered as answered", async () => {
+    const oneOff = dose("o-1", VITAMIN_D, new Date(2026, 9, 21, 9).toISOString());
+    seed({
+      ...household(),
+      med_dose_events: [
+        { ...oneOff, regimen: { ...oneOff.regimen, schedule: { mode: "one_off" } } },
+      ],
+    });
+    await renderScreens(routes, "/today");
+    expect(await screen.findByText("Отмечено 0 из 1")).toBeOnTheScreen();
+    expect(screen.queryByText("Все приёмы на сегодня отмечены")).toBeNull();
+  });
+
+  it("shows every block when the stored choice cannot be read", async () => {
+    const read = AsyncStorage.getItem;
+    AsyncStorage.getItem = (key: string) =>
+      key === blocksKey ? Promise.reject(new Error("disk")) : read(key);
+    try {
+      await renderScreens(routes, "/today");
+      expect(await screen.findByText("Vitamin D3")).toBeOnTheScreen();
+      expect(await screen.findByText("Анализ крови")).toBeOnTheScreen();
+    } finally {
+      AsyncStorage.getItem = read;
+    }
   });
 
   it("says a day without doses has none", async () => {

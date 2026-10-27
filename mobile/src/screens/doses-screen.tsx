@@ -86,16 +86,23 @@ export default function DosesScreen({ top }: { top?: ReactNode }) {
     return (
       <>
         {header}
-        <Placeholder
-          message={message}
-          action={
-            <Button
-              variant="outline"
-              label={t("common.retry")}
-              onPress={() => void (person.error ? person.refetch() : doses.refetch())}
-            />
-          }
-        />
+        {/* The switch stays above the error, so a failed day still leaves the courses a tap away. */}
+        <ScrollView
+          contentInsetAdjustmentBehavior="automatic"
+          contentContainerStyle={{ flexGrow: 1, padding: space.lg }}
+        >
+          {top}
+          <Placeholder
+            message={message}
+            action={
+              <Button
+                variant="outline"
+                label={t("common.retry")}
+                onPress={() => void (person.error ? person.refetch() : doses.refetch())}
+              />
+            }
+          />
+        </ScrollView>
       </>
     );
   }

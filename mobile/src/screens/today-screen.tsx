@@ -180,6 +180,11 @@ function DosesBlock({ doses }: { doses: ReturnType<typeof useDayDoses> }) {
     [doses.data, recentlyActed],
   );
   const total = doses.data?.length ?? 0;
+  // Counted from what was answered, not from the dashboard's grouping: a past one-off left
+  // unanswered folds away there but is not done.
+  const answered = (doses.data ?? []).filter(
+    (dose) => dose.status === "taken" || dose.status === "skipped",
+  ).length;
   const open = (dose: DayDose) => router.push(`/today/medication/${dose.regimen_id}` as Href);
 
   return (
@@ -206,9 +211,9 @@ function DosesBlock({ doses }: { doses: ReturnType<typeof useDayDoses> }) {
             />
           ))}
           <Text size="xs" tone="mutedForeground">
-            {dashboard.pending.length === 0
+            {answered === total
               ? t("today.allDone")
-              : t("today.answered", { done: dashboard.completedCount, total })}
+              : t("today.answered", { done: answered, total })}
           </Text>
         </>
       )}
