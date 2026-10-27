@@ -78,14 +78,22 @@ mapping from database rows to what a screen shows. Those hold the decisions; the
 result out. Anything needing a React Native runtime is verified by using the app on the phone,
 which is also the acceptance the milestone asks for.
 
+## Choosing the server
+
+A build made without the two environment variables above names no instance, and its first start
+asks for one: the person types the address they open in a browser, and the app reads the data API's
+address and anon key from `/.well-known/orbit-instance` there (`src/lib/instance.ts`). Settings and
+the sign-in screen change it later; changing signs out of the old server first, and each server's
+session is stored under its own key. A build made with them starts on that instance and can still
+be pointed elsewhere, which is how previews and recordings run. The rules a typed address obeys —
+https only, an origin and nothing more, data read and never code — are `T-261017-5or`'s.
+
 ## What is not here yet
 
 - Marking a dose taken (`M2`), measurements (`M3`), document capture (`M4`), recording a spend
   (`M5`).
 - A TestFlight build (`M6`). It needs an App Store Connect invitation from somebody holding an Apple
   Developer Program membership; `T-261018-l19` records why, and what that person is taking on.
-- Choosing an instance at run time (`M7`, for `T-261017-5or`). Until then a build is tied to one
-  instance by the two environment variables above.
 - The session is stored through `AsyncStorage` rather than encrypted at rest. Deliberate and
   temporary, with the reasoning in `src/lib/supabase.ts`: it must be fixed before `M6` puts a build
   on anybody else's phone.

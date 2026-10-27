@@ -1,5 +1,9 @@
 import { describe, expect, it } from "@jest/globals";
-import { InstanceConfigError, resolveInstanceConfig } from "@/lib/instance-config";
+import {
+  InstanceConfigError,
+  normalizeAddress,
+  resolveInstanceConfig,
+} from "@/lib/instance-config";
 
 const valid = {
   supabaseUrl: "https://project.supabase.co",
@@ -57,6 +61,31 @@ describe("resolveInstanceConfig", () => {
   it("rejects something that is not a URL at all", () => {
     expect(() => resolveInstanceConfig({ ...valid, supabaseUrl: "not a url" })).toThrow(
       /is not a URL/,
+    );
+  });
+});
+
+describe("normalizeAddress", () => {
+  it.each([
+    ["orbit.example.com", "https://orbit.example.com"],
+    ["  https://orbit.example.com/  ", "https://orbit.example.com"],
+    ["ORBIT.example.com:8443", "https://orbit.example.com:8443"],
+    ["http://localhost:3000", "http://localhost:3000"],
+  ])("reads %s as %s", (input, origin) => {
+    expect(normalizeAddress(input)).toBe(origin);
+  });
+
+  it.each([
+    ["", "empty"],
+    ["   ", "empty"],
+    ["https://", "invalid"],
+    ["http://orbit.example.com", "notHttps"],
+    ["ftp://orbit.example.com", "notHttps"],
+    ["orbit.example.com/app", "hasPath"],
+    ["orbit.example.com?x=1", "hasPath"],
+  ])("refuses %j as %s", (input, problem) => {
+    expect(() => normalizeAddress(input)).toThrow(
+      expect.objectContaining({ problem }) as unknown as Error,
     );
   });
 });

@@ -4,7 +4,7 @@ import {
   routingUpsert,
   type RoutingChoice,
 } from "@orbit-types/notification-routing";
-import { Stack } from "expo-router";
+import { Stack, useRouter, type Href } from "expo-router";
 import { Check } from "lucide-react-native";
 import { useEffect, useState } from "react";
 import { Alert, Pressable, ScrollView, Switch, View } from "react-native";
@@ -13,6 +13,7 @@ import { Button, Icon, Placeholder, Text } from "@/components/ui";
 import type { CheckupReminders, HouseholdPerson } from "@/features/settings";
 import { TODAY_BLOCKS, type TodayBlock } from "@/features/today/blocks";
 import { t } from "@/lib/i18n";
+import { useInstance } from "@/lib/instance-context";
 import {
   useChoosePerson,
   useHousehold,
@@ -117,9 +118,28 @@ export default function SettingsScreen() {
           ))}
         </Section>
 
+        <ServerSection />
+
         <Button variant="outline" label={t("auth.signOut")} onPress={() => void signOut()} />
       </ScrollView>
     </>
+  );
+}
+
+/** The server this phone talks to, and the way to another one. */
+function ServerSection() {
+  const router = useRouter();
+  const { instance } = useInstance();
+  return (
+    <Section title={t("instance.section")}>
+      {instance ? <Text size="sm">{new URL(instance.address).host}</Text> : null}
+      <Button
+        variant="outline"
+        compact
+        label={t("instance.change")}
+        onPress={() => router.push("/server" as Href)}
+      />
+    </Section>
   );
 }
 

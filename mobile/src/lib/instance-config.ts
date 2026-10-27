@@ -4,7 +4,24 @@ export type InstanceConfig = {
   supabaseAnonKey: string;
 };
 
-export class InstanceConfigError extends Error {}
+/** Why a typed address was refused, for the screen to say in the person's language. */
+export type InstanceProblem =
+  | "empty"
+  | "invalid"
+  | "notHttps"
+  | "hasPath"
+  | "unreachable"
+  | "notOrbit"
+  | "badConfig";
+
+export class InstanceConfigError extends Error {
+  constructor(
+    message: string,
+    readonly problem?: InstanceProblem,
+  ) {
+    super(message);
+  }
+}
 
 /**
  * Validate the instance an Expo build was configured with.
@@ -60,4 +77,34 @@ export function resolveInstanceConfig(extra: unknown): InstanceConfig {
   }
 
   return { supabaseUrl: parsed.origin, supabaseAnonKey };
+}
+
+/**
+ * The address a person typed for their instance, as the origin the app will ask: "orbit.example.com"
+ * becomes "https://orbit.example.com". The same rules as a build-time address — https only, loopback
+ * aside, and nothing but an origin — so a typed host cannot be talked to in clear text.
+ */
+export function normalizeAddress(input: string): string {
+  const trimmed = input.trim();
+  if (trimmed === "") {
+    throw new InstanceConfigError("Enter the address of your Orbit server.", "empty");
+  }
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  let parsed: URL;
+  try {
+    parsed = new URL(withScheme);
+  } catch {
+    throw new InstanceConfigError(`Not an address: ${trimmed}`, "invalid");
+  }
+  const isLoopback = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
+  if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && isLoopback)) {
+    throw new InstanceConfigError(`The address must be https: ${trimmed}`, "notHttps");
+  }
+  if (parsed.pathname !== "/" || parsed.search !== "" || parsed.hash !== "") {
+    throw new InstanceConfigError(
+      `Enter only the server's address, without a path: ${trimmed}`,
+      "hasPath",
+    );
+  }
+  return parsed.origin;
 }

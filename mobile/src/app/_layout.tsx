@@ -11,6 +11,7 @@ import { StatusBar } from "expo-status-bar";
 import { useColorScheme } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { queryClient } from "@/lib/queries";
+import { InstanceProvider, useInstance } from "@/lib/instance-context";
 import { SessionProvider } from "@/lib/session";
 import { palettes } from "@/theme";
 
@@ -54,17 +55,30 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <QueryClientProvider client={queryClient}>
-        <SessionProvider>
-          <ThemeProvider value={navigationTheme}>
-            <StatusBar style={scheme === "dark" ? "light" : "dark"} />
-            <Stack screenOptions={{ headerShown: false }}>
-              <Stack.Screen name="index" />
-              <Stack.Screen name="sign-in" />
-              <Stack.Screen name="(tabs)" />
-            </Stack>
-          </ThemeProvider>
-        </SessionProvider>
+        <InstanceProvider>
+          <InstanceSession>
+            <ThemeProvider value={navigationTheme}>
+              <StatusBar style={scheme === "dark" ? "light" : "dark"} />
+              <Stack screenOptions={{ headerShown: false }}>
+                <Stack.Screen name="index" />
+                <Stack.Screen name="server" />
+                <Stack.Screen name="sign-in" />
+                <Stack.Screen name="(tabs)" />
+              </Stack>
+            </ThemeProvider>
+          </InstanceSession>
+        </InstanceProvider>
       </QueryClientProvider>
     </SafeAreaProvider>
   );
+}
+
+/** The session of the server in use: a new server starts a new session provider, signed out. */
+function InstanceSession({ children }: { children: React.ReactNode }) {
+  const { instance } = useInstance();
+  if (instance === undefined) {
+    // A frame on a cold start, while the phone's choice of server is read.
+    return null;
+  }
+  return <SessionProvider key={instance?.address ?? "none"}>{children}</SessionProvider>;
 }

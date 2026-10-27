@@ -4,6 +4,8 @@ import { ExpoRoot } from "expo-router";
 import { getMockContext } from "expo-router/testing-library";
 import * as Fonts from "@expo-google-fonts/geist";
 import * as WebBrowser from "expo-web-browser";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import Constants from "expo-constants";
 import * as ReactNative from "react-native";
 import { queryClient } from "@/lib/queries";
 import { calls, fakeSession, seed, setSession, supabase } from "../test/fake-supabase";
@@ -23,7 +25,8 @@ async function renderApp(location: string) {
   await render(<ExpoRoot context={getMockContext("./src/app")} location={location} />);
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  await AsyncStorage.removeItem("orbit.instance");
   jest.useFakeTimers({ now: NOW, advanceTimers: true });
   queryClient.clear();
   seed(household());
@@ -136,5 +139,112 @@ describe("the app", () => {
     await fireEvent.press((await screen.findAllByLabelText("Настройки"))[0]!);
     await fireEvent.press(await screen.findByText("Выйти"));
     expect(await screen.findByText("Войти через Google")).toBeOnTheScreen();
+  });
+});
+
+/** A server at `friend.example.com` that answers as an Orbit instance. */
+function friendServer() {
+  return jest.spyOn(globalThis, "fetch").mockResolvedValue({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      supabaseUrl: "https://friend.example.com",
+      supabaseAnonKey: "friend-key",
+    }),
+  } as Response);
+}
+
+/** Answer the next alert with the button labelled `label`. */
+function answerAlert(label: string) {
+  jest.spyOn(ReactNative.Alert, "alert").mockImplementationOnce((_title, _message, buttons) => {
+    buttons?.find((button) => button.text === label)?.onPress?.();
+  });
+}
+
+describe("the server", () => {
+  it("is asked for on the first start of a build that names none, then signs in there", async () => {
+    const config = Constants.expoConfig as { extra?: unknown };
+    const extra = config.extra;
+    config.extra = {};
+    try {
+      setSession(null);
+      const fetchMock = friendServer();
+      await renderApp("/");
+      expect(await screen.findByText("Сервер Orbit")).toBeOnTheScreen();
+      expect(screen.queryByText("Отмена")).toBeNull();
+      await fireEvent.changeText(screen.getByTestId("server-address"), "friend.example.com");
+      await fireEvent.press(screen.getByText("Подключиться"));
+      expect(await screen.findByText("Войти через Google")).toBeOnTheScreen();
+      expect(screen.getByText("Сервер: friend.example.com")).toBeOnTheScreen();
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://friend.example.com/.well-known/orbit-instance",
+        expect.anything(),
+      );
+      expect(await AsyncStorage.getItem("orbit.instance")).toContain("friend-key");
+    } finally {
+      config.extra = extra;
+    }
+  });
+
+  it("sends a sign-in without a server to the server screen", async () => {
+    const config = Constants.expoConfig as { extra?: unknown };
+    const extra = config.extra;
+    config.extra = {};
+    try {
+      setSession(null);
+      await renderApp("/sign-in");
+      expect(await screen.findByText("Сервер Orbit")).toBeOnTheScreen();
+    } finally {
+      config.extra = extra;
+    }
+  });
+
+  it("says why an address was refused", async () => {
+    setSession(null);
+    jest.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("Network request failed"));
+    await renderApp("/server");
+    await fireEvent.changeText(await screen.findByTestId("server-address"), "http://x.example.com");
+    await fireEvent.press(screen.getByText("Подключиться"));
+    expect(await screen.findByText("Адрес должен начинаться с https://.")).toBeOnTheScreen();
+    await fireEvent.changeText(screen.getByTestId("server-address"), "nowhere.example.com");
+    await fireEvent(screen.getByTestId("server-address"), "submitEditing");
+    expect(await screen.findByText(/Не удалось связаться с сервером/)).toBeOnTheScreen();
+  });
+
+  it("changes from the sign-in screen after a warning, signed out of the old one", async () => {
+    setSession(null);
+    friendServer();
+    await renderApp("/sign-in");
+    expect(await screen.findByText("Сервер: orbit.test")).toBeOnTheScreen();
+    await fireEvent.press(screen.getByText("Сменить сервер"));
+    const input = await screen.findByTestId("server-address");
+    expect(input.props.value).toBe("orbit.test");
+    await fireEvent.changeText(input, "friend.example.com");
+    answerAlert("Сменить сервер");
+    await fireEvent.press(screen.getByText("Подключиться"));
+    expect(await screen.findByText("Сервер: friend.example.com")).toBeOnTheScreen();
+  });
+
+  it("stays put when the change is cancelled, or the address is the same one", async () => {
+    setSession(fakeSession(USER_ID));
+    friendServer().mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ supabaseUrl: "https://orbit.test", supabaseAnonKey: "anon-key" }),
+    } as Response);
+    await renderApp("/today");
+    await fireEvent.press((await screen.findAllByLabelText("Настройки"))[0]!);
+    expect(await screen.findByText("orbit.test")).toBeOnTheScreen();
+    await fireEvent.press(screen.getByText("Сменить сервер"));
+    await fireEvent.press(await screen.findByText("Подключиться"));
+    expect(await screen.findByText("orbit.test")).toBeOnTheScreen();
+
+    await fireEvent.press(screen.getByText("Сменить сервер"));
+    await fireEvent.changeText(await screen.findByTestId("server-address"), "friend.example.com");
+    answerAlert("Отмена");
+    await fireEvent.press(screen.getByText("Подключиться"));
+    await fireEvent.press(await screen.findByText("Отмена"));
+    expect(await screen.findByText("orbit.test")).toBeOnTheScreen();
+    expect(await AsyncStorage.getItem("orbit.instance")).toBeNull();
   });
 });
