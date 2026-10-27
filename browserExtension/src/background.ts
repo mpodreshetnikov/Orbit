@@ -509,6 +509,7 @@ const autoImportSweep = createAutoImportSweep({
   autoRunStore,
   isRunRequested: (scope, nowMs) => attentionStore.isRunRequested(scope, nowMs),
   clearRunRequest: (scope) => attentionStore.clearRunRequest(scope),
+  getSchedule: async () => (await attentionStore.getState()).autoSchedule,
   openTab: async (url) => {
     // Out of the person's sight: a minimized window of its own. A background tab in their
     // window appeared in their tab strip and read as the bank opening by itself (2026-09-07);

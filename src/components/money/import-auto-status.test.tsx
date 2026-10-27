@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import React from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { MoneyImportAutoStatus, readExtensionAutoStatus } from "./import-auto-status";
 
 const t = (key: string, values?: Record<string, string | number>) =>
@@ -61,7 +61,16 @@ describe("readExtensionAutoStatus", () => {
           scheduled_at: null,
         },
       ],
+      schedule: null,
     });
+    expect(
+      readExtensionAutoStatus({
+        ok: true,
+        grant,
+        sources: [],
+        schedule: { kind: "week", at: "end" },
+      })?.schedule,
+    ).toEqual({ kind: "week", at: "end" });
   });
 });
 
@@ -268,5 +277,77 @@ describe("MoneyImportAutoStatus", () => {
     expect(
       within(tbank).queryByText(/^money\.importAutoStatusLastManualOk /),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("MoneyImportAutoStatus schedule", () => {
+  function renderWith(schedule: unknown, onScheduleChange: (value: unknown) => Promise<unknown>) {
+    return render(
+      <MoneyImportAutoStatus
+        t={t}
+        state="ready"
+        status={{ grant, sources: [], schedule: schedule as never }}
+        selectedPersonId="person-1"
+        sourceLabels={labels}
+        onRefresh={() => {}}
+        onScheduleChange={onScheduleChange as never}
+      />,
+    );
+  }
+
+  it("asks for an extension update when it reports no schedule", () => {
+    renderWith(null, vi.fn());
+    expect(screen.getByTestId("money-import-auto-schedule-update")).toHaveTextContent(
+      "money.importScheduleNeedsUpdate",
+    );
+  });
+
+  it("switches between days, a week and a month and shows what the extension kept", async () => {
+    const onChange = vi.fn(async (value: unknown) => value);
+    renderWith({ kind: "days", every: 1 }, onChange);
+    const editor = within(screen.getByTestId("money-import-auto-schedule"));
+    expect(editor.getByText("money.importScheduleHint_days")).toBeInTheDocument();
+
+    fireEvent.click(editor.getByRole("button", { name: "money.importScheduleKind_week" }));
+    await waitFor(() => expect(editor.getByText("money.importScheduleSaved")).toBeInTheDocument());
+    expect(onChange).toHaveBeenLastCalledWith({ kind: "week", at: "start" });
+    expect(editor.getByText("money.importScheduleHint_week_start")).toBeInTheDocument();
+
+    fireEvent.click(editor.getByRole("button", { name: "money.importSchedule_week_end" }));
+    await waitFor(() => expect(onChange).toHaveBeenLastCalledWith({ kind: "week", at: "end" }));
+
+    fireEvent.click(editor.getByRole("button", { name: "money.importScheduleKind_month" }));
+    await waitFor(() => expect(onChange).toHaveBeenLastCalledWith({ kind: "month", at: "end" }));
+    expect(await editor.findByText("money.importScheduleHint_month_end")).toBeInTheDocument();
+
+    fireEvent.click(editor.getByRole("button", { name: "money.importScheduleKind_days" }));
+    await waitFor(() => expect(onChange).toHaveBeenLastCalledWith({ kind: "days", every: 1 }));
+  });
+
+  it("bounds the day count and saves it once it is committed", async () => {
+    const onChange = vi.fn(async (value: unknown) => value);
+    renderWith({ kind: "days", every: 2 }, onChange);
+    const input = screen.getByRole("spinbutton", { name: "money.importScheduleDaysLabel" });
+
+    fireEvent.change(input, { target: { value: "2" } });
+    fireEvent.blur(input);
+    expect(onChange).not.toHaveBeenCalled();
+
+    fireEvent.change(input, { target: { value: "90" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith({ kind: "days", every: 30 }));
+    expect(input).toHaveValue(30);
+  });
+
+  it("goes back to what was saved when the extension does not keep a change", async () => {
+    const onChange = vi.fn(async () => null);
+    renderWith({ kind: "month", at: "start" }, onChange);
+    const editor = within(screen.getByTestId("money-import-auto-schedule"));
+
+    fireEvent.click(editor.getByRole("button", { name: "money.importSchedule_month_end" }));
+    expect(await editor.findByText("money.importScheduleFailed")).toBeInTheDocument();
+    expect(
+      editor.getByRole("button", { name: "money.importSchedule_month_start" }),
+    ).toHaveAttribute("aria-pressed", "true");
   });
 });

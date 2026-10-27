@@ -4,6 +4,12 @@ import React from "react";
 import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import {
+  IMPORT_SCHEDULE_MAX_DAYS,
+  readImportAutoSchedule,
+  type ImportAutoSchedule,
+} from "@/lib/money/extension-bridge";
 
 /**
  * What the extension will do on its own, as it reports it.
@@ -29,6 +35,8 @@ export interface ExtensionAutoStatusSource {
 export interface ExtensionAutoStatus {
   grant: { person_id: string; allowed_sources: string[]; received_at: string } | null;
   sources: ExtensionAutoStatusSource[];
+  /** How often it imports on its own. Null or absent from an extension older than the setting. */
+  schedule?: ImportAutoSchedule | null;
 }
 
 type Translate = (key: string, values?: Record<string, string | number>) => string;
@@ -90,7 +98,7 @@ export function readExtensionAutoStatus(data: Record<string, unknown>): Extensio
       next_run: readNextRun(record.next_run),
       scheduled_at: asString(record.scheduled_at),
     }));
-  return { grant, sources };
+  return { grant, sources, schedule: readImportAutoSchedule(data.schedule) };
 }
 
 function formatMoment(iso: string): string {
@@ -167,6 +175,156 @@ interface MoneyImportAutoStatusProps {
   /** Localized names for the extension sources, by source id. */
   sourceLabels: Record<string, string>;
   onRefresh: () => void;
+  /** Hands a new schedule to the extension; resolves with what it kept, or null. */
+  onScheduleChange?: (schedule: ImportAutoSchedule) => Promise<ImportAutoSchedule | null>;
+}
+
+const SCHEDULE_KINDS: Array<ImportAutoSchedule["kind"]> = ["days", "week", "month"];
+
+/**
+ * The frequency setting: days, a week or a month, then how many days or which edge. A change
+ * goes to the extension at once; what it kept is what the panel shows, so a rejected value
+ * cannot sit on screen looking saved.
+ */
+function ImportAutoScheduleEditor({
+  t,
+  schedule,
+  onChange,
+}: {
+  t: Translate;
+  schedule: ImportAutoSchedule;
+  onChange: (schedule: ImportAutoSchedule) => Promise<ImportAutoSchedule | null>;
+}) {
+  const [current, setCurrent] = React.useState(schedule);
+  const [saving, setSaving] = React.useState<"idle" | "saving" | "saved" | "failed">("idle");
+  const [daysDraft, setDaysDraft] = React.useState(
+    schedule.kind === "days" ? String(schedule.every) : "1",
+  );
+  React.useEffect(() => {
+    setCurrent(schedule);
+    if (schedule.kind === "days") setDaysDraft(String(schedule.every));
+  }, [schedule]);
+
+  const save = async (next: ImportAutoSchedule) => {
+    setCurrent(next);
+    setSaving("saving");
+    const kept = await onChange(next);
+    if (!kept) {
+      setCurrent(schedule);
+      setSaving("failed");
+      return;
+    }
+    setCurrent(kept);
+    if (kept.kind === "days") setDaysDraft(String(kept.every));
+    setSaving("saved");
+  };
+
+  const pickKind = (kind: ImportAutoSchedule["kind"]) => {
+    if (kind === current.kind) return;
+    void save(
+      kind === "days"
+        ? { kind, every: Math.max(1, Number.parseInt(daysDraft, 10) || 1) }
+        : { kind, at: current.kind === "days" ? "start" : current.at },
+    );
+  };
+
+  const commitDays = () => {
+    const every = Math.min(
+      IMPORT_SCHEDULE_MAX_DAYS,
+      Math.max(1, Number.parseInt(daysDraft, 10) || 1),
+    );
+    setDaysDraft(String(every));
+    if (current.kind === "days" && current.every === every) return;
+    void save({ kind: "days", every });
+  };
+
+  const pill = (active: boolean) =>
+    `rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+      active
+        ? "border-foreground bg-foreground text-background"
+        : "border-border text-foreground hover:bg-muted"
+    }`;
+
+  return (
+    <div className="space-y-2" data-testid="money-import-auto-schedule">
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-medium">{t("money.importScheduleTitle")}</span>
+        {saving !== "idle" && (
+          <span
+            className={`text-xs ${saving === "failed" ? "text-destructive" : "text-muted-foreground"}`}
+          >
+            {t(
+              saving === "saving"
+                ? "money.importScheduleSaving"
+                : saving === "saved"
+                  ? "money.importScheduleSaved"
+                  : "money.importScheduleFailed",
+            )}
+          </span>
+        )}
+      </div>
+      <div
+        className="flex flex-wrap gap-1.5"
+        role="group"
+        aria-label={t("money.importScheduleTitle")}
+      >
+        {SCHEDULE_KINDS.map((kind) => (
+          <button
+            key={kind}
+            type="button"
+            className={pill(current.kind === kind)}
+            aria-pressed={current.kind === kind}
+            onClick={() => pickKind(kind)}
+          >
+            {t(`money.importScheduleKind_${kind}`)}
+          </button>
+        ))}
+      </div>
+      {current.kind === "days" ? (
+        <label className="flex items-center gap-2 text-muted-foreground">
+          {t("money.importScheduleEvery")}
+          <Input
+            type="number"
+            inputMode="numeric"
+            min={1}
+            max={IMPORT_SCHEDULE_MAX_DAYS}
+            value={daysDraft}
+            onChange={(event) => setDaysDraft(event.target.value)}
+            onBlur={commitDays}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") commitDays();
+            }}
+            className="h-8 w-16 text-center"
+            aria-label={t("money.importScheduleDaysLabel")}
+          />
+          {t("money.importScheduleDaysUnit", { count: Number.parseInt(daysDraft, 10) || 1 })}
+        </label>
+      ) : (
+        <div className="flex flex-wrap gap-1.5">
+          {(["start", "end"] as const).map((edge) => (
+            <button
+              key={edge}
+              type="button"
+              className={pill(current.at === edge)}
+              aria-pressed={current.at === edge}
+              onClick={() => {
+                if (current.at !== edge) void save({ kind: current.kind, at: edge });
+              }}
+            >
+              {t(`money.importSchedule_${current.kind}_${edge}`)}
+            </button>
+          ))}
+        </div>
+      )}
+      <p className="text-xs text-muted-foreground">{t(scheduleHintKey(current))}</p>
+    </div>
+  );
+}
+
+function scheduleHintKey(schedule: ImportAutoSchedule): string {
+  return schedule.kind === "days"
+    ? "money.importScheduleHint_days"
+    : `money.importScheduleHint_${schedule.kind}_${schedule.at}`;
 }
 
 export function MoneyImportAutoStatus({
@@ -176,6 +334,7 @@ export function MoneyImportAutoStatus({
   selectedPersonId,
   sourceLabels,
   onRefresh,
+  onScheduleChange,
   children,
 }: MoneyImportAutoStatusProps & { children?: React.ReactNode }) {
   const grant = status?.grant ?? null;
@@ -216,6 +375,21 @@ export function MoneyImportAutoStatus({
                   .join(", "),
               })}
             </p>
+            {onScheduleChange &&
+              (status?.schedule ? (
+                <ImportAutoScheduleEditor
+                  t={t}
+                  schedule={status.schedule}
+                  onChange={onScheduleChange}
+                />
+              ) : (
+                <p
+                  className="text-muted-foreground"
+                  data-testid="money-import-auto-schedule-update"
+                >
+                  {t("money.importScheduleNeedsUpdate")}
+                </p>
+              ))}
             {status?.sources.map((source) => {
               const label = sourceLabels[source.source_id] ?? source.source_id;
               const described = describeSource(source, label, t);

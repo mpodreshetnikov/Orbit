@@ -1,3 +1,5 @@
+import { scheduleDueAtMs, type AutoSchedule } from "./auto-schedule.js";
+
 /**
  * Decides whether an import may start on its own.
  *
@@ -60,8 +62,14 @@ export type AutoRunEligibility =
   | { kind: "stopped" };
 
 export interface AutoRunOptions {
+  /** How long a failed run waits before the next attempt, doubled per further failure. */
   cooldownMs?: number;
   maxConsecutiveFailures?: number;
+  /**
+   * How often a successful source runs again. Without one, a success waits `cooldownMs`, which
+   * is what the extension did before the schedule existed.
+   */
+  schedule?: AutoSchedule;
 }
 
 /**
@@ -142,12 +150,22 @@ export function describeAutoRunEligibility(
   if (!state || state.lastRunAtMs === null) return { kind: "now" };
   if (state.consecutiveFailures >= maxConsecutiveFailures) return { kind: "stopped" };
 
-  // Each failure doubles the wait, so a signed-out session costs one attempt, then one every
-  // two days, then nothing until a manual run clears the count.
+  // The schedule says when a source is due again after its last success; a failure since then
+  // only holds the next attempt back further. Each failure doubles that wait, so a signed-out
+  // session costs one attempt, then one every two days, then nothing until a manual run clears
+  // the count.
+  const lastOkAtMs = lastOkAtMsOf(state);
+  const dueAtMs = options.schedule
+    ? scheduleDueAtMs(options.schedule, lastOkAtMs)
+    : state.lastResult === "ok"
+      ? state.lastRunAtMs + cooldownMs
+      : Number.NEGATIVE_INFINITY;
   const backoffFactor = 2 ** Math.max(0, state.consecutiveFailures - 1);
-  const effectiveCooldownMs =
-    state.lastResult === "error" ? cooldownMs * backoffFactor : cooldownMs;
-  const atMs = state.lastRunAtMs + effectiveCooldownMs;
+  const retryAtMs =
+    state.lastResult === "error"
+      ? state.lastRunAtMs + cooldownMs * backoffFactor
+      : Number.NEGATIVE_INFINITY;
+  const atMs = Math.max(dueAtMs, retryAtMs);
 
   // A cooldown that has passed is not "after": the page would otherwise show a receding
   // timestamp for a run the sweep is already allowed to make.

@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { probeExtension } from "./extension-bridge";
+import {
+  probeExtension,
+  readImportAutoSchedule,
+  setExtensionAutoSchedule,
+} from "./extension-bridge";
 
 function replyToPings(...types: string[]) {
   return vi.spyOn(window, "postMessage").mockImplementation((message) => {
@@ -32,5 +36,58 @@ describe("probeExtension", () => {
   it("is silent when nothing answers", async () => {
     replyToPings();
     await expect(probeExtension(50)).resolves.toBe("silent");
+  });
+});
+
+describe("setExtensionAutoSchedule", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function answerWith(reply: Record<string, unknown>) {
+    return vi.spyOn(window, "postMessage").mockImplementation((message) => {
+      const request = message as { type?: string; request_id?: string };
+      if (request.type !== "MONEY_IMPORT_SET_AUTO_SCHEDULE") return;
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          data: {
+            source: "orbit-extension",
+            type: "MONEY_IMPORT_AUTO_SCHEDULE_ACK",
+            request_id: request.request_id,
+            ...reply,
+          },
+        }),
+      );
+    });
+  }
+
+  it("resolves with what the extension kept", async () => {
+    const post = answerWith({ ok: true, schedule: { kind: "days", every: 30 } });
+    await expect(setExtensionAutoSchedule({ kind: "days", every: 45 })).resolves.toEqual({
+      kind: "days",
+      every: 30,
+    });
+    expect(post.mock.calls[0]?.[0]).toMatchObject({ schedule: { kind: "days", every: 45 } });
+  });
+
+  it("resolves null when the extension refused", async () => {
+    answerWith({ ok: false });
+    await expect(setExtensionAutoSchedule({ kind: "week", at: "end" })).resolves.toBeNull();
+  });
+});
+
+describe("readImportAutoSchedule", () => {
+  it("reads the three shapes and nothing else", () => {
+    expect(readImportAutoSchedule({ kind: "days", every: 2.4 })).toEqual({
+      kind: "days",
+      every: 2,
+    });
+    expect(readImportAutoSchedule({ kind: "month", at: "start" })).toEqual({
+      kind: "month",
+      at: "start",
+    });
+    expect(readImportAutoSchedule({ kind: "days", every: 0 })).toBeNull();
+    expect(readImportAutoSchedule({ kind: "week", at: "noon" })).toBeNull();
+    expect(readImportAutoSchedule("weekly")).toBeNull();
   });
 });

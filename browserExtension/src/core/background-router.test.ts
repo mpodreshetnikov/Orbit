@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import extensionManifest from "../../manifest.json";
 import { createImportDebugStore } from "./import-debug.js";
 import { routeBackgroundMessage } from "./background-router.js";
+import { normalizeAutoSchedule, type AutoSchedule } from "./auto-schedule.js";
 import type { StoredImportGrant } from "./grant-store.js";
 import { createInitialAutoRunState } from "./auto-run-policy.js";
 import { activeImportRuns, UPDATE_IN_PROGRESS_ERROR } from "./active-runs.js";
@@ -176,7 +177,12 @@ describe("background-router", () => {
     const deps = createDeps();
     await expect(
       routeBackgroundMessage({ type: "MONEY_IMPORT_GET_AUTO_STATUS" }, deps),
-    ).resolves.toEqual({ ok: true, grant: null, sources: [] });
+    ).resolves.toEqual({
+      ok: true,
+      grant: null,
+      sources: [],
+      schedule: { kind: "days", every: 1 },
+    });
 
     deps.grantStore.getGrant.mockResolvedValue({
       token: "secret",
@@ -246,6 +252,7 @@ describe("background-router", () => {
           live_run: null,
         },
       ],
+      schedule: { kind: "days", every: 1 },
     });
   });
 
@@ -1042,6 +1049,7 @@ describe("background-router", () => {
         staleAfterMs: initial?.staleAfterMs ?? DAY,
         lastOpenedAtMs: initial?.lastOpenedAtMs ?? null,
         lastStartedAtMs: null as number | null,
+        autoSchedule: { kind: "days", every: 1 } as AutoSchedule,
         runRequests: { ...(initial?.runRequests ?? {}) },
         requestTabs: {} as Record<string, number>,
       };
@@ -1057,6 +1065,10 @@ describe("background-router", () => {
         setStaleAfterMs: vi.fn(async (value: unknown) => {
           state.staleAfterMs = typeof value === "number" ? value : DAY;
           return state.staleAfterMs;
+        }),
+        setAutoSchedule: vi.fn(async (value: unknown) => {
+          state.autoSchedule = normalizeAutoSchedule(value);
+          return state.autoSchedule;
         }),
         markPageOpened: vi.fn(async (nowMs: number) => {
           state.lastOpenedAtMs = nowMs;
@@ -1365,6 +1377,34 @@ describe("background-router", () => {
         ),
       ).resolves.toEqual({ ok: true, stale_after_ms: 3 * DAY });
       expect(attentionStore.setStaleAfterMs).toHaveBeenCalledWith(3 * DAY);
+    });
+
+    it("stores the schedule, echoes it normalised, and reads it back in the status", async () => {
+      const attentionStore = createAttentionStore();
+      await expect(
+        routeBackgroundMessage(
+          { type: "MONEY_IMPORT_SET_AUTO_SCHEDULE", schedule: { kind: "days", every: 45 } },
+          { ...createDeps(), attentionStore },
+        ),
+      ).resolves.toEqual({ ok: true, schedule: { kind: "days", every: 30 } });
+      await routeBackgroundMessage(
+        { type: "MONEY_IMPORT_SET_AUTO_SCHEDULE", schedule: { kind: "week", at: "start" } },
+        { ...createDeps(), attentionStore },
+      );
+      const status = (await routeBackgroundMessage(
+        { type: "MONEY_IMPORT_GET_AUTO_STATUS" },
+        { ...createDeps(), attentionStore },
+      )) as Record<string, unknown>;
+      expect(status.schedule).toEqual({ kind: "week", at: "start" });
+    });
+
+    it("says the schedule cannot be set where there is no settings store", async () => {
+      await expect(
+        routeBackgroundMessage(
+          { type: "MONEY_IMPORT_SET_AUTO_SCHEDULE", schedule: { kind: "week", at: "end" } },
+          createDeps(),
+        ),
+      ).resolves.toEqual({ ok: false, error: "Schedule is not available" });
     });
   });
 });

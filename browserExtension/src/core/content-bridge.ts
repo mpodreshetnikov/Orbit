@@ -87,6 +87,7 @@ export function createContentBridge(deps: ContentBridgeDeps) {
       request_id?: unknown;
       source_id?: unknown;
       stale_after_ms?: unknown;
+      schedule?: unknown;
     };
     if (!data || data.source !== WEBAPP_SOURCE) return;
 
@@ -149,6 +150,9 @@ export function createContentBridge(deps: ContentBridgeDeps) {
               ok: Boolean(response?.ok),
               grant: response?.grant ?? null,
               sources: Array.isArray(response?.sources) ? response.sources : [],
+              // Absent from an extension older than the schedule; the page reads that as
+              // "update to set it".
+              schedule: response?.schedule ?? null,
             },
             "*",
           );
@@ -196,6 +200,26 @@ export function createContentBridge(deps: ContentBridgeDeps) {
               ok: Boolean(response?.ok),
               error: typeof response?.error === "string" ? response.error : null,
               source_id: typeof response?.source_id === "string" ? response.source_id : null,
+            },
+            "*",
+          );
+        },
+      );
+      return;
+    }
+
+    if (data.type === "MONEY_IMPORT_SET_AUTO_SCHEDULE") {
+      const requestId = typeof data.request_id === "string" ? data.request_id : null;
+      sendToRuntime(
+        { type: "MONEY_IMPORT_SET_AUTO_SCHEDULE", schedule: data.schedule },
+        (response: Record<string, unknown> | undefined) => {
+          deps.windowPostMessage(
+            {
+              source: BRIDGE_SOURCE,
+              type: "MONEY_IMPORT_AUTO_SCHEDULE_ACK",
+              request_id: requestId,
+              ok: Boolean(response?.ok),
+              schedule: response?.schedule ?? null,
             },
             "*",
           );

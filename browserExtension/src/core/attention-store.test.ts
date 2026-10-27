@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createAttentionStore } from "./attention-store";
+import { DEFAULT_AUTO_SCHEDULE } from "./auto-schedule.js";
 import { DAY_MS, DEFAULT_STALE_AFTER_MS, HOUR_MS, MIN_STALE_AFTER_MS } from "./attention-policy";
 
 const NOW = Date.parse("2026-09-03T12:00:00.000Z");
@@ -26,6 +27,7 @@ describe("attention-store", () => {
       staleAfterMs: DEFAULT_STALE_AFTER_MS,
       lastOpenedAtMs: null,
       lastStartedAtMs: null,
+      autoSchedule: DEFAULT_AUTO_SCHEDULE,
       runRequests: {},
       requestTabs: {},
     });
@@ -65,6 +67,7 @@ describe("attention-store", () => {
       staleAfterMs: DEFAULT_STALE_AFTER_MS,
       lastOpenedAtMs: null,
       lastStartedAtMs: null,
+      autoSchedule: DEFAULT_AUTO_SCHEDULE,
       runRequests: { "alfa_web::person-1": NOW },
       requestTabs: {},
     });
@@ -124,6 +127,7 @@ describe("attention-store under concurrent changes", () => {
       staleAfterMs: 2 * DAY_MS,
       lastOpenedAtMs: null,
       lastStartedAtMs: null,
+      autoSchedule: DEFAULT_AUTO_SCHEDULE,
       runRequests: { "alfa_web::person-1": NOW + 1 },
       requestTabs: {},
     });
@@ -135,5 +139,22 @@ describe("attention-store per person", () => {
     const store = createAttentionStore(createStorage());
     await store.requestRun(TBANK, NOW);
     expect(await store.isRunRequested({ ...TBANK, payerPersonId: "person-2" }, NOW)).toBe(false);
+  });
+});
+
+describe("attention-store schedule", () => {
+  it("starts on the daily default and stores what the page sets, normalised", async () => {
+    const store = createAttentionStore(createStorage());
+    expect((await store.getState()).autoSchedule).toEqual({ kind: "days", every: 1 });
+    expect(await store.setAutoSchedule({ kind: "week", at: "end" })).toEqual({
+      kind: "week",
+      at: "end",
+    });
+    expect((await store.getState()).autoSchedule).toEqual({ kind: "week", at: "end" });
+    expect(await store.setAutoSchedule({ kind: "days", every: 90 })).toEqual({
+      kind: "days",
+      every: 30,
+    });
+    expect(await store.setAutoSchedule("weekly")).toEqual({ kind: "days", every: 1 });
   });
 });
