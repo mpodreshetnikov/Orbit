@@ -150,13 +150,17 @@ describe("runScheduledImport", () => {
       (call) => (call[2] as Record<string, unknown>).action === "create_session",
     );
     expect(createCalls.length).toBeGreaterThan(0);
-    for (const call of createCalls) {
-      // The batch keeps this meta as sent, so the history screen can tell these imports apart.
-      expect((call[2] as Record<string, unknown>).meta).toEqual({
+    // The batch keeps this meta as sent, so the history screen can tell these imports apart,
+    // and the server knows which failed window is worth a push.
+    expect(createCalls.map((call) => (call[2] as Record<string, unknown>).meta)).toEqual([
+      {
         parse_strategy: "full",
         unattended: true,
-      });
-    }
+        run_origin: "auto",
+        window_kind: "incremental",
+      },
+      { parse_strategy: "full", unattended: true, run_origin: "auto", window_kind: "backfill" },
+    ]);
     // The connector reads the strategy from the session; a server that does not echo it must
     // not leave the run on the fast one.
     const sessions = harness.connector.parse.mock.calls.map(
@@ -177,7 +181,10 @@ describe("runScheduledImport", () => {
     );
     expect(createCalls.length).toBeGreaterThan(0);
     for (const call of createCalls) {
-      expect((call[2] as Record<string, unknown>).meta).toEqual({ unattended: true });
+      expect((call[2] as Record<string, unknown>).meta).toEqual(
+        expect.objectContaining({ unattended: true }),
+      );
+      expect((call[2] as Record<string, unknown>).meta).not.toHaveProperty("parse_strategy");
     }
     const sessions = harness.connector.parse.mock.calls.map(
       (call) => (call[0] as { session?: Record<string, unknown> }).session,
@@ -656,8 +663,11 @@ describe("runScheduledImport", () => {
     const completions = harness.callEdge.mock.calls
       .map((call) => call[2] as Record<string, unknown>)
       .filter((payload) => payload.action === "complete_session");
-    // The session it opened and could not use is closed, not left running.
-    expect(completions.some((payload) => payload.status === "failed")).toBe(true);
+    // The session it opened and could not use is closed, not left running -- and said to be
+    // given back, so the server does not push a failure for it.
+    expect(
+      completions.some((payload) => payload.status === "failed" && payload.reason === "superseded"),
+    ).toBe(true);
   });
 
   it("marks its runs unattended so the app does not navigate on them", async () => {

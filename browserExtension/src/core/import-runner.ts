@@ -635,6 +635,10 @@ export async function runScheduledImport(
         ...parseStrategyFields,
         // Kept on the batch, so the history screen can say which imports nobody started.
         unattended: true,
+        // Read by the server when the window fails: only the sweep's own catch-up window
+        // sends the person a push about it.
+        run_origin: origin,
+        window_kind: kind,
       },
     });
 
@@ -674,7 +678,10 @@ export async function runScheduledImport(
     // window's own session is completed as failed rather than left running.
     const claimed = await claimSessionField(deps.sessionStore, session);
     if (!claimed) {
-      await tryCompleteSessionAsFailed(session, deps.callEdge);
+      // Given back, not failed: the person's own import is running and they are at the screen.
+      await tryCompleteSessionAsFailed(session, deps.callEdge, undefined, {
+        reason: "superseded",
+      });
       throw new Error("A session started by the person is in progress");
     }
     const sessionId = typeof session.session_id === "string" ? session.session_id : "";
@@ -786,6 +793,7 @@ export async function tryCompleteSessionAsFailed(
   session: Record<string, unknown>,
   callEdge: ImportRunnerDeps["callEdge"],
   error?: unknown,
+  options: { reason?: "superseded" } = {},
 ): Promise<void> {
   // The reason goes to the batch, where the report shows it: until it did, a failed run said
   // only "Failed", and finding out why took the extension's console open before the run.
@@ -804,6 +812,7 @@ export async function tryCompleteSessionAsFailed(
       batch_id: session.batch_id,
       status: "failed",
       ...(failureMessage ? { failure_message: failureMessage } : {}),
+      ...(options.reason ? { reason: options.reason } : {}),
     });
   } catch {
     // Ignore completion failures; original error is still reported to UI.

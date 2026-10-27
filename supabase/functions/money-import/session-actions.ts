@@ -11,6 +11,7 @@ import {
 import { buildImportContext, readRangeSelectionMeta } from "./range-window.ts";
 import type { AuthContext, GrantAuthContext, UserAuthContext } from "./types.ts";
 import { closeAbandonedSessions } from "./abandoned-sessions.ts";
+import { buildFailedRunNotification, shouldNotifyFailedRun } from "./failure-notification.ts";
 import type { MoneyImportRepository } from "./repository.ts";
 
 export const DEFAULT_SESSION_TTL_MINUTES = 15;
@@ -323,8 +324,10 @@ export async function completeSessionAction(
     return jsonResponse({ error: "session_id is required" }, 400);
   }
 
+  let session: Record<string, unknown> | null = auth.mode === "session" ? auth.session : null;
   if (auth.mode === "user") {
     const ownedSession = await deps.repository.getImportSessionForUser(sessionId, auth.userId);
+    session = ownedSession;
     if (!ownedSession) {
       await span?.end({
         status: "error",
@@ -346,10 +349,12 @@ export async function completeSessionAction(
     updated_at: nowIso,
   });
 
+  let batchStatusBefore: string | null = null;
   if (batchId) {
     const batch = await deps.repository.getImportBatch(batchId);
     if (batch) {
       const currentBatchStatus = normalizeText(batch.status);
+      batchStatusBefore = currentBatchStatus;
       const batchPatch: Record<string, unknown> = {};
 
       // A batch that has been applied stays applied. The extension completes a session as
@@ -377,12 +382,38 @@ export async function completeSessionAction(
       }
     }
   }
+  const notify =
+    finalStatus === "failed" &&
+    session !== null &&
+    shouldNotifyFailedRun({
+      session,
+      batchStatus: batchStatusBefore,
+      reason: normalizeText(body.reason),
+    });
+  if (notify && session && deps.repository.enqueueNotification) {
+    // Best-effort: the session is closed either way, and a push that could not be queued must
+    // not turn the completion into an error the extension would retry.
+    try {
+      await deps.repository.enqueueNotification(buildFailedRunNotification(session, nowIso));
+      deps.telemetry?.info("money_import_failed_run_notification_queued", {
+        session_id: sessionId,
+        source: normalizeText(session.source),
+      });
+    } catch (error) {
+      deps.telemetry?.warn("money_import_failed_run_notification_failed", {
+        session_id: sessionId,
+        error_message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   await span?.end({
     status: "ok",
     attrs: {
       session_id: sessionId,
       has_batch_id: Boolean(batchId),
       status: finalStatus,
+      failure_notified: notify,
     },
   });
 

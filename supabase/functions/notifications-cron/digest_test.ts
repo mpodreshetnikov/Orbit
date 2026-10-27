@@ -277,3 +277,28 @@ Deno.test(
     assertEquals(notifications[0].titlePrefix, null);
   },
 );
+
+Deno.test("mapDigestRowsToNotifications keeps a money import failure's source", () => {
+  const notifications = mapDigestRowsToNotifications(
+    [
+      {
+        id: "row-9",
+        type: "money_import_failed",
+        scheduled_at: "2026-10-26T06:00:00.000Z",
+        person_id: null,
+        payload_json: {
+          title: "Automatic import failed",
+          body: "T-Bank: the import did not go through.",
+          url: "/money/import",
+          source: "tbank_web",
+        },
+      },
+    ],
+    [],
+    "user-1",
+    false,
+  );
+  assertEquals(notifications.length, 1);
+  assertEquals(notifications[0].source, "tbank_web");
+  assertEquals(notifications[0].url, "/money/import");
+});
