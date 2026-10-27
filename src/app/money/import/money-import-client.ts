@@ -2,12 +2,33 @@
 
 import { createClient } from "@/lib/supabase";
 import { fetchEdgeFunctionWithTelemetry } from "@/lib/observability/edge-function-fetch";
-import type { MoneyImportSessionStatus } from "@/types";
+import type { MoneyImportBatch, MoneyImportSessionStatus } from "@/types";
 
 export function getFunctionUrl(functionName: string): string {
   const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
   if (!base) throw new Error("Supabase URL is not configured");
   return `${base}/functions/v1/${functionName}`;
+}
+
+export type RecentImport = Pick<MoneyImportBatch, "source" | "created_at" | "inserted_count">;
+
+/**
+ * The person's latest applied imports, newest first: the page's header line and each bank's last
+ * date. Empty when they cannot be read, since the page works without them.
+ */
+export async function loadRecentImports(personId: string): Promise<RecentImport[]> {
+  try {
+    const { data } = await createClient()
+      .from("money_import_batches")
+      .select("source, created_at, inserted_count")
+      .eq("payer_person_id", personId)
+      .eq("status", "completed")
+      .order("created_at", { ascending: false })
+      .limit(50);
+    return (data ?? []) as RecentImport[];
+  } catch {
+    return [];
+  }
 }
 
 export async function getAccessToken(): Promise<string> {

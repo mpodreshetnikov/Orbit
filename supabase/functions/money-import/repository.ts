@@ -30,6 +30,13 @@ import type {
  * parenthesis or dot in the data be read as filter grammar. Backslash escapes itself and the
  * quote, so it has to be escaped first.
  */
+
+/** What an account the import opens for a bank is called until its owner renames it. */
+const IMPORT_ACCOUNT_LABELS: Record<string, string> = {
+  tbank: "T-Bank",
+  alfa: "Альфа-Банк",
+};
+
 export function postgrestFilterValue(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
@@ -776,7 +783,7 @@ export function createSupabaseMoneyImportRepository(
 
     const { data: accounts, error: accountsError } = await getAdminClient()
       .from("money_accounts")
-      .select("id")
+      .select("id, created_at")
       .eq("owner_person_id", payerPersonId)
       .eq("source", sourceForAccounts);
 
@@ -784,12 +791,17 @@ export function createSupabaseMoneyImportRepository(
       throw new Error(accountsError.message || "Failed to resolve money account");
     }
 
-    const accountIds = (accounts ?? [])
-      .map((item) => normalizeText((item as Record<string, unknown>).id))
+    // Oldest first, so the fallback below is the same account on every import.
+    const accountIds = [...(accounts ?? [])]
+      .map((item) => item as Record<string, unknown>)
+      .sort((a, b) => String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")))
+      .map((item) => normalizeText(item.id))
       .filter((value): value is string => Boolean(value));
 
+    // Nobody is asked which account an import goes to (T-261026-2ew): a bank imported for the
+    // first time gets its account here.
     if (accountIds.length === 0) {
-      throw new Error(`No money account found for source ${sourceForAccounts}`);
+      return await createImportAccount(payerPersonId, sourceForAccounts);
     }
 
     const accountHint = extractAccountHintFromRow(row);
@@ -822,8 +834,29 @@ export function createSupabaseMoneyImportRepository(
       return normalizedDefaultAccountId;
     }
 
-    if (accountIds.length === 1) return accountIds[0];
-    throw new Error("account_id is required and could not be resolved");
+    // A card no account knows yet lands on the source's first account; the import's page can
+    // move that card, with its operations, to another one.
+    return accountIds[0];
+  }
+
+  async function createImportAccount(payerPersonId: string, source: string): Promise<string> {
+    const { data, error } = await getAdminClient()
+      .from("money_accounts")
+      .insert({
+        owner_person_id: payerPersonId,
+        source,
+        account_kind: "debit",
+        account_label: IMPORT_ACCOUNT_LABELS[source] ?? source,
+        currency: "RUB",
+      })
+      .select("id")
+      .single();
+
+    const accountId = normalizeText((data as Record<string, unknown> | null)?.id);
+    if (error || !accountId) {
+      throw new Error(error?.message || `Failed to create a money account for source ${source}`);
+    }
+    return accountId;
   }
 
   /**

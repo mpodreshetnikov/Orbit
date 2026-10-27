@@ -35,6 +35,9 @@ const light = {
   completedText: "#334155", // slate-700
   completedSurface: "rgba(100, 116, 139, 0.1)", // slate-500/10
   completedBorder: "rgba(100, 116, 139, 0.2)", // slate-500/20
+  infoText: "#1d4ed8", // blue-700
+  infoSurface: "#eff6ff", // blue-50
+  infoBorder: "#bfdbfe", // blue-200
   rising: "#f97316", // orange-500, a measurement going up
   falling: "#3b82f6", // blue-500, a measurement going down
 };
@@ -68,6 +71,9 @@ const dark: Palette = {
   completedText: "#94a3b8", // slate-400
   completedSurface: "rgba(100, 116, 139, 0.1)",
   completedBorder: "rgba(100, 116, 139, 0.2)",
+  infoText: "#93c5fd", // blue-300
+  infoSurface: "rgba(59, 130, 246, 0.1)",
+  infoBorder: "rgba(59, 130, 246, 0.25)",
   rising: "#f97316",
   falling: "#3b82f6",
 };
