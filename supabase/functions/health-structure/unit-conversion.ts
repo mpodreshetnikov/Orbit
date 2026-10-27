@@ -56,6 +56,11 @@ const UNIT_ALIASES: Record<string, string> = {
   "мме/л": "mIU/L",
   "ммє/л": "mIU/L",
   "мед/л": "mIU/L",
+  "мкме/мл": "uIU/mL",
+  "мкмед/мл": "uIU/mL",
+  "мэкв/л": "mEq/L",
+  "л/л": "L/L",
+  "тыс/мкл": "10^3/uL",
   пг: "pg",
   фл: "fL",
   мм: "mm",
@@ -136,7 +141,7 @@ function unitComparisonKey(unit: string): string {
  * It can when the entry converts from that unit or keeps its values in it. It cannot when both the
  * printed unit and the entry's own are units this module knows and they differ with no conversion
  * between them: PDW printed in fL is not the PDW kept in %, and filing 16.1 fL as 16.1 % puts a
- * number into a history it cannot be compared with. An unfamiliar spelling (`ед.`, `л/л`) proves
+ * number into a history it cannot be compared with. An unfamiliar spelling (`ед.`, `у.е.`) proves
  * nothing either way, so it fits, as it always did.
  */
 export function unitFitsEntry(

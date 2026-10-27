@@ -67,6 +67,76 @@ export function storagePathForPage(
   return `${personId}/${recordId}/${index + 1}-${filename.replace(/[^a-zA-Z0-9.-]/g, "_")}`;
 }
 
+/** A page that is the same file as one already brought in, by the SHA-256 its client gave. */
+export interface DuplicatePage {
+  filename: string;
+  /** The other page: in an existing record, or earlier in the same document. */
+  record_id: string | null;
+  record_title: string | null;
+  record_status: string | null;
+  record_date: string | null;
+  page_filename: string;
+}
+
+/**
+ * The pages whose content this person already has, or that repeat within the document.
+ *
+ * Only a hash the client gave can be compared; a page without one, or a page uploaded before
+ * hashes were kept, never matches. A removed record does not count: bringing a document back in
+ * after setting it aside is a fresh start, not a duplicate.
+ */
+export async function findDuplicatePages(
+  supabase: SupabaseClient<Database>,
+  personId: string,
+  pages: Array<{ filename: string; sha256?: string | null }>,
+): Promise<DuplicatePage[]> {
+  const duplicates: DuplicatePage[] = [];
+  const seen = new Map<string, string>();
+  for (const page of pages) {
+    if (!page.sha256) continue;
+    const earlier = seen.get(page.sha256);
+    if (earlier) {
+      duplicates.push({
+        filename: page.filename,
+        record_id: null,
+        record_title: null,
+        record_status: null,
+        record_date: null,
+        page_filename: earlier,
+      });
+    } else {
+      seen.set(page.sha256, page.filename);
+    }
+  }
+  if (seen.size === 0) return duplicates;
+
+  const { data, error } = await supabase
+    .from("record_attachments")
+    .select(
+      "content_sha256, original_filename, medical_records!inner(id, title, status, record_date, person_id)",
+    )
+    .in("content_sha256", [...seen.keys()])
+    .eq("medical_records.person_id", personId)
+    .neq("medical_records.status", "removed");
+  if (error) throw new Error(`Failed to look for duplicate pages: ${error.message}`);
+
+  for (const row of (data ?? []) as unknown as Array<{
+    content_sha256: string;
+    original_filename: string;
+    medical_records: { id: string; title: string; status: string; record_date: string | null };
+  }>) {
+    duplicates.push({
+      filename: seen.get(row.content_sha256) ?? row.original_filename,
+      record_id: row.medical_records.id,
+      record_title: row.medical_records.title,
+      record_status: row.medical_records.status,
+      record_date: row.medical_records.record_date,
+      page_filename: row.original_filename,
+    });
+  }
+  return duplicates;
+}
+
 /**
  * A draft record with one attachment row per page, and a signed upload link for each.
  *
@@ -82,7 +152,7 @@ export async function createDraftRecord(
     recordType: Database["public"]["Enums"]["record_type"];
     recordDate: string | null;
     title: string;
-    pages: Array<{ filename: string; mime_type: string }>;
+    pages: Array<{ filename: string; mime_type: string; sha256?: string | null }>;
   },
 ): Promise<{ recordId: string; uploads: PageUpload[] }> {
   const { data: record, error } = await supabase
@@ -108,6 +178,7 @@ export async function createDraftRecord(
     mime_type: page.mime_type,
     original_filename: page.filename,
     sort_order: index,
+    content_sha256: page.sha256 ?? null,
   }));
   const { data: attachments, error: attachmentError } = await supabase
     .from("record_attachments")
