@@ -5,6 +5,7 @@ import {
   convertValueWithConfig,
   evaluateFormula,
   getUnitConfig,
+  unitFitsEntry,
 } from "./unit-conversion.ts";
 import type { ObservationCatalogItem } from "./types.ts";
 
@@ -206,4 +207,58 @@ Deno.test("a folded unit converts the reference range with the value", () => {
     ref_range_low_canonical: 147.6,
     ref_range_high_canonical: 664.2,
   });
+});
+
+Deno.test("hematocrit printed as a fraction reaches the percent the entry keeps", () => {
+  const hct: ObservationCatalogItem = {
+    id: "obs-hct",
+    obs_code: "hct",
+    name_ru: "Гематокрит",
+    name_en: "Hematocrit",
+    canonical_unit: "%",
+    synonyms_ru: [],
+    synonyms_en: [],
+    accepted_units: { "L/L": { factor_to_canonical: 100 } },
+  };
+  assertEquals(convertToCanonical(0.42, "л/л", hct), { value_canonical: 42, unit_canonical: "%" });
+});
+
+Deno.test("TSH printed in мкМЕ/мл is the same number in mIU/L, and fits the entry", () => {
+  const tsh: ObservationCatalogItem = {
+    id: "obs-tsh",
+    obs_code: "tsh",
+    name_ru: "ТТГ",
+    name_en: "TSH",
+    canonical_unit: "mIU/L",
+    synonyms_ru: [],
+    synonyms_en: [],
+    accepted_units: {
+      "mIU/L": { factor_to_canonical: 1 },
+      "uIU/mL": { factor_to_canonical: 1 },
+    },
+  };
+  assertEquals(unitFitsEntry(tsh, "мкМЕ/мл"), true);
+  assertEquals(convertToCanonical(2.1, "мкМЕ/мл", tsh), {
+    value_canonical: 2.1,
+    unit_canonical: "mIU/L",
+  });
+});
+
+Deno.test("a count printed per microlitre does not slip into a count kept per 10^12/L", () => {
+  const rbc = {
+    accepted_units: { "10^6/uL": { factor_to_canonical: 1 } },
+    canonical_unit: "10^12/L",
+  };
+  assertEquals(unitFitsEntry(rbc, "тыс/мкл"), false);
+  assertEquals(
+    unitFitsEntry(
+      {
+        ...rbc,
+        canonical_unit: "10^9/L",
+        accepted_units: { "10^3/uL": { factor_to_canonical: 1 } },
+      },
+      "тыс/мкл",
+    ),
+    true,
+  );
 });

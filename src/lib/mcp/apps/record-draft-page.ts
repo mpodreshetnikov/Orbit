@@ -369,8 +369,8 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
     var unrecognised = draft.observations.filter(function (o) { return !o.recognised; }).length;
     if (!proposal && unrecognised && (!decision || decision.kind === "error")) {
       card.appendChild(el("div", "warning", unrecognised === 1
-        ? "1 показатель не распознан каталогом: при одобрении он не попадёт в карту."
-        : unrecognised + " " + plural(unrecognised, "показатель не распознан", "показателя не распознаны", "показателей не распознаны") + " каталогом: при одобрении они не попадут в карту."));
+        ? "1 показатель не распознан каталогом: он сохранится в записи, но не попадёт в историю показателей."
+        : unrecognised + " " + plural(unrecognised, "показатель не распознан", "показателя не распознаны", "показателей не распознаны") + " каталогом: они сохранятся в записи, но не попадут в историю показателей."));
     }
 
     card.appendChild(renderFooter());
@@ -476,7 +476,7 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
       var say = el("button", "link", "Попросить Claude");
       say.type = "button";
       say.addEventListener("click", function () {
-        request("ui/message", { role: "user", content: [{ type: "text", text: "Одобри черновик записи «" + draft.title + "» (record_id " + draft.record_id + ")." }] }, 30000).catch(function () {});
+        tellChat("Одобри черновик записи «" + draft.title + "» (record_id " + draft.record_id + ").");
       });
       links.appendChild(say);
     }
@@ -555,7 +555,17 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
   // it reaches the chat after the context that explains it.
   function tellChat(textValue) {
     if (!hostCaps.message) return;
-    request("ui/message", { role: "user", content: [{ type: "text", text: textValue }] }, 30000).catch(function () {});
+    leaveFullscreen().then(function () {
+      request("ui/message", { role: "user", content: [{ type: "text", text: textValue }] }, 30000).catch(function () {});
+    });
+  }
+  // On the phone a chat message sent from full screen opens the chat in a second sheet over the
+  // card (2026-10-27). Back inline first, the reply lands in the chat the owner is already in.
+  function leaveFullscreen() {
+    if (!isFullscreen()) return Promise.resolve();
+    return request("ui/request-display-mode", { mode: "inline" }, 10000).then(function (result) {
+      applyContext({ displayMode: (result && result.mode) || "inline" });
+    }, function () {});
   }
 
   function settle(action, result) {
@@ -579,7 +589,7 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
     } else if (action === "approve") {
       var outcome = (result && result.structuredContent) || {};
       var notes = [];
-      if (outcome.droppedUnmatchedObservations) notes.push("Нераспознанных показателей отброшено: " + outcome.droppedUnmatchedObservations + ".");
+      if (outcome.keptUnmatchedObservations) notes.push("Нераспознанные показатели сохранены в записи, но не в истории: " + outcome.keptUnmatchedObservations + ".");
       if (outcome.proposalsMaterialized) notes.push("Новых или связанных диагнозов: " + outcome.proposalsMaterialized + ".");
       if (outcome.checkupsCompleted) notes.push("Отмечено чекапов: " + outcome.checkupsCompleted + ".");
       if (outcome.closuresLeftPending) notes.push("Закрытий осталось на подтверждении: " + outcome.closuresLeftPending + ".");

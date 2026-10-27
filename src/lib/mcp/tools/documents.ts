@@ -6,6 +6,7 @@ import {
   activateMedicalRecord,
   createDraftRecord,
   dismissConditionClosure,
+  findDuplicatePages,
   findMissingPages,
   getIngestCandidates,
   getIngestableRecord,
@@ -16,6 +17,7 @@ import {
   removeRecordDraft,
   signPageUploads,
   suggestReconciliation,
+  type DuplicatePage,
   type PageUpload,
 } from "../health/documents";
 import {
@@ -129,6 +131,13 @@ function formatUploads(uploads: PageUpload[]): string {
     .join("\n");
 }
 
+function formatDuplicate(duplicate: DuplicatePage): string {
+  if (!duplicate.record_id) {
+    return `- ${duplicate.filename} is the same file as ${duplicate.page_filename} in this document.`;
+  }
+  return `- ${duplicate.filename} is ${duplicate.page_filename} of "${duplicate.record_title}"${duplicate.record_date ? ` (${duplicate.record_date})` : ""}, ${duplicate.record_status}, record_id ${duplicate.record_id}.`;
+}
+
 function formatSuggestion(item: ReconciliationSuggestion): string {
   const id = item.kind === "condition" ? `condition_id ${item.id}` : `checkup_item_id ${item.id}`;
   return `- ${item.kind}: ${item.label} -- ${item.reason} (${id})`;
@@ -222,11 +231,24 @@ export function registerDocumentTools(server: McpToolServer): void {
                 .min(1)
                 .describe("The file's own name, e.g. the one the user uploaded."),
               mime_type: z.enum(ALLOWED_PAGE_MIME_TYPES),
+              sha256: z
+                .string()
+                .regex(/^[0-9a-fA-F]{64}$/)
+                .optional()
+                .describe(
+                  "The file's SHA-256 in hex (e.g. from sha256sum). With it the server reports a document this person already has; without it the page is not compared.",
+                ),
             }),
           )
           .min(1)
           .max(30)
           .describe("The files of the document, in page order."),
+        allow_duplicate: z
+          .boolean()
+          .optional()
+          .describe(
+            "true to bring the pages in although the person already has the same files. Only when the user wants a second copy.",
+          ),
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
@@ -236,15 +258,34 @@ export function registerDocumentTools(server: McpToolServer): void {
       record_type: (typeof RECORD_TYPES)[number];
       title: string;
       record_date?: string;
-      pages: Array<{ filename: string; mime_type: (typeof ALLOWED_PAGE_MIME_TYPES)[number] }>;
+      pages: Array<{
+        filename: string;
+        mime_type: (typeof ALLOWED_PAGE_MIME_TYPES)[number];
+        sha256?: string;
+      }>;
+      allow_duplicate?: boolean;
     }>(async (supabase, person, args, auth) => {
+      const pages = args.pages.map((page) => ({ ...page, sha256: page.sha256?.toLowerCase() }));
+      if (!args.allow_duplicate) {
+        const duplicates = await findDuplicatePages(supabase, person.id, pages);
+        if (duplicates.length > 0) {
+          return fail(
+            [
+              `Not created: ${duplicates.length} page(s) are files ${person.name} already has.`,
+              ...duplicates.map(formatDuplicate),
+              "If this is that document, do not bring it in again; a draft is continued with get_upload_links and ingest_medical_document. If the user wants a second copy, call again with allow_duplicate: true.",
+            ].join("\n"),
+            { person_id: person.id, duplicates },
+          );
+        }
+      }
       const { recordId, uploads } = await createDraftRecord(supabase, {
         personId: person.id,
         userId: auth.authUserId,
         recordType: args.record_type,
         recordDate: args.record_date ?? null,
         title: args.title.trim(),
-        pages: args.pages,
+        pages,
       });
 
       return ok(
@@ -367,7 +408,7 @@ export function registerDocumentTools(server: McpToolServer): void {
         "Print names and units as written. Put a finding the document says is NOT there (e.g. 'конкременты не выявлены') in extraction.asserted_absences, never in findings.",
         "Before submitting findings or absences, look up each finding type and body site with search_catalog_entries (catalogs finding_type and body_site). The server codes them from their labels, and a label no entry carries stays uncoded: it cannot be tracked over time, and uncoded findings at different sites merge into one history. When entries are missing, add them first with create_catalog_entries (several in one call), putting the document's wording in their Russian synonyms; when one exists under another wording, add that wording with add_catalog_synonyms. One finding per site.",
         "Every submission carries reconciliation, decided now and not after approval: the conditions this document resolves, the findings it settles and the checkups it completes (ids from get_ingest_candidates), the server's suggestions you rule out in not_applicable with a reason, or nothing_to_reconcile: true when it closes nothing. A submission without that decision, or that leaves a server suggestion unruled, is refused before anything is stored, and the refusal lists what the server thinks the document may close.",
-        "The record moves to review, not to the chart. The reply lists what was stored, what was refused and why, observations the catalogue did not recognise (dropped at approval unless added with create_catalog_entries or add_catalog_synonyms and the document re-ingested), and closures awaiting confirmation. Re-submitting replaces the previous submission for this record.",
+        "The record moves to review, not to the chart. The reply lists what was stored, what was refused and why, observations the catalogue did not recognise (kept on the record at approval but out of every history; to track them, add them with create_catalog_entries or add_catalog_synonyms and re-ingest before approving), and closures awaiting confirmation. Re-submitting replaces the previous submission for this record.",
       ].join(" "),
       inputSchema: z.object({
         record_id: uuidSchema,
@@ -546,7 +587,7 @@ export function registerDocumentTools(server: McpToolServer): void {
       ];
       if (unmatched.length > 0) {
         lines.push(
-          `Not recognised by the observation catalogue (dropped at approval unless added with create_catalog_entries, all of them in one call, or given as a wording to an existing entry with add_catalog_synonyms, and re-ingested):`,
+          `Not recognised by the observation catalogue (kept on the record at approval, but out of every history; to track them, add them with create_catalog_entries, all of them in one call, or give the wording to an existing entry with add_catalog_synonyms, and re-ingest before approving):`,
           ...unmatched.map((row) =>
             `- ${String(row.obs_name)} ${String(row.value_text ?? "")} ${String(row.unit ?? "")}`.trimEnd(),
           ),
@@ -751,10 +792,11 @@ export function registerDocumentTools(server: McpToolServer): void {
     {
       title: "Approve medical record",
       description:
-        "Approve an ingested record, as the owner's Approve button in the app does: unrecognised observations are dropped, proposed diagnoses become conditions, the record's data goes on the chart, closures awaiting confirmation are confirmed unless the measurement they cite no longer holds, and suggested checkup completions are recorded. Only after the owner has agreed to what the record says.",
+        "Approve an ingested record, as the owner's Approve button in the app does: unrecognised observations stay on the record but outside every history, proposed diagnoses become conditions, the record's data goes on the chart, closures awaiting confirmation are confirmed unless the measurement they cite no longer holds, and suggested checkup completions are recorded. Only after the owner has agreed to what the record says.",
       inputSchema: z.object({ record_id: uuidSchema }),
-      // Approval deletes the observations nobody matched and cannot be undone here, so a client
-      // asks before it runs rather than letting an agent approve on its own initiative.
+      // Approval creates and closes conditions and puts the record on the chart, none of which
+      // this surface can undo, so a client asks before it runs rather than letting an agent
+      // approve on its own initiative.
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
     },
     withUserClient<{ record_id: string }>(async (supabase, args, auth) => {
@@ -783,8 +825,10 @@ export function registerDocumentTools(server: McpToolServer): void {
       });
 
       const lines = [`Approved "${record.title}"; it is on the chart now.`];
-      if (outcome.droppedUnmatchedObservations > 0) {
-        lines.push(`Dropped ${outcome.droppedUnmatchedObservations} unrecognised observation(s).`);
+      if (outcome.keptUnmatchedObservations > 0) {
+        lines.push(
+          `Kept ${outcome.keptUnmatchedObservations} unrecognised observation(s) on the record, outside every history.`,
+        );
       }
       lines.push(
         `New or linked conditions: ${outcome.proposalsMaterialized}${outcome.proposalsSkipped > 0 ? ` (${outcome.proposalsSkipped} proposal(s) skipped: no name to match on)` : ""}. Diagnosis mentions confirmed: ${outcome.mentionsConfirmed}. Checkups marked done: ${outcome.checkupsCompleted}.`,

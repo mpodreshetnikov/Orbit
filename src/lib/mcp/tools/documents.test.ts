@@ -18,6 +18,7 @@ const documents = vi.hoisted(() => ({
   activateMedicalRecord: vi.fn(),
   createDraftRecord: vi.fn(),
   dismissConditionClosure: vi.fn(),
+  findDuplicatePages: vi.fn(),
   findMissingPages: vi.fn(),
   getIngestCandidates: vi.fn(),
   getIngestableRecord: vi.fn(),
@@ -131,6 +132,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   documents.getIngestableRecord.mockResolvedValue(RECORD);
   documents.findMissingPages.mockResolvedValue([]);
+  documents.findDuplicatePages.mockResolvedValue([]);
   documents.getRecordExtractionIssues.mockResolvedValue([]);
   documents.suggestReconciliation.mockResolvedValue({ suggestions: [], alsoDue: [] });
   records.getRecordObservations.mockResolvedValue([]);
@@ -171,6 +173,55 @@ describe("create_medical_record", () => {
     expect(result.content[0].text).toContain(
       'curl -sS -X PUT -H "Content-Type: image/jpeg" --data-binary @"<local path to page1.jpg>" "https://orbit.test/upload?token=t"',
     );
+  });
+});
+
+describe("create_medical_record duplicates", () => {
+  const HASH = "A".repeat(64);
+  const call = (extra: Record<string, unknown> = {}) => ({
+    record_type: "lab",
+    title: "Витамины",
+    pages: [{ filename: "scan.pdf", mime_type: "application/pdf", sha256: HASH }],
+    ...extra,
+  });
+
+  it("refuses a file the person already has, naming the record it is in", async () => {
+    documents.findDuplicatePages.mockResolvedValue([
+      {
+        filename: "scan.pdf",
+        record_id: RECORD_ID,
+        record_title: "Витамины",
+        record_status: "active",
+        record_date: "2025-10-27",
+        page_filename: "vitamins.pdf",
+      },
+    ]);
+    const result = await (await handlers()).get("create_medical_record")!(call(), ctx);
+
+    expect(result.isError).toBe(true);
+    expect(documents.createDraftRecord).not.toHaveBeenCalled();
+    // The hash is compared lower-cased, as the column stores it.
+    expect(documents.findDuplicatePages.mock.calls[0][2]).toEqual([
+      expect.objectContaining({ sha256: "a".repeat(64) }),
+    ]);
+    expect(result.content[0].text).toContain(
+      `scan.pdf is vitamins.pdf of "Витамины" (2025-10-27), active, record_id ${RECORD_ID}.`,
+    );
+    expect(result.content[0].text).toContain("allow_duplicate: true");
+  });
+
+  it("creates the record anyway when the user wants a second copy", async () => {
+    documents.createDraftRecord.mockResolvedValue({ recordId: RECORD_ID, uploads: [] });
+    const result = await (await handlers()).get("create_medical_record")!(
+      call({ allow_duplicate: true }),
+      ctx,
+    );
+
+    expect(result.isError).toBeUndefined();
+    expect(documents.findDuplicatePages).not.toHaveBeenCalled();
+    expect(documents.createDraftRecord.mock.calls[0][1].pages).toEqual([
+      { filename: "scan.pdf", mime_type: "application/pdf", sha256: "a".repeat(64) },
+    ]);
   });
 });
 
@@ -452,7 +503,7 @@ describe("activate_medical_record", () => {
   it("reports closures it left pending", async () => {
     documents.getIngestableRecord.mockResolvedValue({ ...RECORD, status: "structure_review" });
     documents.activateMedicalRecord.mockResolvedValue({
-      droppedUnmatchedObservations: 1,
+      keptUnmatchedObservations: 1,
       proposalsMaterialized: 0,
       proposalsSkipped: 0,
       mentionsConfirmed: 0,
@@ -463,7 +514,9 @@ describe("activate_medical_record", () => {
       { record_id: RECORD_ID },
       ctx,
     );
-    expect(result.content[0].text).toContain("Dropped 1 unrecognised observation(s).");
+    expect(result.content[0].text).toContain(
+      "Kept 1 unrecognised observation(s) on the record, outside every history.",
+    );
     expect(result.content[0].text).toContain("1 closure(s) left awaiting confirmation");
   });
 });
