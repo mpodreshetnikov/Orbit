@@ -491,6 +491,15 @@ describe("RECORD_DRAFT_HTML", () => {
     }
   });
 
+  it("leaves full screen before it writes to the chat", () => {
+    // Sent from full screen, the message opens the chat in a sheet over the card.
+    expect(RECORD_DRAFT_HTML).toContain(
+      'leaveFullscreen().then(function () {\n      request("ui/message"',
+    );
+    expect(RECORD_DRAFT_HTML).toContain('request("ui/request-display-mode", { mode: "inline" }');
+    expect(RECORD_DRAFT_HTML.match(/request\("ui\/message"/g)).toHaveLength(1);
+  });
+
   it("holds the chat message for a queue until the owner is through it", () => {
     expect(RECORD_DRAFT_HTML).toContain("Разобрал записи в карточке: ");
     expect(RECORD_DRAFT_HTML).toContain('if (!noteOutcome("approved")) tellChat(');

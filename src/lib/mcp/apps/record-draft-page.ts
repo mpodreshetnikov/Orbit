@@ -476,7 +476,7 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
       var say = el("button", "link", "Попросить Claude");
       say.type = "button";
       say.addEventListener("click", function () {
-        request("ui/message", { role: "user", content: [{ type: "text", text: "Одобри черновик записи «" + draft.title + "» (record_id " + draft.record_id + ")." }] }, 30000).catch(function () {});
+        tellChat("Одобри черновик записи «" + draft.title + "» (record_id " + draft.record_id + ").");
       });
       links.appendChild(say);
     }
@@ -555,7 +555,17 @@ export const RECORD_DRAFT_HTML = `<!doctype html>
   // it reaches the chat after the context that explains it.
   function tellChat(textValue) {
     if (!hostCaps.message) return;
-    request("ui/message", { role: "user", content: [{ type: "text", text: textValue }] }, 30000).catch(function () {});
+    leaveFullscreen().then(function () {
+      request("ui/message", { role: "user", content: [{ type: "text", text: textValue }] }, 30000).catch(function () {});
+    });
+  }
+  // On the phone a chat message sent from full screen opens the chat in a second sheet over the
+  // card (2026-10-27). Back inline first, the reply lands in the chat the owner is already in.
+  function leaveFullscreen() {
+    if (!isFullscreen()) return Promise.resolve();
+    return request("ui/request-display-mode", { mode: "inline" }, 10000).then(function (result) {
+      applyContext({ displayMode: (result && result.mode) || "inline" });
+    }, function () {});
   }
 
   function settle(action, result) {
