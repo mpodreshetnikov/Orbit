@@ -115,7 +115,10 @@
     "records": "Records",
     "addRecord": "Add Record",
     "noRecords": "No medical records yet",
-    "noRecordsDescription": "Upload your first medical record to get started."
+    "noRecordsDescription": "Upload your first medical record to get started.",
+    "documents": "Documents",
+    "allDocuments": "All documents",
+    "noDocuments": "No documents yet. They are added through Claude or on the web."
   },
   "money": {
     "title": "Money",
@@ -946,7 +949,10 @@
       "keywords": "Keywords",
       "observations": "Observations",
       "ocrText": "Extracted Text (OCR)",
-      "noOcrText": "No text extracted"
+      "noOcrText": "No text extracted",
+      "summary": "Summary",
+      "findings": "Findings",
+      "openAttachment": "Open attachment"
     },
     "confirm": {
       "removeTitle": "Remove Record",

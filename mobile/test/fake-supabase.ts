@@ -271,6 +271,15 @@ export const supabase = {
     invoke: (name: string, options: { body?: Record<string, unknown> } = {}) =>
       supabase.rpc(name, options.body),
   },
+  /** A bucket's signed links, at a test host; `fail("storage")` refuses them. */
+  storage: {
+    from: (bucket: string) => ({
+      createSignedUrl: async (path: string) =>
+        db.failing.has("storage")
+          ? { data: null, error: { message: "storage is unavailable" } }
+          : { data: { signedUrl: `https://files.test/${bucket}/${path}` }, error: null },
+    }),
+  },
   auth: {
     getSession: async () => ({ data: { session }, error: null }),
     onAuthStateChange: (listener: (event: string, session: Session | null) => void) => {
