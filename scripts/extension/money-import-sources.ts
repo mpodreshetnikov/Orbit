@@ -19,9 +19,16 @@ const MONEY_IMPORT_SOURCE_DEFINITIONS: MoneyImportSourceDefinition[] = [
     accountSource: "tbank",
     displayName: "T-Bank Web",
     targetUrl: "https://www.tbank.ru/mybank/operations/",
-    tabUrlPatterns: ["https://www.tbank.ru/*", "https://*.tbank.ru/*"],
+    // The bank's mirror, tbank-online.com, beside it: the extension's own copy of this list says
+    // why. The build takes the extension's host permissions from these patterns.
+    tabUrlPatterns: [
+      "https://www.tbank.ru/*",
+      "https://*.tbank.ru/*",
+      "https://www.tbank-online.com/*",
+      "https://*.tbank-online.com/*",
+    ],
     tabUrlContains: "/mybank/operations",
-    apiUrlRegex: "https://(?:www\\.)?tbank\\.ru/api/common/v1/",
+    apiUrlRegex: "https://(?:www\\.)?tbank(?:\\.ru|-online\\.com)/api/common/v1/",
   },
   {
     sourceId: "alfa_web",
