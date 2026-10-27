@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MoneyImportGrants } from "./import-grants";
@@ -167,6 +167,17 @@ describe("MoneyImportGrants", () => {
       "nevermoney.importGrantNeverUsed · money.importBankTbankmoney.importGrantRevoke",
       "unknown-bankmoney.importGrantNeverUsed · sber_webmoney.importGrantRevoke",
       "expiredmoney.importGrantExpired · money.importBankTbankmoney.importGrantRevoke",
+    ]);
+
+    // Revoked keys wait folded under one line until asked for.
+    expect(screen.queryByTestId("money-import-grant-revoked-list")).not.toBeInTheDocument();
+    const toggle = screen.getByRole("button", { name: /money\.importGrantRevokedToggle/ });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+    const revoked = within(screen.getByTestId("money-import-grant-revoked-list")).getAllByRole(
+      "listitem",
+    );
+    expect(revoked.map((row) => row.textContent)).toEqual([
       "revokedmoney.importGrantRevoked · money.importBankTbank",
     ]);
     vi.useRealTimers();

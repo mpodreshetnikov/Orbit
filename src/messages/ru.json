@@ -601,6 +601,7 @@
     "importGrantRevoke": "Отозвать",
     "importGrantRevokeFailed": "Не удалось отозвать ключ.",
     "importGrantRevoked": "Отозван",
+    "importGrantRevokedToggle": "Отозванные ключи: {count}",
     "importGrantSourcesRequired": "Выберите хотя бы один источник.",
     "importGrantTokenShownOnce": "Ключ показывается один раз — в базе хранится только его хеш. Передайте его расширению сейчас или скопируйте.",
     "importGrantsDescription": "Ключ даёт расширению на устройстве импортировать само. Отзовите ключ, если устройство больше не ваше.",

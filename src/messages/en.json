@@ -601,6 +601,7 @@
     "importGrantRevoke": "Revoke",
     "importGrantRevokeFailed": "Could not revoke the key.",
     "importGrantRevoked": "Revoked",
+    "importGrantRevokedToggle": "Revoked keys: {count}",
     "importGrantSourcesRequired": "Pick at least one source.",
     "importGrantTokenShownOnce": "The key is shown once — only its hash is stored. Hand it to the extension now, or copy it.",
     "importGrantsDescription": "A key lets the extension on a device import by itself. Revoke it when the device is no longer yours.",
