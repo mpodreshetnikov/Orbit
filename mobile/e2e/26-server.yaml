@@ -1,0 +1,17 @@
+# The server screen, as settings open it: the address in use, ready to change, and back.
+appId: host.exp.Exponent
+name: Сервер
+---
+- runFlow: setup/fresh.yaml
+- openLink: exp://127.0.0.1:8081/--/today/settings
+- tapOn: { text: "Open", optional: true }
+- extendedWaitUntil: { visible: "ВЫБРАТЬ ПЕРСОНУ", timeout: 60000 }
+# The button sits just above sign-out at the end of settings: scrolling to sign-out brings it out
+# from under the tab bar, which a scroll to the button itself can leave it beneath.
+- scrollUntilVisible: { element: "Выйти", direction: DOWN }
+- takeScreenshot: server-01-settings
+- tapOn: "Сменить сервер"
+- extendedWaitUntil: { visible: "Сервер Orbit", timeout: 10000 }
+- takeScreenshot: server-02-screen
+- tapOn: "Отмена"
+- extendedWaitUntil: { visible: "Сменить сервер", timeout: 10000 }

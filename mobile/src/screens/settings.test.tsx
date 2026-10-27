@@ -156,10 +156,11 @@ describe("the settings", () => {
     expect(screen.getByDisplayValue("Asia/Tbilisi")).toBeOnTheScreen();
   });
 
-  it("keeps sign-out when the settings cannot load", async () => {
+  it("keeps sign-out and the server choice when the settings cannot load", async () => {
     fail("notification_routing");
     await renderScreens(routes, "/today/settings");
     expect(await screen.findByText("notification_routing is unavailable")).toBeOnTheScreen();
+    expect(screen.getByText("Сменить сервер")).toBeOnTheScreen();
     db.failing.clear();
     await fireEvent.press(screen.getByText("Повторить"));
     expect(await screen.findByText("ВЫБРАТЬ ПЕРСОНУ")).toBeOnTheScreen();

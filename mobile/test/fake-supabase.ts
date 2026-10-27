@@ -260,6 +260,11 @@ class Query {
   }
 }
 
+/** Leaving the server in use signs out of it, as the real one does even when it does not answer. */
+export async function leaveInstance() {
+  setSession(null);
+}
+
 export const supabase = {
   from: (table: string) => new Query(table),
   rpc: async (name: string, args: Record<string, unknown> = {}) => {

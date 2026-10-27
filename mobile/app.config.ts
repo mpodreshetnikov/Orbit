@@ -1,11 +1,9 @@
 import type { ExpoConfig } from "expo/config";
 
 /**
- * The instance this build talks to.
- *
- * Read from the environment at bundle time, which is why `M7` of `T-261018-l19` exists: a communal
- * app has to ask its user for this instead, and that is a run-time question. Until then a build is
- * tied to one instance, and the two names below are the only place that is true.
+ * The instance this build starts on, read from the environment at bundle time — for development,
+ * previews and recordings. A release build leaves both empty and asks its user on the first start
+ * (`src/lib/instance.ts`); either way the person can point the app at another server later.
  */
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? "";
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? "";

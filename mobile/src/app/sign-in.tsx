@@ -1,10 +1,11 @@
 import * as Linking from "expo-linking";
-import { Redirect } from "expo-router";
+import { Redirect, useRouter, type Href } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import { useEffect, useState } from "react";
 import { View } from "react-native";
 import { Button, Text } from "@/components/ui";
 import { t } from "@/lib/i18n";
+import { useInstance } from "@/lib/instance-context";
 import { parseOAuthCallback } from "@/lib/oauth-callback";
 import { useSession } from "@/lib/session";
 import { supabase } from "@/lib/supabase";
@@ -23,6 +24,8 @@ import { space, usePalette } from "@/theme";
  */
 export default function SignIn() {
   const palette = usePalette();
+  const router = useRouter();
+  const { instance } = useInstance();
   const { session } = useSession();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -31,15 +34,18 @@ export default function SignIn() {
   // the app rather than on a Google sheet it cannot finish.
   useEffect(() => {
     const credentials = testSignInCredentials();
-    if (credentials && session === null) {
+    if (credentials && session === null && instance) {
       void supabase.auth
         .signInWithPassword(credentials)
         .then(({ error: signInError }) => setError(signInError?.message ?? null));
     }
-  }, [session]);
+  }, [session, instance]);
 
   if (session) {
     return <Redirect href="/today" />;
+  }
+  if (instance === null) {
+    return <Redirect href="/server" />;
   }
 
   async function signInWithGoogle(): Promise<string | null> {
@@ -99,6 +105,19 @@ export default function SignIn() {
         </Text>
       ) : null}
       <Button label={t("auth.signInWithGoogle")} busy={busy} onPress={() => void submit()} />
+      {instance ? (
+        <View style={{ gap: space.xs, alignItems: "center" }}>
+          <Text size="xs" tone="mutedForeground">
+            {t("instance.current", { address: new URL(instance.address).host })}
+          </Text>
+          <Button
+            compact
+            variant="ghost"
+            label={t("instance.change")}
+            onPress={() => router.push("/server" as Href)}
+          />
+        </View>
+      ) : null}
     </View>
   );
 }

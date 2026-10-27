@@ -1873,5 +1873,25 @@
     "blockCheckups": "Current and overdue checkups",
     "noBlocks": "All blocks are hidden",
     "noBlocksHint": "Turn on the ones you need in settings"
+  },
+  "instance": {
+    "title": "Orbit server",
+    "description": "Enter the address of your Orbit server — the one you open in a browser.",
+    "address": "Server address",
+    "connect": "Connect",
+    "section": "Server",
+    "current": "Server: {address}",
+    "change": "Change server",
+    "confirmTitle": "Change server?",
+    "confirmMessage": "You will be signed out of {address}.",
+    "errors": {
+      "empty": "Enter the server address.",
+      "invalid": "That does not look like a server address.",
+      "notHttps": "The address must start with https://.",
+      "hasPath": "Enter only the server address, without a path.",
+      "unreachable": "Could not reach the server. Check the address and your connection.",
+      "notOrbit": "There is no Orbit server at this address.",
+      "badConfig": "The server answered with settings the app cannot use."
+    }
   }
 }

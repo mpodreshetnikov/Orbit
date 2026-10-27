@@ -1,5 +1,6 @@
 import type { Session } from "@supabase/supabase-js";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { currentInstance } from "@/lib/instance";
 import { supabase } from "@/lib/supabase";
 
 type SessionState = {
@@ -25,6 +26,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
 
   useEffect(() => {
+    // No server chosen yet: nobody can be signed in, and there is no client to ask.
+    if (!currentInstance()) {
+      setSession(null);
+      return;
+    }
     let active = true;
 
     void supabase.auth.getSession().then(({ data }) => {

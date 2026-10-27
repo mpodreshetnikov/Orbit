@@ -9,8 +9,19 @@ appId: host.exp.Exponent
     text: "Open"
     optional: true
 - extendedWaitUntil:
-    visible: "Сегодня"
+    visible: "Сегодня|Continue"
     timeout: 120000
+# Expo Go can show its developer-menu introduction again on a relaunch, over «Сегодня»: dismiss it
+# the way open.yaml does the first time, or every later flow waits behind it.
+- tapOn:
+    text: "Continue"
+    optional: true
+- tapOn:
+    text: "Close"
+    optional: true
+- extendedWaitUntil:
+    visible: "Сегодня"
+    timeout: 30000
 # Expo Go may put its tools button back over the top right corner on launch, where it hides the
 # navigation bar's own buttons: drag it down beside the tab bar again (see open.yaml). Where it is
 # already down there, the drag only pulls at today's header.
