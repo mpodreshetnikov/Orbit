@@ -11,10 +11,15 @@ import {
   Stethoscope,
   type LucideIcon,
 } from "lucide-react-native";
-import { Pressable, ScrollView, View } from "react-native";
-import { Card, Icon, Text } from "@/components/ui";
+import { ActivityIndicator, Pressable, ScrollView, View } from "react-native";
+import { Button, Card, Icon, Text } from "@/components/ui";
 import { t } from "@/lib/i18n";
+import { usePerson, useRecords } from "@/lib/queries";
 import { space, usePalette } from "@/theme";
+import { RecordRow } from "./records-screen";
+
+/** How many of the latest documents the tab shows before "Все документы". */
+const LATEST = 3;
 
 /** The web app's health sections, each a row into its own screen. */
 const SECTIONS: { title: string; description?: string; icon: LucideIcon; href: string }[] = [
@@ -67,7 +72,7 @@ const SECTIONS: { title: string; description?: string; icon: LucideIcon; href: s
   },
 ];
 
-/** "Здоровье": the web health menu as a grouped list. */
+/** "Здоровье": the latest documents on top, then the web health menu as a grouped list. */
 export default function HealthScreen() {
   const palette = usePalette();
   const router = useRouter();
@@ -76,8 +81,9 @@ export default function HealthScreen() {
       <Stack.Screen options={{ title: t("nav.health") }} />
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
-        contentContainerStyle={{ padding: space.lg }}
+        contentContainerStyle={{ padding: space.lg, gap: space.lg }}
       >
+        <Documents />
         <Card style={{ paddingVertical: space.xs }}>
           {SECTIONS.map((section, index) => (
             <Pressable
@@ -111,5 +117,50 @@ export default function HealthScreen() {
         </Card>
       </ScrollView>
     </>
+  );
+}
+
+/** The person's latest documents, each opening the document, and the way to all of them. */
+function Documents() {
+  const router = useRouter();
+  const person = usePerson();
+  const records = useRecords(person.data?.id);
+  const failed = person.error ?? records.error;
+  const latest = (records.data ?? []).slice(0, LATEST);
+  return (
+    <View style={{ gap: space.sm }}>
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+        <Text size="lg" weight="semibold">
+          {t("health.documents")}
+        </Text>
+        <Button
+          compact
+          variant="ghost"
+          label={t("health.allDocuments")}
+          onPress={() => router.push("/health/records" as Href)}
+        />
+      </View>
+      {failed ? (
+        <View style={{ gap: space.sm }}>
+          <Text size="sm" tone="destructive">
+            {failed.message}
+          </Text>
+          <Button
+            variant="outline"
+            compact
+            label={t("common.retry")}
+            onPress={() => void (person.error ? person.refetch() : records.refetch())}
+          />
+        </View>
+      ) : records.isPending ? (
+        <ActivityIndicator />
+      ) : latest.length === 0 ? (
+        <Text size="sm" tone="mutedForeground">
+          {t("health.noDocuments")}
+        </Text>
+      ) : (
+        latest.map((record) => <RecordRow key={record.id} record={record} />)
+      )}
+    </View>
   );
 }

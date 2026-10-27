@@ -28,6 +28,9 @@ export const db: { tables: Record<string, Row[]>; failing: Set<string> } = {
   failing: new Set(),
 };
 export const calls: { rpc: { name: string; args: unknown }[] } = { rpc: [] };
+/** `max_rows` in supabase/config.toml. */
+const MAX_ROWS = 1000;
+
 export const rpcHandlers: Record<string, (args: Record<string, unknown>) => unknown> = {};
 
 function updateDose(args: Record<string, unknown>, changes: Row) {
@@ -242,9 +245,9 @@ class Query {
       }
       return 0;
     });
-    const copy = structuredClone(
-      this.window ? sorted.slice(this.window[0], this.window[1] + 1) : sorted,
-    );
+    // PostgREST's `max_rows`: a read returns at most a thousand rows, a page or not.
+    const [from, to] = this.window ?? [0, MAX_ROWS - 1];
+    const copy = structuredClone(sorted.slice(from, Math.min(to + 1, from + MAX_ROWS)));
     return { data: this.one ? (copy[0] ?? null) : copy, error: null };
   }
 
@@ -270,6 +273,15 @@ export const supabase = {
   functions: {
     invoke: (name: string, options: { body?: Record<string, unknown> } = {}) =>
       supabase.rpc(name, options.body),
+  },
+  /** A bucket's signed links, at a test host; `fail("storage")` refuses them. */
+  storage: {
+    from: (bucket: string) => ({
+      createSignedUrl: async (path: string) =>
+        db.failing.has("storage")
+          ? { data: null, error: { message: "storage is unavailable" } }
+          : { data: { signedUrl: `https://files.test/${bucket}/${path}` }, error: null },
+    }),
   },
   auth: {
     getSession: async () => ({ data: { session }, error: null }),

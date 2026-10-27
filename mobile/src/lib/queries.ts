@@ -27,6 +27,16 @@ import type {
 import type { CourseColumns } from "@orbit-types/regimen-form";
 import { withStatus } from "@/features/doses/dashboard";
 import { readTodayBlocks, writeTodayBlocks, type TodayBlocks } from "@/features/today/blocks";
+import {
+  attachmentLink,
+  fetchAttachments,
+  fetchRecord,
+  fetchRecordFindings,
+  fetchRecordObservations,
+  fetchRecords,
+  saveRecord,
+  type RecordDetails,
+} from "@/features/records/query";
 import type { DayDose, DoseStatus } from "@/features/doses/model";
 import {
   fetchDoseHistory,
@@ -947,5 +957,62 @@ export function useSaveTodayBlocks() {
     onMutate: (blocks) => client.setQueryData(["today-blocks", userId], blocks),
     onSuccess: () => void Haptics.selectionAsync(),
     onSettled: () => void client.invalidateQueries({ queryKey: ["today-blocks", userId] }),
+  });
+}
+
+/** The person's approved documents, newest first. */
+export function useRecords(personId: string | undefined) {
+  return useQuery({
+    queryKey: ["records", personId],
+    queryFn: () => fetchRecords(personId!),
+    enabled: Boolean(personId),
+  });
+}
+
+/** One document with its pages, what was read from it, and what was found in it. */
+export function useRecord(id: string) {
+  const record = useQuery({ queryKey: ["record", id], queryFn: () => fetchRecord(id) });
+  const attachments = useQuery({
+    queryKey: ["record-attachments", id],
+    queryFn: () => fetchAttachments(id),
+  });
+  const observations = useQuery({
+    queryKey: ["record-observations", id],
+    queryFn: () => fetchRecordObservations(id),
+  });
+  const findings = useQuery({
+    queryKey: ["record-findings", id],
+    queryFn: () => fetchRecordFindings(id),
+  });
+  return { record, attachments, observations, findings };
+}
+
+/** A link to open an attachment with, fetched when it is asked for. */
+export function useAttachmentLink() {
+  return useMutation({ mutationFn: (storagePath: string) => attachmentLink(storagePath) });
+}
+
+/** Save a document's title, type, date and notes; the document and the list are refetched. */
+export function useSaveRecord() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, details }: { id: string; details: RecordDetails }) =>
+      saveRecord(id, details),
+    onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
+    onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
+    onSettled: (_data, _error, { id }) => {
+      void client.invalidateQueries({ queryKey: ["record", id] });
+      // A document's title and date also order and label results, findings and conditions.
+      for (const family of [
+        "records",
+        "observations",
+        "findings",
+        "active-records",
+        "condition",
+        "completions",
+      ]) {
+        void client.invalidateQueries({ queryKey: [family] });
+      }
+    },
   });
 }

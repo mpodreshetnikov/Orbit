@@ -9,10 +9,11 @@ name: Курс — форма
 - extendedWaitUntil:
     visible: "Курсы"
     timeout: 60000
-- tapOn: "Курсы"
-- extendedWaitUntil:
-    visible: "Vitamin D3.*"
-    timeout: 20000
+- retry: # A tab still settling can swallow the switch: tap until the courses show.
+    maxRetries: 3
+    commands:
+      - tapOn: "Курсы"
+      - extendedWaitUntil: { visible: "Vitamin D3.*", timeout: 10000 }
 - retry: # A list still settling can swallow the plus: tap until its sheet opens.
     maxRetries: 3
     commands:
@@ -63,10 +64,11 @@ name: Курс — форма
 - extendedWaitUntil:
     visible: "Курсы"
     timeout: 15000
-- tapOn: "Курсы"
-- extendedWaitUntil:
-    visible: "Vitamin D3.*"
-    timeout: 15000
+- retry: # A tab still settling can swallow the switch: tap until the courses show.
+    maxRetries: 3
+    commands:
+      - tapOn: "Курсы"
+      - extendedWaitUntil: { visible: "Vitamin D3.*", timeout: 10000 }
 - tapOn: "Добавить лекарство"
 - tapOn: "Разово"
 - extendedWaitUntil:

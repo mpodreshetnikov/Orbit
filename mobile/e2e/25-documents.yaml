@@ -1,0 +1,32 @@
+# Documents: the latest ones atop «Здоровье», the full list, the seeded blood test with its results,
+# and its details form. Nothing is saved: the recording only shows the form.
+appId: host.exp.Exponent
+name: Документы
+---
+- runFlow: setup/fresh.yaml
+- openLink: exp://127.0.0.1:8081/--/health
+- tapOn:
+    text: "Open"
+    optional: true
+- extendedWaitUntil:
+    visible: "Annual Blood Test Results.*" # A row reads as one element: match the whole of it.
+    timeout: 60000
+- takeScreenshot: documents-01-health
+- tapOn: "Все документы"
+- extendedWaitUntil:
+    visible: "Все типы"
+    timeout: 20000
+- takeScreenshot: documents-02-list
+- tapOn:
+    text: "Annual Blood Test Results.*"
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: "Заметки"
+    timeout: 20000
+- takeScreenshot: documents-03-record
+- tapOn: "Редактировать"
+- extendedWaitUntil:
+    visible: "Тип записи"
+    timeout: 20000
+- takeScreenshot: documents-04-edit
+- tapOn: "Отмена"
