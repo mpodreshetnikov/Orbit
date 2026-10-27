@@ -768,6 +768,7 @@
       "completed": "Импорт завершён"
     },
     "importHistoryImportTypeUnattended": "Автоимпорт (расширение)",
+    "importHistoryErrors": "Ошибок: {count}.",
     "importBatchStatusRolledBack": "Откачен",
     "importOutcomeRunningTitle": "Импорт идёт",
     "importOutcomeRunningHint": "Прочитано операций: {count}. Не закрывайте вкладку банка, пока импорт не закончится.",

@@ -768,6 +768,7 @@
       "completed": "Import completed"
     },
     "importHistoryImportTypeUnattended": "Automatic (extension)",
+    "importHistoryErrors": "Errors: {count}.",
     "importBatchStatusRolledBack": "Rolled back",
     "importOutcomeRunningTitle": "Import in progress",
     "importOutcomeRunningHint": "Operations read: {count}. Keep the bank tab open until the import finishes.",
