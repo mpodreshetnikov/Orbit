@@ -6,8 +6,9 @@ name: Сервер
 - openLink: exp://127.0.0.1:8081/--/today/settings
 - tapOn: { text: "Open", optional: true }
 - extendedWaitUntil: { visible: "ВЫБРАТЬ ПЕРСОНУ", timeout: 60000 }
-# The button sits at the end of settings, where the page cannot scroll it any higher.
-- scrollUntilVisible: { element: "Сменить сервер", direction: DOWN }
+# The button sits just above sign-out at the end of settings: scrolling to sign-out brings it out
+# from under the tab bar, which a scroll to the button itself can leave it beneath.
+- scrollUntilVisible: { element: "Выйти", direction: DOWN }
 - takeScreenshot: server-01-settings
 - tapOn: "Сменить сервер"
 - extendedWaitUntil: { visible: "Сервер Orbit", timeout: 10000 }
