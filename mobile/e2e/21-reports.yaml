@@ -16,6 +16,10 @@ name: Отчеты
       - extendedWaitUntil: { visible: "Сумма цели.*", timeout: 10000 }
       - takeScreenshot: reports-02-target
       - tapOn: "Отмена"
+# The link sits at the bottom of a long report, under the tab bar: bring it to the middle first.
+- scrollUntilVisible:
+    element: "Псевдонимы для переводов себе"
+    centerElement: true
 - tapOn: "Псевдонимы для переводов себе"
 - extendedWaitUntil: { visible: "Добавить", timeout: 10000 }
 - takeScreenshot: reports-03-aliases

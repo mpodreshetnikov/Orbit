@@ -11,6 +11,7 @@ import { Alert, Pressable, ScrollView, Switch, View } from "react-native";
 import { Field, Input, Section } from "@/components/form";
 import { Button, Icon, Placeholder, Text } from "@/components/ui";
 import type { CheckupReminders, HouseholdPerson } from "@/features/settings";
+import { TODAY_BLOCKS, type TodayBlock } from "@/features/today/blocks";
 import { t } from "@/lib/i18n";
 import {
   useChoosePerson,
@@ -18,6 +19,8 @@ import {
   useNotificationSettings,
   usePerson,
   useSaveNotificationSettings,
+  useSaveTodayBlocks,
+  useTodayBlocks,
 } from "@/lib/queries";
 import { useSession } from "@/lib/session";
 import { space } from "@/theme";
@@ -25,8 +28,9 @@ import { space } from "@/theme";
 const fail = (error: Error) => Alert.alert(t("common.error"), error.message);
 
 /**
- * "Настройки" — whose record the phone shows, and the web settings' notification choices: when the
- * daily checkup reminder comes and whose reminders reach this account. Signing out lives here too.
+ * "Настройки" — whose record the phone shows, which blocks "Сегодня" shows, and the web settings'
+ * notification choices: when the daily checkup reminder comes and whose reminders reach this account.
+ * Signing out lives here too.
  */
 export default function SettingsScreen() {
   const { session, signOut } = useSession();
@@ -95,6 +99,8 @@ export default function SettingsScreen() {
           ))}
         </Section>
 
+        <TodayBlocksSection />
+
         <Reminders initial={settings.data.reminders} />
 
         <Section title={t("settings.pwa.routingTitle")}>
@@ -114,6 +120,38 @@ export default function SettingsScreen() {
         <Button variant="outline" label={t("auth.signOut")} onPress={() => void signOut()} />
       </ScrollView>
     </>
+  );
+}
+
+const BLOCK_LABELS: Record<TodayBlock, string> = {
+  doses: "today.blockDoses",
+  checkups: "today.blockCheckups",
+};
+
+/** Which blocks "Сегодня" shows on this phone, each a switch. */
+function TodayBlocksSection() {
+  const blocks = useTodayBlocks();
+  const save = useSaveTodayBlocks();
+  if (!blocks.data) return null;
+  const shown = blocks.data;
+  return (
+    <Section title={t("today.blocks")}>
+      <Text size="sm" tone="mutedForeground">
+        {t("today.blocksDescription")}
+      </Text>
+      {TODAY_BLOCKS.map((block) => (
+        <View key={block} style={{ flexDirection: "row", alignItems: "center", gap: space.md }}>
+          <Text weight="medium" style={{ flex: 1 }}>
+            {t(BLOCK_LABELS[block])}
+          </Text>
+          <Switch
+            accessibilityLabel={t(BLOCK_LABELS[block])}
+            value={shown[block]}
+            onValueChange={(on) => save.mutate({ ...shown, [block]: on }, { onError: fail })}
+          />
+        </View>
+      ))}
+    </Section>
   );
 }
 

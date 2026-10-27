@@ -12,8 +12,12 @@ name: Курс — действия
     text: "Open"
     optional: true
 - extendedWaitUntil:
-    visible: "Magnesium.*"
+    visible: "Курсы"
     timeout: 60000
+- tapOn: "Курсы"
+- extendedWaitUntil:
+    visible: "Magnesium.*"
+    timeout: 20000
 - retry: # A search left open, or a list still settling, can swallow a tap: tap until it opens.
     maxRetries: 3
     commands:

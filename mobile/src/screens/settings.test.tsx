@@ -54,23 +54,6 @@ afterEach(() => {
 });
 
 describe("the settings", () => {
-  it("open from today's header and switch the phone to another person", async () => {
-    await renderScreens(routes, "/today");
-    await fireEvent.press(await screen.findByLabelText("Настройки"));
-    expect(await screen.findByText("ВЫБРАТЬ ПЕРСОНУ")).toBeOnTheScreen();
-    expect(screen.getByText("Собака")).toBeOnTheScreen();
-
-    await fireEvent.press(screen.getAllByText("Anna")[0]!);
-    await waitFor(async () =>
-      expect(await AsyncStorage.getItem(`orbit.person.${USER_ID}`)).toBe(ANNA.id),
-    );
-    await waitFor(() =>
-      expect(
-        screen.getAllByRole("button").find((button) => button.props.accessibilityState?.selected),
-      ).toHaveTextContent("Anna"),
-    );
-  });
-
   it("falls back to the account's own person when the chosen one left the household", async () => {
     await AsyncStorage.setItem(`orbit.person.${USER_ID}`, "gone");
     await renderScreens(routes, "/today/settings");
@@ -192,5 +175,24 @@ describe("the settings", () => {
     await renderScreens(routes, "/today/settings");
     await fireEvent.press(await screen.findByText("Выйти"));
     await waitFor(() => expect(screen.queryByText("ВЫБРАТЬ ПЕРСОНУ")).toBeNull());
+  });
+
+  // Last: switching the person reloads Today's blocks under the settings after the test's own
+  // assertions, which would otherwise spill into the next test.
+  it("open from today's header and switch the phone to another person", async () => {
+    await renderScreens(routes, "/today");
+    await fireEvent.press(await screen.findByLabelText("Настройки"));
+    expect(await screen.findByText("ВЫБРАТЬ ПЕРСОНУ")).toBeOnTheScreen();
+    expect(screen.getByText("Собака")).toBeOnTheScreen();
+
+    await fireEvent.press(screen.getAllByText("Anna")[0]!);
+    await waitFor(async () =>
+      expect(await AsyncStorage.getItem(`orbit.person.${USER_ID}`)).toBe(ANNA.id),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getAllByRole("button").find((button) => button.props.accessibilityState?.selected),
+      ).toHaveTextContent("Anna"),
+    );
   });
 });

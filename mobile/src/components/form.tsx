@@ -200,3 +200,58 @@ export function Chip({
     </Pressable>
   );
 }
+
+/**
+ * The system's segmented switch, drawn here: a muted track with the chosen segment raised on it.
+ * Each segment is a tab for VoiceOver, with its selection stated.
+ */
+export function Segmented<T extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: [T, string][];
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  const palette = usePalette();
+  return (
+    <View
+      accessibilityRole="tablist"
+      style={{
+        flexDirection: "row",
+        padding: 2,
+        borderRadius: radius.md,
+        backgroundColor: palette.muted,
+      }}
+    >
+      {options.map(([option, label]) => {
+        const selected = option === value;
+        return (
+          <Pressable
+            key={option}
+            accessibilityRole="tab"
+            accessibilityState={{ selected }}
+            onPress={() => onChange(option)}
+            style={{
+              flex: 1,
+              minHeight: 30,
+              alignItems: "center",
+              justifyContent: "center",
+              borderRadius: radius.md - 2,
+              backgroundColor: selected ? palette.background : "transparent",
+              shadowColor: "#000",
+              shadowOpacity: selected ? 0.12 : 0,
+              shadowRadius: 2,
+              shadowOffset: { width: 0, height: 1 },
+            }}
+          >
+            <Text size="sm" weight={selected ? "semibold" : "medium"}>
+              {label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}

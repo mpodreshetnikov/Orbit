@@ -5,9 +5,14 @@ name: Курс — форма
 - runFlow: setup/fresh.yaml
 - openLink: exp://127.0.0.1:8081/--/medications
 - tapOn: { text: "Open", optional: true }
+# The tab opens on the day's doses; the courses are a switch away.
+- extendedWaitUntil:
+    visible: "Курсы"
+    timeout: 60000
+- tapOn: "Курсы"
 - extendedWaitUntil:
     visible: "Vitamin D3.*"
-    timeout: 60000
+    timeout: 20000
 - retry: # A list still settling can swallow the plus: tap until its sheet opens.
     maxRetries: 3
     commands:
@@ -55,6 +60,10 @@ name: Курс — форма
     timeout: 20000
 - takeScreenshot: form-06-edited
 - openLink: exp://127.0.0.1:8081/--/medications
+- extendedWaitUntil:
+    visible: "Курсы"
+    timeout: 15000
+- tapOn: "Курсы"
 - extendedWaitUntil:
     visible: "Vitamin D3.*"
     timeout: 15000

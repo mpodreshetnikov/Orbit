@@ -1850,6 +1850,22 @@
     "settings": "Settings",
     "overdueReminderInterval": "Overdue reminder interval",
     "overdueReminderIntervalDescription": "Notify for overdue doses every N minutes after the due time (same day only; no reminders after midnight).",
-    "overdueReminderIntervalMinutes": "minutes"
+    "overdueReminderIntervalMinutes": "minutes",
+    "viewDoses": "Doses",
+    "viewCourses": "Courses"
+  },
+  "today": {
+    "title": "Today",
+    "allDone": "All of today's doses are answered",
+    "answered": "{done} of {total} answered",
+    "checkups": "Checkups",
+    "noCheckups": "No overdue or upcoming checkups",
+    "showAll": "All",
+    "blocks": "Blocks on \"Today\"",
+    "blocksDescription": "What the app's \"Today\" tab shows",
+    "blockDoses": "Medication doses",
+    "blockCheckups": "Current and overdue checkups",
+    "noBlocks": "All blocks are hidden",
+    "noBlocksHint": "Turn on the ones you need in settings"
   }
 }

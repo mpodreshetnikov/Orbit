@@ -26,6 +26,7 @@ import type {
 } from "@orbit-types/regimen";
 import type { CourseColumns } from "@orbit-types/regimen-form";
 import { withStatus } from "@/features/doses/dashboard";
+import { readTodayBlocks, writeTodayBlocks, type TodayBlocks } from "@/features/today/blocks";
 import type { DayDose, DoseStatus } from "@/features/doses/model";
 import {
   fetchDoseHistory,
@@ -921,5 +922,30 @@ export function useSaveNotificationSettings() {
     onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
     onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
     onSettled: () => void client.invalidateQueries({ queryKey: ["notification-settings"] }),
+  });
+}
+
+/** The blocks "Сегодня" shows on this phone. */
+export function useTodayBlocks() {
+  const { session } = useSession();
+  const userId = session?.user.id;
+  return useQuery({
+    queryKey: ["today-blocks", userId],
+    queryFn: () => readTodayBlocks(userId!),
+    enabled: Boolean(userId),
+    staleTime: Infinity,
+  });
+}
+
+/** Show or hide blocks on "Сегодня"; the screen follows at once. */
+export function useSaveTodayBlocks() {
+  const client = useQueryClient();
+  const { session } = useSession();
+  const userId = session?.user.id;
+  return useMutation({
+    mutationFn: (blocks: TodayBlocks) => writeTodayBlocks(userId!, blocks),
+    onMutate: (blocks) => client.setQueryData(["today-blocks", userId], blocks),
+    onSuccess: () => void Haptics.selectionAsync(),
+    onSettled: () => void client.invalidateQueries({ queryKey: ["today-blocks", userId] }),
   });
 }

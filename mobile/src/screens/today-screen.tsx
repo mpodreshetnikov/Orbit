@@ -1,134 +1,40 @@
+import type { CheckupItem } from "@orbit-types/checkup";
+import { checkupLateness, groupCheckups, isoDay } from "@orbit-types/checkup-summary";
 import { Stack, useRouter, type Href } from "expo-router";
-import {
-  Check,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  Clock,
-  MoreHorizontal,
-  Settings,
-  Wallet,
-  X,
-} from "lucide-react-native";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AppState, Pressable, RefreshControl, ScrollView, View } from "react-native";
-import { showDoseSheet } from "@/components/dose-sheet";
-import { statusIcon, unitIcon } from "@/components/medication-icons";
-import { Button, Icon, Placeholder, Text } from "@/components/ui";
-import { buildDashboard, type Slot } from "@/features/doses/dashboard";
-import { msUntilNextLocalDay } from "@/features/doses/day";
-import { doseAmountLabel, doseName, doseUnit, isOpen, type DayDose } from "@/features/doses/model";
-import { intakeAdviceLabel } from "@/features/medications/format";
+import { ChevronRight, Settings, Wallet } from "lucide-react-native";
+import { useMemo, type ReactNode } from "react";
+import { Pressable, RefreshControl, ScrollView, View } from "react-native";
+import { PendingSlot } from "@/components/dose-slots";
+import { Badge, Button, Card, Icon, Placeholder, Text } from "@/components/ui";
+import { categoryLabel } from "@/features/checkups/query";
+import { buildDashboard } from "@/features/doses/dashboard";
+import type { DayDose } from "@/features/doses/model";
+import { useSettledDoses } from "@/features/doses/use-settled";
+import { useToday } from "@/features/doses/use-today";
+import { formatDay } from "@/features/measurements/format";
 import { t } from "@/lib/i18n";
-import { useDayDoses, useDoseAction, usePerson, type DoseAction } from "@/lib/queries";
+import { useCheckups, useDayDoses, useDoseAction, usePerson, useTodayBlocks } from "@/lib/queries";
 import { radius, space, usePalette } from "@/theme";
 
-/** How long a dose acted on stays in place, showing its new state, before it moves to the completed
- * section. The web dashboard's five seconds, restarted by every tap. */
-const SETTLE_MS = 5000;
-
-function startOfDay(day: Date): Date {
-  return new Date(day.getFullYear(), day.getMonth(), day.getDate());
-}
-
-function shiftDay(day: Date, by: number): Date {
-  return new Date(day.getFullYear(), day.getMonth(), day.getDate() + by);
-}
-
 /**
- * The day's doses — the web app's medication dashboard, on the phone.
- *
- * Doses still to take sit at the top in time slots, overdue ones tinted amber, each with "Принято" and
- * a skip cross; a tap answers at once, with a haptic, and the server is told behind it. The day's
- * settled doses fold away below. Arrows step through days, so the past can be corrected and the
- * coming days read; a future day shows its plan but takes no answers, as on the web.
+ * "Сегодня": what today asks of the person, gathered from the other tabs in blocks — the doses still
+ * to take and the checkups that are late or due within the week. Each block answers in place where it
+ * can and leads to its own tab for the rest. Which blocks show is chosen in the settings.
  */
 export default function TodayScreen() {
   const palette = usePalette();
   const router = useRouter();
   const person = usePerson();
-  const [today, setToday] = useState(() => startOfDay(new Date()));
-  const [offset, setOffset] = useState(0);
-  const day = shiftDay(today, offset);
-  const doses = useDayDoses(person.data?.id, day);
-  const action = useDoseAction();
-  const [recentlyActed, setRecentlyActed] = useState<ReadonlySet<string>>(new Set());
-  const [completedOpen, setCompletedOpen] = useState(false);
-  const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // A day ends under a mounted screen in two ways on a phone: backgrounded overnight, or left open
-  // past midnight. Both move "today", so the screen does not keep yesterday under today's heading.
-  useEffect(() => {
-    const refresh = () => setToday(startOfDay(new Date()));
-    const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") {
-        refresh();
-      }
-    });
-    const timer = setTimeout(refresh, msUntilNextLocalDay(new Date()));
-    return () => {
-      subscription.remove();
-      clearTimeout(timer);
-    };
-  }, [today]);
-
-  useEffect(
-    () => () => {
-      if (settleTimer.current) {
-        clearTimeout(settleTimer.current);
-      }
-    },
-    [],
-  );
-
-  const act = useCallback(
-    (dose: DayDose, kind: DoseAction) => {
-      setRecentlyActed((previous) => new Set(previous).add(dose.id));
-      if (settleTimer.current) {
-        clearTimeout(settleTimer.current);
-      }
-      settleTimer.current = setTimeout(() => setRecentlyActed(new Set()), SETTLE_MS);
-      action.mutate({ dose, action: kind, at: new Date().toISOString() });
-    },
-    [action],
-  );
-
-  const isToday = offset === 0;
-  const isFuture = offset > 0;
-  const actionable = !isFuture;
-  const dashboard = useMemo(
-    () => buildDashboard(doses.data ?? [], { now: new Date(), isToday, recentlyActed }),
-    [doses.data, isToday, recentlyActed],
-  );
-
-  const openCourse = useCallback(
-    (dose: DayDose) => router.push(`/today/medication/${dose.regimen_id}` as Href),
-    [router],
-  );
-
-  const offerActions = useCallback(
-    (dose: DayDose) =>
-      showDoseSheet(dose, act, {
-        actionable,
-        extra: [{ label: t("medications.navTitle"), run: () => openCourse(dose) }],
-      }),
-    [act, actionable, openCourse],
-  );
-
-  const dateLabel = day.toLocaleDateString("ru", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-  });
-  const sectionTitle = isToday
-    ? t("medications.todayIntakes")
-    : t("medications.intakesForDate", { date: dateLabel });
-  const showCompleted = completedOpen || offset < 0;
+  const blocks = useTodayBlocks();
+  const today = useToday();
+  const shown = blocks.data;
+  const doses = useDayDoses(shown?.doses ? person.data?.id : undefined, today);
+  const checkups = useCheckups(shown?.checkups ? person.data?.id : undefined);
 
   const header = (
     <Stack.Screen
       options={{
-        title: isToday ? t("medications.dateToday") : dateLabel,
+        title: t("today.title"),
         headerLeft: () => (
           <Pressable
             accessibilityRole="button"
@@ -153,18 +59,17 @@ export default function TodayScreen() {
     />
   );
 
-  if (person.error || doses.error) {
-    const message = (person.error ?? doses.error)?.message ?? t("common.error");
+  if (person.error) {
     return (
       <>
         {header}
         <Placeholder
-          message={message}
+          message={person.error.message}
           action={
             <Button
               variant="outline"
               label={t("common.retry")}
-              onPress={() => void (person.error ? person.refetch() : doses.refetch())}
+              onPress={() => void person.refetch()}
             />
           }
         />
@@ -172,328 +77,214 @@ export default function TodayScreen() {
     );
   }
 
+  const dateLabel = today.toLocaleDateString("ru", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  });
+  const none = shown && !shown.doses && !shown.checkups;
+
   return (
     <>
       {header}
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
-        contentContainerStyle={{ padding: space.lg, gap: space.lg, paddingBottom: space.xl * 2 }}
+        contentContainerStyle={{ padding: space.lg, gap: space.md, paddingBottom: space.xl * 2 }}
         refreshControl={
           <RefreshControl
-            refreshing={doses.isRefetching}
-            onRefresh={() => void doses.refetch()}
+            refreshing={doses.isRefetching || checkups.isRefetching}
+            onRefresh={() => {
+              if (shown?.doses) void doses.refetch();
+              if (shown?.checkups) void checkups.refetch();
+            }}
             tintColor={palette.mutedForeground}
           />
         }
       >
-        <View style={{ gap: space.sm }}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
-            <Text size="sm" weight="medium" tone="mutedForeground" style={{ flex: 1 }}>
-              {person.data ? `${sectionTitle} · ${person.data.name}` : sectionTitle}
-            </Text>
-            {!isToday ? (
+        <Text size="sm" weight="medium" tone="mutedForeground">
+          {person.data ? `${dateLabel} · ${person.data.name}` : dateLabel}
+        </Text>
+        {!shown ? <Placeholder busy /> : null}
+        {none ? (
+          <Placeholder
+            message={`${t("today.noBlocks")}. ${t("today.noBlocksHint")}.`}
+            action={
               <Button
-                variant="ghost"
-                compact
-                label={t("medications.dateToday")}
-                onPress={() => setOffset(0)}
+                variant="outline"
+                label={t("nav.settings")}
+                onPress={() => router.push("/today/settings" as Href)}
               />
-            ) : null}
-          </View>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: space.xs }}>
-            <Button
-              variant="outline"
-              icon={ChevronLeft}
-              accessibilityLabel={t("medications.datePrev")}
-              onPress={() => setOffset((value) => value - 1)}
-              style={{ width: 36, minHeight: 36 }}
-            />
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => setOffset(0)}
-              style={{
-                flex: 1,
-                minHeight: 36,
-                alignItems: "center",
-                justifyContent: "center",
-                borderWidth: 1,
-                borderColor: palette.border,
-                borderRadius: radius.md,
-              }}
-            >
-              <Text size="sm" weight="medium" tabular>
-                {dateLabel}
-              </Text>
-            </Pressable>
-            <Button
-              variant="outline"
-              icon={ChevronRight}
-              accessibilityLabel={t("medications.dateNext")}
-              onPress={() => setOffset((value) => value + 1)}
-              style={{ width: 36, minHeight: 36 }}
-            />
-          </View>
-        </View>
-
-        {doses.isPending ? (
-          <Placeholder busy />
-        ) : dashboard.pending.length === 0 && dashboard.completedCount === 0 ? (
-          <Text size="sm" tone="mutedForeground">
-            {isToday
-              ? t("medications.noIntakesDueToday")
-              : isFuture
-                ? t("medications.noIntakesPlannedForDate")
-                : t("medications.noIntakesForDate")}
-          </Text>
-        ) : null}
-
-        {dashboard.pending.map((slot) => (
-          <PendingSlot
-            key={slot.time}
-            slot={slot}
-            actionable={actionable}
-            overdueIds={dashboard.overdueIds}
-            recentlyActed={recentlyActed}
-            onAct={act}
-            onOpen={openCourse}
+            }
           />
-        ))}
-
-        {dashboard.completedCount > 0 ? (
-          <View
-            style={{
-              borderWidth: 1,
-              borderColor: palette.border,
-              borderRadius: radius.lg,
-              overflow: "hidden",
-            }}
-          >
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => setCompletedOpen((open) => !open)}
-              style={({ pressed }) => ({
-                flexDirection: "row",
-                alignItems: "center",
-                justifyContent: "space-between",
-                paddingHorizontal: space.md,
-                paddingVertical: space.md,
-                backgroundColor: pressed ? palette.mutedHalf : "transparent",
-              })}
-            >
-              <Text size="sm" weight="medium" tone="mutedForeground">
-                {offset < 0
-                  ? t("medications.completedOnDate", { date: dateLabel })
-                  : t("medications.completedToday")}{" "}
-                ({dashboard.completedCount})
-              </Text>
-              <Icon icon={showCompleted ? ChevronDown : ChevronRight} tone="foreground" />
-            </Pressable>
-            {showCompleted
-              ? dashboard.completed.map((slot) => (
-                  <CompletedSlot
-                    key={slot.time}
-                    slot={slot}
-                    onMore={offerActions}
-                    onOpen={openCourse}
-                  />
-                ))
-              : null}
-          </View>
         ) : null}
+        {shown?.doses ? <DosesBlock doses={doses} /> : null}
+        {shown?.checkups ? <CheckupsBlock checkups={checkups} /> : null}
       </ScrollView>
     </>
   );
 }
 
-function SlotTime({ time }: { time: string }) {
+/** A block of "Сегодня": its heading, a way to its whole tab, and what it holds for today. */
+function Block({
+  title,
+  onAll,
+  children,
+}: {
+  title: string;
+  onAll: () => void;
+  children: ReactNode;
+}) {
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: space.xs }}>
-      <Icon icon={Clock} size={14} />
-      <Text size="xs" weight="medium" tone="mutedForeground" tabular>
-        {time}
+    <Card style={{ padding: space.md, gap: space.sm }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
+        <Text weight="semibold" style={{ flex: 1 }}>
+          {title}
+        </Text>
+        <Pressable
+          accessibilityRole="link"
+          accessibilityLabel={`${title}: ${t("today.showAll")}`}
+          hitSlop={space.sm}
+          onPress={onAll}
+          style={{ flexDirection: "row", alignItems: "center", gap: 2 }}
+        >
+          <Text size="sm" tone="primary">
+            {t("today.showAll")}
+          </Text>
+          <Icon icon={ChevronRight} size={16} tone="primary" />
+        </Pressable>
+      </View>
+      {children}
+    </Card>
+  );
+}
+
+/** Retry inside a block, so one failed read does not take the others down with it. */
+function BlockError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <View style={{ gap: space.sm }}>
+      <Text size="sm" tone="destructive">
+        {message}
       </Text>
+      <Button variant="outline" compact label={t("common.retry")} onPress={onRetry} />
     </View>
   );
 }
 
-function PendingSlot({
-  slot,
-  actionable,
-  overdueIds,
-  recentlyActed,
-  onAct,
-  onOpen,
-}: {
-  slot: Slot;
-  actionable: boolean;
-  overdueIds: ReadonlySet<string>;
-  recentlyActed: ReadonlySet<string>;
-  onAct: (dose: DayDose, action: DoseAction) => void;
-  onOpen: (dose: DayDose) => void;
-}) {
-  const palette = usePalette();
-  const open = slot.doses.filter((dose) => isOpen(dose.status) || dose.status === "missed");
-  return (
-    <View style={{ backgroundColor: palette.card, borderRadius: radius.lg, gap: 6 }}>
-      <View
-        style={{
-          flexDirection: "row",
-          alignItems: "center",
-          justifyContent: "space-between",
-          paddingHorizontal: space.xs,
-        }}
-      >
-        <SlotTime time={slot.time} />
-        {actionable && open.length > 1 ? (
-          <Button
-            variant="secondary"
-            compact
-            icon={Check}
-            label={t("medications.confirmAll")}
-            onPress={() => open.forEach((dose) => onAct(dose, "take"))}
-          />
-        ) : null}
-      </View>
-      {slot.doses.map((dose) => {
-        const justActed = recentlyActed.has(dose.id);
-        const overdue = overdueIds.has(dose.id);
-        const taken = dose.status === "taken";
-        const advice = intakeAdviceLabel(dose.regimen);
-        const settledLabel =
-          dose.status === "taken"
-            ? `${t("medications.taken")} — ${doseAmountLabel(dose)}`
-            : dose.status === "skipped"
-              ? t("medications.skipped")
-              : null;
-        const status = statusIcon(dose.status);
-        return (
-          <View
-            key={dose.id}
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              gap: space.sm,
-              paddingVertical: 6,
-              paddingHorizontal: space.sm,
-              borderRadius: radius.sm,
-              borderWidth: overdue || (taken && justActed) ? 1 : 0,
-              borderColor: overdue ? palette.warningBorder : palette.successBorder,
-              backgroundColor: overdue
-                ? palette.warningSurface
-                : taken && justActed
-                  ? palette.successSurface
-                  : palette.mutedHalf,
-            }}
-          >
-            <Icon icon={unitIcon(doseUnit(dose))} />
-            <Pressable style={{ flex: 1 }} onPress={() => onOpen(dose)} accessibilityRole="link">
-              <Text size="sm" weight="medium" numberOfLines={1}>
-                {doseName(dose)}
-              </Text>
-              <Text size="xs" tone="mutedForeground">
-                {overdue && !justActed ? (
-                  <Text size="xs" weight="medium" tone="warning">
-                    {t("medications.overdue")} ·{" "}
-                  </Text>
-                ) : null}
-                {justActed && settledLabel ? settledLabel : doseAmountLabel(dose)}
-                {advice ? ` · ${advice}` : ""}
-              </Text>
-            </Pressable>
-            {actionable && !justActed ? (
-              <View style={{ flexDirection: "row", gap: space.xs }}>
-                <Button
-                  variant="ghost"
-                  compact
-                  icon={X}
-                  accessibilityLabel={t("medications.skipped")}
-                  onPress={() => onAct(dose, "skip")}
-                />
-                <Button
-                  compact
-                  icon={Check}
-                  label={t("medications.taken")}
-                  onPress={() => onAct(dose, "take")}
-                />
-              </View>
-            ) : null}
-            {justActed ? <Icon icon={status.icon} tone={status.tone} /> : null}
-          </View>
-        );
-      })}
-    </View>
+/** Today's doses still to take, answered in place; the day's settled ones are only counted. */
+function DosesBlock({ doses }: { doses: ReturnType<typeof useDayDoses> }) {
+  const router = useRouter();
+  const action = useDoseAction();
+  const { recentlyActed, act } = useSettledDoses(action);
+  const dashboard = useMemo(
+    () => buildDashboard(doses.data ?? [], { now: new Date(), isToday: true, recentlyActed }),
+    [doses.data, recentlyActed],
   );
-}
+  const total = doses.data?.length ?? 0;
+  // Counted from what was answered, not from the dashboard's grouping: a past one-off left
+  // unanswered folds away there but is not done.
+  const answered = (doses.data ?? []).filter(
+    (dose) => dose.status === "taken" || dose.status === "skipped",
+  ).length;
+  const open = (dose: DayDose) => router.push(`/today/medication/${dose.regimen_id}` as Href);
 
-function CompletedSlot({
-  slot,
-  onMore,
-  onOpen,
-}: {
-  slot: Slot;
-  onMore: (dose: DayDose) => void;
-  onOpen: (dose: DayDose) => void;
-}) {
-  const palette = usePalette();
   return (
-    <View
-      style={{
-        borderTopWidth: 1,
-        borderTopColor: palette.border,
-        backgroundColor: palette.mutedHalf,
-      }}
-    >
-      <View style={{ paddingHorizontal: space.md, paddingVertical: 6 }}>
-        <SlotTime time={slot.time} />
-      </View>
-      {slot.doses.map((dose) => {
-        const status = statusIcon(dose.status);
-        const advice = intakeAdviceLabel(dose.regimen);
-        const label =
-          dose.status === "taken"
-            ? `${t("medications.taken")} — ${doseAmountLabel(dose)}`
-            : dose.status === "skipped"
-              ? t("medications.skipped")
-              : t("medications.unspecified");
-        return (
-          <Pressable
-            key={dose.id}
-            onPress={() => onOpen(dose)}
-            onLongPress={() => onMore(dose)}
-            style={({ pressed }) => ({
-              flexDirection: "row",
-              alignItems: "center",
-              gap: space.sm,
-              paddingHorizontal: space.md,
-              paddingVertical: 6,
-              backgroundColor: pressed
-                ? palette.muted
-                : dose.status === "taken"
-                  ? palette.successSurface
-                  : "transparent",
-            })}
-          >
-            <Icon icon={unitIcon(doseUnit(dose))} />
-            <View style={{ flex: 1 }}>
-              <Text size="sm" weight="medium" numberOfLines={1}>
-                {doseName(dose)}
-              </Text>
-              <Text size="xs" tone="mutedForeground">
-                {label}
-                {advice ? ` · ${advice}` : ""}
-              </Text>
-            </View>
-            <Icon icon={status.icon} tone={status.tone} />
-            <Button
-              variant="ghost"
-              compact
-              icon={MoreHorizontal}
-              accessibilityLabel={t("common.actions")}
-              onPress={() => onMore(dose)}
+    <Block title={t("medications.todayIntakes")} onAll={() => router.push("/medications" as Href)}>
+      {doses.error ? (
+        <BlockError message={doses.error.message} onRetry={() => void doses.refetch()} />
+      ) : doses.isPending ? (
+        <Placeholder busy />
+      ) : total === 0 ? (
+        <Text size="sm" tone="mutedForeground">
+          {t("medications.noIntakesDueToday")}
+        </Text>
+      ) : (
+        <>
+          {dashboard.pending.map((slot) => (
+            <PendingSlot
+              key={slot.time}
+              slot={slot}
+              actionable
+              overdueIds={dashboard.overdueIds}
+              recentlyActed={recentlyActed}
+              onAct={act}
+              onOpen={open}
             />
-          </Pressable>
-        );
-      })}
-    </View>
+          ))}
+          <Text size="xs" tone="mutedForeground">
+            {answered === total
+              ? t("today.allDone")
+              : t("today.answered", { done: answered, total })}
+          </Text>
+        </>
+      )}
+    </Block>
+  );
+}
+
+/** Checkups that are late or due within the week, overdue first; each opens its checkup. */
+function CheckupsBlock({ checkups }: { checkups: ReturnType<typeof useCheckups> }) {
+  const palette = usePalette();
+  const router = useRouter();
+  const now = new Date();
+  const groups = groupCheckups(checkups.data ?? [], now);
+  const items: CheckupItem[] = [...groups.overdue, ...groups.upcoming];
+  const todayIso = isoDay(now);
+
+  return (
+    <Block title={t("today.checkups")} onAll={() => router.push("/health/checkups" as Href)}>
+      {checkups.error ? (
+        <BlockError message={checkups.error.message} onRetry={() => void checkups.refetch()} />
+      ) : checkups.isPending ? (
+        <Placeholder busy />
+      ) : items.length === 0 ? (
+        <Text size="sm" tone="mutedForeground">
+          {t("today.noCheckups")}
+        </Text>
+      ) : (
+        items.map((item) => {
+          const late = checkupLateness(item, todayIso);
+          const overdue = late.byDue || late.byPlan;
+          const day = late.byPlan && !late.byDue ? item.planned_on : item.next_due_at;
+          return (
+            <Pressable
+              key={item.id}
+              accessibilityRole="link"
+              onPress={() => router.push(`/health/checkups/${item.id}` as Href)}
+              style={({ pressed }) => ({
+                flexDirection: "row",
+                alignItems: "center",
+                gap: space.sm,
+                paddingVertical: 6,
+                paddingHorizontal: space.sm,
+                borderRadius: radius.sm,
+                borderWidth: overdue ? 1 : 0,
+                borderColor: palette.warningBorder,
+                backgroundColor: pressed
+                  ? palette.muted
+                  : overdue
+                    ? palette.warningSurface
+                    : palette.mutedHalf,
+              })}
+            >
+              <View style={{ flex: 1 }}>
+                <Text size="sm" weight="medium" numberOfLines={1}>
+                  {item.title}
+                </Text>
+                <Text size="xs" tone="mutedForeground" numberOfLines={1}>
+                  {categoryLabel(item.category)}
+                  {day ? ` · ${t("checkups.dueDate")}: ${formatDay(day)}` : ""}
+                </Text>
+              </View>
+              {late.byDue ? (
+                <Badge label={t("checkups.overdue")} textTone="warningText" />
+              ) : late.byPlan ? (
+                <Badge label={t("checkups.plannedOverdue")} textTone="primary" />
+              ) : null}
+              <Icon icon={ChevronRight} size={16} />
+            </Pressable>
+          );
+        })
+      )}
+    </Block>
   );
 }
