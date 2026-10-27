@@ -29,6 +29,8 @@ export interface NotificationItem {
   amount?: string | null;
   unit?: string | null;
   timeStr?: string | null;
+  /** The money import source a `money_import_failed` notification is about. */
+  source?: string | null;
 }
 
 interface MedicationDosePayload {
@@ -55,6 +57,7 @@ interface DigestPayloadJson {
   time_str?: string;
   is_overdue_reminder?: boolean;
   doses?: MedicationDosePayload[];
+  source?: string;
 }
 
 export function filterUnsentRowsByAllowedPersons(
@@ -149,6 +152,7 @@ export function mapDigestRowsToNotifications(
       personName,
       titlePrefix,
       dose_event_id: payload.dose_event_id ?? null,
+      ...(payload.source != null ? { source: payload.source } : {}),
     });
   }
 
