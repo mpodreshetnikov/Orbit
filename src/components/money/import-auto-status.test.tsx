@@ -350,4 +350,15 @@ describe("MoneyImportAutoStatus schedule", () => {
       editor.getByRole("button", { name: "money.importSchedule_month_start" }),
     ).toHaveAttribute("aria-pressed", "true");
   });
+
+  it("puts the rejected day count back to the saved one", async () => {
+    const onChange = vi.fn(async () => null);
+    renderWith({ kind: "days", every: 1 }, onChange);
+    const input = screen.getByRole("spinbutton", { name: "money.importScheduleDaysLabel" });
+
+    fireEvent.change(input, { target: { value: "30" } });
+    fireEvent.blur(input);
+    expect(await screen.findByText("money.importScheduleFailed")).toBeInTheDocument();
+    expect(input).toHaveValue(1);
+  });
 });

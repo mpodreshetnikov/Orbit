@@ -200,9 +200,15 @@ function ImportAutoScheduleEditor({
   const [daysDraft, setDaysDraft] = React.useState(
     schedule.kind === "days" ? String(schedule.every) : "1",
   );
+  // What the extension last confirmed: a rejected change goes back to it, draft included.
+  const saved = React.useRef(schedule);
+  const show = (value: ImportAutoSchedule) => {
+    setCurrent(value);
+    if (value.kind === "days") setDaysDraft(String(value.every));
+  };
   React.useEffect(() => {
-    setCurrent(schedule);
-    if (schedule.kind === "days") setDaysDraft(String(schedule.every));
+    saved.current = schedule;
+    show(schedule);
   }, [schedule]);
 
   const save = async (next: ImportAutoSchedule) => {
@@ -210,12 +216,12 @@ function ImportAutoScheduleEditor({
     setSaving("saving");
     const kept = await onChange(next);
     if (!kept) {
-      setCurrent(schedule);
+      show(saved.current);
       setSaving("failed");
       return;
     }
-    setCurrent(kept);
-    if (kept.kind === "days") setDaysDraft(String(kept.every));
+    saved.current = kept;
+    show(kept);
     setSaving("saved");
   };
 
