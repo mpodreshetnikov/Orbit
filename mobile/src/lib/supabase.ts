@@ -3,7 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createClient, processLock, type SupabaseClient } from "@supabase/supabase-js";
 import { AppState } from "react-native";
 import type { Database } from "@db";
-import { currentInstance } from "@/lib/instance";
+import { currentInstance, type Instance } from "@/lib/instance";
 
 let client: SupabaseClient<Database> | null = null;
 let clientFor: string | null = null;
@@ -28,6 +28,10 @@ let clientFor: string | null = null;
  * encrypt the session and keep only the key in SecureStore — required before `M6` puts a build on
  * anybody else's phone (`T-261018-l19`).
  */
+function storageKeyOf(instance: Instance): string {
+  return `orbit-auth-${new URL(instance.supabaseUrl).host}`;
+}
+
 function currentClient(): SupabaseClient<Database> {
   const instance = currentInstance();
   if (!instance) {
@@ -38,7 +42,7 @@ function currentClient(): SupabaseClient<Database> {
     client = createClient<Database>(instance.supabaseUrl, instance.supabaseAnonKey, {
       auth: {
         storage: AsyncStorage,
-        storageKey: `orbit-auth-${new URL(instance.supabaseUrl).host}`,
+        storageKey: storageKeyOf(instance),
         autoRefreshToken: true,
         persistSession: true,
         detectSessionInUrl: false,
@@ -61,6 +65,36 @@ export const supabase = new Proxy({} as SupabaseClient<Database>, {
       : value;
   },
 });
+
+/** How long a server that is being left gets to hear about it before its session is dropped anyway. */
+const SIGN_OUT_GRACE_MS = 3000;
+
+/**
+ * Sign out of the instance in use, whether or not it answers.
+ *
+ * Supabase's sign-out asks the server first even with `scope: "local"`, and keeps the stored session
+ * when the server answers with an error rather than failing. The server is told when it can be, for a
+ * few seconds at most; then the refresh loop is stopped, the session's stored keys are removed and the
+ * client is dropped, so going back to that server later finds nobody signed in.
+ */
+export async function leaveInstance(): Promise<void> {
+  const instance = currentInstance();
+  if (!instance) return;
+  const auth = currentClient().auth;
+  await auth.stopAutoRefresh();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    auth.signOut({ scope: "local" }).catch(() => undefined),
+    new Promise((resolve) => {
+      timer = setTimeout(resolve, SIGN_OUT_GRACE_MS);
+    }),
+  ]);
+  clearTimeout(timer);
+  const key = storageKeyOf(instance);
+  await AsyncStorage.multiRemove([key, `${key}-code-verifier`, `${key}-user`]);
+  client = null;
+  clientFor = null;
+}
 
 /**
  * Keep the token fresh while the app is in the foreground, and stop when it is not.

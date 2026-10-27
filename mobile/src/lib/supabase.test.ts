@@ -66,4 +66,49 @@ describe("the Supabase client", () => {
     expect(() => modules.supabase.supabase.auth).toThrow("No Orbit server");
     expect(() => onChange?.("active")).not.toThrow();
   });
+
+  it("signs out of the server it leaves even when that server cannot be reached", async () => {
+    const modules = load();
+    const key = "orbit-auth-orbit.test";
+    await AsyncStorage.multiSet([
+      [key, "{}"],
+      [`${key}-code-verifier`, "v"],
+      [`${key}-user`, "{}"],
+    ]);
+    const auth = modules.supabase.supabase.auth;
+    const stop = jest.spyOn(auth, "stopAutoRefresh").mockResolvedValue();
+    const signOut = jest
+      .spyOn(auth, "signOut")
+      .mockResolvedValue({ error: new Error("unreachable") } as never);
+    await modules.supabase.leaveInstance();
+    expect(stop).toHaveBeenCalled();
+    expect(signOut).toHaveBeenCalledWith({ scope: "local" });
+    expect(await AsyncStorage.multiGet([key, `${key}-code-verifier`, `${key}-user`])).toEqual([
+      [key, null],
+      [`${key}-code-verifier`, null],
+      [`${key}-user`, null],
+    ]);
+    expect(modules.supabase.supabase.auth).not.toBe(auth);
+  });
+
+  it("does not wait on a server that never answers", async () => {
+    jest.useFakeTimers();
+    try {
+      const modules = load();
+      const auth = modules.supabase.supabase.auth;
+      jest.spyOn(auth, "stopAutoRefresh").mockResolvedValue();
+      jest.spyOn(auth, "signOut").mockReturnValue(new Promise(() => {}));
+      const leaving = modules.supabase.leaveInstance();
+      await jest.advanceTimersByTimeAsync(3000);
+      await expect(leaving).resolves.toBeUndefined();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("has nothing to leave before a server is chosen", async () => {
+    const modules = load();
+    jest.spyOn(modules.instance, "currentInstance").mockReturnValue(null);
+    await expect(modules.supabase.leaveInstance()).resolves.toBeUndefined();
+  });
 });

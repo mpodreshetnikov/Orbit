@@ -63,6 +63,8 @@ export default function SettingsScreen() {
                   label={t("auth.signOut")}
                   onPress={() => void signOut()}
                 />
+                {/* Nor the way to another server, when this one is what fails. */}
+                <ChangeServerButton />
               </View>
             )
           }
@@ -128,18 +130,24 @@ export default function SettingsScreen() {
 
 /** The server this phone talks to, and the way to another one. */
 function ServerSection() {
-  const router = useRouter();
   const { instance } = useInstance();
   return (
     <Section title={t("instance.section")}>
       {instance ? <Text size="sm">{new URL(instance.address).host}</Text> : null}
-      <Button
-        variant="outline"
-        compact
-        label={t("instance.change")}
-        onPress={() => router.push("/server" as Href)}
-      />
+      <ChangeServerButton compact />
     </Section>
+  );
+}
+
+function ChangeServerButton({ compact }: { compact?: boolean }) {
+  const router = useRouter();
+  return (
+    <Button
+      variant="outline"
+      compact={compact}
+      label={t("instance.change")}
+      onPress={() => router.push("/server" as Href)}
+    />
   );
 }
 

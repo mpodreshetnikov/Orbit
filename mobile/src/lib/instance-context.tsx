@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { currentInstance, loadInstance, saveInstance, type Instance } from "@/lib/instance";
+import { loadInstance, saveInstance, type Instance } from "@/lib/instance";
 import { queryClient } from "@/lib/queries";
-import { supabase } from "@/lib/supabase";
+import { leaveInstance } from "@/lib/supabase";
 
 type InstanceState = {
   /** `undefined` while the phone's choice is being read; `null` when there is none yet. */
@@ -40,10 +40,8 @@ export function InstanceProvider({ children }: { children: React.ReactNode }) {
     () => ({
       instance,
       switchTo: async (next) => {
-        if (currentInstance()) {
-          // Local only: the old server may be the one that cannot be reached.
-          await supabase.auth.signOut({ scope: "local" }).catch(() => undefined);
-        }
+        // The old server may be the one that cannot be reached: this signs out regardless.
+        await leaveInstance();
         queryClient.clear();
         await saveInstance(next);
         setInstance(next);
