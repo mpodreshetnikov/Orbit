@@ -1,4 +1,5 @@
-# The "Сегодня" tab: opens signed in as the seed user and shows the day's doses.
+# The "Сегодня" tab: opens signed in as the seed user and shows the day's blocks, doses still to
+# take and the late or coming checkups.
 # `setup/open.yaml` has already loaded the client; `setup/fresh.yaml` relaunches it on «Сегодня».
 appId: host.exp.Exponent
 name: Сегодня
@@ -23,3 +24,7 @@ name: Сегодня
     visible: "Vitamin D3.*"
     timeout: 60000
 - takeScreenshot: today-01-day
+- extendedWaitUntil:
+    visible: "Чек-апы"
+    timeout: 20000
+- takeScreenshot: today-02-blocks

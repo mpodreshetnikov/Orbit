@@ -1,4 +1,5 @@
-# "Лекарства": the course list, search, a status filter, a course and its history.
+# "Лекарства": the day's doses, then the course list, search, a status filter, a course and its
+# history.
 appId: host.exp.Exponent
 name: Лекарства
 ---
@@ -11,6 +12,12 @@ name: Лекарства
     visible: "Лекарства"
     timeout: 60000
 - tapOn: "Лекарства"
+# The tab opens on the day's doses; the courses are the switch's other half.
+- extendedWaitUntil:
+    visible: "Курсы"
+    timeout: 30000
+- takeScreenshot: meds-00-doses
+- tapOn: "Курсы"
 - extendedWaitUntil:
     visible: "Vitamin D3.*"
     timeout: 30000

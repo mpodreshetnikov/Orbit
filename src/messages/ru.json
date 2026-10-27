@@ -1824,6 +1824,22 @@
     "settings": "Настройки",
     "overdueReminderInterval": "Интервал напоминаний о просроченных",
     "overdueReminderIntervalDescription": "Напоминать о просроченных дозах каждые N минут после времени приёма (только в тот же день; после полуночи напоминания не отправляются).",
-    "overdueReminderIntervalMinutes": "мин"
+    "overdueReminderIntervalMinutes": "мин",
+    "viewDoses": "Приёмы",
+    "viewCourses": "Курсы"
+  },
+  "today": {
+    "title": "Сегодня",
+    "allDone": "Все приёмы на сегодня отмечены",
+    "answered": "Отмечено {done} из {total}",
+    "checkups": "Чек-апы",
+    "noCheckups": "Нет просроченных и ближайших чек-апов",
+    "showAll": "Все",
+    "blocks": "Блоки на «Сегодня»",
+    "blocksDescription": "Что показывать на вкладке «Сегодня» в приложении",
+    "blockDoses": "Приёмы лекарств",
+    "blockCheckups": "Актуальные и просроченные чек-апы",
+    "noBlocks": "Все блоки скрыты",
+    "noBlocksHint": "Включите нужные в настройках"
   }
 }
