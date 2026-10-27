@@ -53,6 +53,8 @@ const EXTENSION_WEBAPP_SOURCE = "orbit-webapp";
 const EXTENSION_BRIDGE_SOURCE = "orbit-extension";
 const DEFAULT_TBANK_PARSE_STRATEGY: MoneyImportParseStrategy = "full";
 const EXTENSION_PING_TIMEOUT_MS = 500;
+/** Focus and visibility often fire together; one ask covers both. */
+const EXTENSION_RECHECK_MIN_GAP_MS = 2000;
 // The ping is answered by the service worker, which may be asleep; one 500 ms miss is a slow
 // wake as often as a missing extension, so the start asks a few times before giving up.
 const START_PROBE_OFFSETS_MS: readonly number[] = [0, 500, 1500, 3000];
@@ -642,6 +644,35 @@ export default function MoneyImportPage() {
     if (!isExtensionConnector) return;
     void checkExtension();
   }, [checkExtension, isExtensionConnector, selectedSourceId]);
+
+  // An extension updated while this page was open is heard only when asked again: the page
+  // kept saying v0.1.31 under an installed 0.1.33 (2026-10-27). Coming back into view, or
+  // getting focus back from the extension's popup, asks once more -- quietly, so the panel does
+  // not blank on every focus, and only a live answer replaces what the page shows.
+  useEffect(() => {
+    if (!isExtensionConnector) return;
+    let lastAskedAtMs = 0;
+    const askAgain = () => {
+      if (document.visibilityState !== "visible") return;
+      const nowMs = Date.now();
+      if (nowMs - lastAskedAtMs < EXTENSION_RECHECK_MIN_GAP_MS) return;
+      lastAskedAtMs = nowMs;
+      void (async () => {
+        const pingResult = await pingExtension();
+        if (!pingResult.active) return;
+        setExtensionActive(true);
+        setInstalledExtensionVersion(pingResult.extensionVersion);
+        const status = await requestExtensionAutoStatus();
+        if (status) setExtensionAutoStatus({ state: "ready", status });
+      })();
+    };
+    window.addEventListener("focus", askAgain);
+    document.addEventListener("visibilitychange", askAgain);
+    return () => {
+      window.removeEventListener("focus", askAgain);
+      document.removeEventListener("visibilitychange", askAgain);
+    };
+  }, [isExtensionConnector, pingExtension, requestExtensionAutoStatus]);
 
   useEffect(() => {
     if (!isExtensionConnector || !shouldUsePublishedExtensionFlow) {
