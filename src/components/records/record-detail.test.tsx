@@ -1,5 +1,5 @@
 import React from "react";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -677,6 +677,50 @@ describe("RecordDetail", () => {
     await userEvent.setup().click(screen.getByRole("button", { name: "observations.add" }));
     expect(await screen.findByText("observations.addObservation")).toBeInTheDocument();
   });
+
+  it("puts a row kept unrecognised into history once the owner matches it", async () => {
+    const updateObs = createMutationMock();
+    hookMocks.useUpdateRecordObservation.mockReturnValue(updateObs);
+    hookMocks.useRecordObservations.mockReturnValue({
+      data: [
+        {
+          id: "obs-kept",
+          record_id: "record-1",
+          obs_name: "Сахар крови",
+          obs_code: null,
+          is_applied: false,
+          value_numeric: 5.1,
+          value_text: "5.1",
+          value_canonical: null,
+          unit: "mmol/L",
+          unit_canonical: null,
+          ref_range_text: null,
+          ref_range_low: null,
+          ref_range_high: null,
+          ref_range_low_canonical: null,
+          ref_range_high_canonical: null,
+          status: null,
+        },
+      ],
+    });
+    const { RecordDetail } = await import("./record-detail");
+    render(<RecordDetail recordId="record-1" />);
+    const user = userEvent.setup();
+
+    const row = screen.getByText("Сахар крови").closest(".rounded-lg") as HTMLElement;
+    await user.click(within(row).getAllByRole("button")[0]);
+    await user.click(screen.getAllByRole("combobox")[0]);
+    await user.type(screen.getByPlaceholderText("observations.searchOrSelect"), "глю");
+    await user.click(await screen.findByText("Глюкоза"));
+    await user.click(screen.getByRole("button", { name: "common.save" }));
+
+    await waitFor(() =>
+      expect(updateObs.mutateAsync).toHaveBeenCalledWith({
+        id: "obs-kept",
+        updates: expect.objectContaining({ obs_code: "glucose", is_applied: true }),
+      }),
+    );
+  }, 20000);
 
   it("handles edit/save, remove, restore, and hard delete flows", async () => {
     const updateMutation = createMutationMock();

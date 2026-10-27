@@ -453,6 +453,8 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
           status: data.status,
           obs_code: data.obs_code,
           is_user_verified: true,
+          // A row kept unrecognised at approval joins its history once the owner matches it.
+          ...(data.obs_code ? { is_applied: true } : {}),
         },
       });
     }

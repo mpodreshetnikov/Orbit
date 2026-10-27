@@ -1218,7 +1218,7 @@
     "customObservation": "Custom (not in catalog)",
     "customBadge": "Custom",
     "unrecognisedBadge": "Not recognised",
-    "unrecognisedHint": "The catalogue does not know this name, so it is kept on the record but not in any history. Add it to the catalogue to track it.",
+    "unrecognisedHint": "The catalogue does not know this name, so it is kept on the record but not in any history. To track it, edit it and pick the catalogue entry.",
     "pendingBadge": "Pending",
     "applyButton": "Apply",
     "applyHint": "Click Apply to include in your health data",
