@@ -5,6 +5,7 @@ import {
   createDraftRecord,
   dismissConditionClosure,
   dismissRecordProposals,
+  findDuplicatePages,
   findMissingPages,
   signRecordPageLinks,
   proposeRecordReconciliation,
@@ -210,6 +211,72 @@ describe("findMissingPages", () => {
     });
     expect(missing.map((page) => page.original_filename)).toEqual(["b.png"]);
     expect(stub.list).toHaveBeenCalledWith("p-1/rec-1", { limit: 1000 });
+  });
+});
+
+describe("findDuplicatePages", () => {
+  const A = "a".repeat(64);
+  const B = "b".repeat(64);
+
+  it("reports a page this person already has and one repeated in the document", async () => {
+    const stub = createSupabaseStub({
+      record_attachments: [
+        {
+          data: [
+            {
+              content_sha256: A,
+              original_filename: "old.pdf",
+              medical_records: {
+                id: "rec-old",
+                title: "Витамины",
+                status: "active",
+                record_date: "2025-10-27",
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    const duplicates = await findDuplicatePages(stub.client, "p-1", [
+      { filename: "new.pdf", sha256: A },
+      { filename: "page2.jpg", sha256: B },
+      { filename: "page2-again.jpg", sha256: B },
+      { filename: "unhashed.jpg" },
+    ]);
+
+    expect(duplicates).toEqual([
+      {
+        filename: "page2-again.jpg",
+        record_id: null,
+        record_title: null,
+        record_status: null,
+        record_date: null,
+        page_filename: "page2.jpg",
+      },
+      {
+        filename: "new.pdf",
+        record_id: "rec-old",
+        record_title: "Витамины",
+        record_status: "active",
+        record_date: "2025-10-27",
+        page_filename: "old.pdf",
+      },
+    ]);
+    // Scoped to the person, and a removed record is a fresh start rather than a duplicate.
+    expect(stub.argsFor("record_attachments", "in")).toEqual([["content_sha256", [A, B]]]);
+    expect(stub.argsFor("record_attachments", "eq")).toEqual([
+      ["medical_records.person_id", "p-1"],
+    ]);
+    expect(stub.argsFor("record_attachments", "neq")).toEqual([
+      ["medical_records.status", "removed"],
+    ]);
+  });
+
+  it("asks nothing when no page carries a hash", async () => {
+    const stub = createSupabaseStub({});
+    expect(await findDuplicatePages(stub.client, "p-1", [{ filename: "a.jpg" }])).toEqual([]);
+    expect(stub.calls).toHaveLength(0);
   });
 });
 

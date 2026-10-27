@@ -1,11 +1,14 @@
 import type { LocalStorageLike } from "./session-store.js";
 import type { AutoRunScope } from "./auto-run-store.js";
 import { isRunRequestLive, normalizeStaleAfterMs } from "./attention-policy.js";
+import { normalizeAutoSchedule, type AutoSchedule } from "./auto-schedule.js";
 
 const ATTENTION_STORAGE_KEY = "money_import_attention";
 
 export interface AttentionState {
   staleAfterMs: number;
+  /** How often the sweep imports a source on its own, as the import page set it. */
+  autoSchedule: AutoSchedule;
   /** When the extension last opened the attention page of its own accord. */
   lastOpenedAtMs: number | null;
   /** When the browser last started, as `chrome.runtime.onStartup` told the extension. */
@@ -31,6 +34,8 @@ export interface AttentionStore {
   getState(): Promise<AttentionState>;
   /** Stores the threshold, bounded; returns what was stored. */
   setStaleAfterMs(value: unknown): Promise<number>;
+  /** Stores the schedule, normalised; returns what was stored. */
+  setAutoSchedule(value: unknown): Promise<AutoSchedule>;
   markPageOpened(nowMs: number): Promise<void>;
   markBrowserStarted(nowMs: number): Promise<void>;
   requestRun(scope: AutoRunScope, nowMs: number, tabId?: number | null): Promise<void>;
@@ -63,6 +68,7 @@ function readState(value: unknown): AttentionState {
   }
   return {
     staleAfterMs: normalizeStaleAfterMs(record.staleAfterMs),
+    autoSchedule: normalizeAutoSchedule(record.autoSchedule),
     lastOpenedAtMs:
       typeof record.lastOpenedAtMs === "number" && Number.isFinite(record.lastOpenedAtMs)
         ? record.lastOpenedAtMs
@@ -118,6 +124,13 @@ export function createAttentionStore(storage: LocalStorageLike): AttentionStore 
         const staleAfterMs = normalizeStaleAfterMs(value);
         await write({ ...state, staleAfterMs });
         return staleAfterMs;
+      });
+    },
+    setAutoSchedule(value) {
+      return change(async (state) => {
+        const autoSchedule = normalizeAutoSchedule(value);
+        await write({ ...state, autoSchedule });
+        return autoSchedule;
       });
     },
     markPageOpened(nowMs) {

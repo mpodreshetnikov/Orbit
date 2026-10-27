@@ -324,3 +324,42 @@ export function setExtensionStaleAfter(staleAfterMs: number): Promise<number | n
       data.ok === true && typeof data.stale_after_ms === "number" ? data.stale_after_ms : null,
   });
 }
+
+/**
+ * How often the extension imports on its own: every N days, at the start or end of each week
+ * (Monday or Sunday), or of each month (the first or the last day). The extension keeps it.
+ */
+export type ImportAutoSchedule =
+  | { kind: "days"; every: number }
+  | { kind: "week"; at: "start" | "end" }
+  | { kind: "month"; at: "start" | "end" };
+
+export const IMPORT_SCHEDULE_MAX_DAYS = 30;
+
+/** A schedule as the extension reported it; null for anything else, an older extension included. */
+export function readImportAutoSchedule(value: unknown): ImportAutoSchedule | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  if (record.kind === "days" && typeof record.every === "number" && record.every >= 1) {
+    return { kind: "days", every: Math.round(record.every) };
+  }
+  if (
+    (record.kind === "week" || record.kind === "month") &&
+    (record.at === "start" || record.at === "end")
+  ) {
+    return { kind: record.kind, at: record.at };
+  }
+  return null;
+}
+
+/** Stores the schedule; resolves with what the extension kept, or null when it did not answer. */
+export function setExtensionAutoSchedule(
+  schedule: ImportAutoSchedule,
+): Promise<ImportAutoSchedule | null> {
+  return requestFromExtension({
+    type: "MONEY_IMPORT_SET_AUTO_SCHEDULE",
+    replyType: "MONEY_IMPORT_AUTO_SCHEDULE_ACK",
+    payload: { schedule },
+    read: (data) => (data.ok === true ? readImportAutoSchedule(data.schedule) : null),
+  });
+}

@@ -2,6 +2,7 @@ import type { AutoRunStore } from "./auto-run-store.js";
 import type { StoredImportGrant } from "./grant-store.js";
 import { requestKey, type AttentionState } from "./attention-store.js";
 import { describeSourceFreshness, isRunRequestLive } from "./attention-policy.js";
+import type { AutoSchedule } from "./auto-schedule.js";
 import {
   describeAutoRunEligibility,
   lastAttemptOf,
@@ -71,8 +72,12 @@ export function describeLastAttempt(state: AutoRunState): AttentionLastAttempt |
   };
 }
 
-export function describeNextRun(state: AutoRunState, nowMs: number): AttentionNextRun {
-  const eligibility = describeAutoRunEligibility(state, nowMs);
+export function describeNextRun(
+  state: AutoRunState,
+  nowMs: number,
+  schedule?: AutoSchedule,
+): AttentionNextRun {
+  const eligibility = describeAutoRunEligibility(state, nowMs, schedule ? { schedule } : {});
   return eligibility.kind === "after"
     ? { kind: "after", at: new Date(eligibility.atMs).toISOString() }
     : { kind: eligibility.kind };
@@ -130,6 +135,7 @@ export async function buildAttentionStatus(input: {
         Number.isFinite(receivedAtMs) ? receivedAtMs : 0,
         input.nowMs,
         input.attention.staleAfterMs,
+        input.attention.autoSchedule,
       );
       sources.push({
         source_id: sourceId,
@@ -146,7 +152,7 @@ export async function buildAttentionStatus(input: {
           input.liveRuns?.findBySource(sourceId, input.grant.person_id) ?? null,
         ),
         last_attempt: describeLastAttempt(state),
-        next_run: describeNextRun(state, input.nowMs),
+        next_run: describeNextRun(state, input.nowMs, input.attention.autoSchedule),
       });
     }
   }

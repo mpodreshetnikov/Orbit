@@ -16,6 +16,7 @@ import {
   type AutoRunOrigin,
 } from "./auto-run-policy.js";
 import { looksLikeBankLoginUrl } from "./bank-login-url.js";
+import { DEFAULT_AUTO_SCHEDULE } from "./auto-schedule.js";
 import type { AttentionStore } from "./attention-store.js";
 import { activeImportRuns, UPDATE_IN_PROGRESS_ERROR } from "./active-runs.js";
 import {
@@ -29,6 +30,7 @@ export interface BackgroundMessage {
   type: string;
   source_id?: unknown;
   stale_after_ms?: unknown;
+  schedule?: unknown;
   session?: Record<string, unknown>;
   grant?: unknown;
   session_id?: string;
@@ -378,6 +380,11 @@ export async function routeBackgroundMessage(
 
   if (message.type === "MONEY_IMPORT_GET_AUTO_STATUS") {
     const grant = await deps.grantStore.getGrant();
+    // The schedule lives with the attention settings; an extension wired without them runs
+    // on the default, and says so.
+    const schedule = deps.attentionStore
+      ? (await deps.attentionStore.getState()).autoSchedule
+      : DEFAULT_AUTO_SCHEDULE;
     const scheduled = deps.listScheduledSweeps ? await deps.listScheduledSweeps() : [];
     const nowMs = deps.now?.() ?? Date.now();
     const sources: AutoImportStatusSource[] = [];
@@ -389,11 +396,11 @@ export async function routeBackgroundMessage(
           sourceId,
           payerPersonId: grant.person_id,
         });
-        const eligibility = describeAutoRunEligibility(state, nowMs);
+        const eligibility = describeAutoRunEligibility(state, nowMs, { schedule });
         // A visit inside the cooldown still sets the alarm; when it fires the policy turns the
         // sweep away. Reporting that alarm as a run would contradict the line above it.
         const pending = scheduled.find(
-          (entry) => entry.sourceId === sourceId && shouldAutoRun(state, entry.atMs),
+          (entry) => entry.sourceId === sourceId && shouldAutoRun(state, entry.atMs, { schedule }),
         );
         sources.push({
           source_id: sourceId,
@@ -423,6 +430,7 @@ export async function routeBackgroundMessage(
           }
         : null,
       sources,
+      schedule,
     };
   }
 
@@ -485,6 +493,12 @@ export async function routeBackgroundMessage(
       tabId,
     );
     return { ok: true, source_id: sourceId, target_url: targetUrl, tab_id: tabId };
+  }
+
+  if (message.type === "MONEY_IMPORT_SET_AUTO_SCHEDULE") {
+    if (!deps.attentionStore) return { ok: false, error: "Schedule is not available" };
+    const schedule = await deps.attentionStore.setAutoSchedule(message.schedule);
+    return { ok: true, schedule };
   }
 
   if (message.type === "MONEY_IMPORT_SET_ATTENTION_SETTINGS") {

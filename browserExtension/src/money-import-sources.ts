@@ -11,6 +11,11 @@ export interface MoneyImportSourceDefinition extends MoneyImportSourcePreset {
   accountSource: string;
   displayName: string;
   hostnamePattern: RegExp;
+  /**
+   * Every origin the bank serves its site from, the one `targetUrl` names first. A tab on any of
+   * them is the bank's; a slow load on one is moved to the next (see `core/slow-load-fallback.ts`).
+   */
+  siteOrigins: string[];
 }
 
 const MONEY_IMPORT_SOURCE_DEFINITIONS: MoneyImportSourceDefinition[] = [
@@ -20,10 +25,18 @@ const MONEY_IMPORT_SOURCE_DEFINITIONS: MoneyImportSourceDefinition[] = [
     accountSource: "tbank",
     displayName: "T-Bank Web",
     targetUrl: "https://www.tbank.ru/mybank/operations/",
-    tabUrlPatterns: ["https://www.tbank.ru/*", "https://*.tbank.ru/*"],
+    // tbank-online.com is the bank's own mirror of the same site and API (checked 2026-10-26),
+    // with a sign-in of its own: its cookies and SSO are scoped to that domain.
+    tabUrlPatterns: [
+      "https://www.tbank.ru/*",
+      "https://*.tbank.ru/*",
+      "https://www.tbank-online.com/*",
+      "https://*.tbank-online.com/*",
+    ],
     tabUrlContains: "/mybank/operations",
-    apiUrlRegex: "https://(?:www\\.)?tbank\\.ru/api/common/v1/",
-    hostnamePattern: /(^|\.)tbank\.ru$/i,
+    apiUrlRegex: "https://(?:www\\.)?tbank(?:\\.ru|-online\\.com)/api/common/v1/",
+    hostnamePattern: /(^|\.)(tbank\.ru|tbank-online\.com)$/i,
+    siteOrigins: ["https://www.tbank.ru", "https://www.tbank-online.com"],
   },
   {
     sourceId: "alfa_web",
@@ -35,6 +48,7 @@ const MONEY_IMPORT_SOURCE_DEFINITIONS: MoneyImportSourceDefinition[] = [
     tabUrlContains: "web.alfabank.ru",
     apiUrlRegex: "https://(?:[^/]+\\.)?alfabank\\.ru/",
     hostnamePattern: /(^|\.)alfabank\.ru$/i,
+    siteOrigins: ["https://web.alfabank.ru"],
   },
 ];
 
@@ -115,4 +129,56 @@ export function shouldShowMoneyImportSourcePageWidget(
   return (
     session?.show_source_page_widget === true && getMoneyImportSourceDefinition(sourceId) !== null
   );
+}
+
+function originOf(url: string | null | undefined): string | null {
+  if (typeof url !== "string") return null;
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+}
+
+/** The site origin a source URL is on, or null when it is on none of them. */
+export function findMoneyImportSourceSiteOrigin(
+  sourceId: string | null | undefined,
+  url: string | null | undefined,
+): string | null {
+  const origin = originOf(url);
+  if (!origin) return null;
+  return getMoneyImportSourceDefinition(sourceId)?.siteOrigins.includes(origin) ? origin : null;
+}
+
+/** The known source whose site a URL is on, by exact site origin. */
+export function findMoneyImportSourceBySiteUrl(
+  url: string | null | undefined,
+): MoneyImportSourceDefinition | null {
+  const origin = originOf(url);
+  if (!origin) return null;
+  return (
+    MONEY_IMPORT_SOURCE_DEFINITIONS.find((source) => source.siteOrigins.includes(origin)) ?? null
+  );
+}
+
+/**
+ * The same page on another of the source's site origins: `origin` when given and known, else the
+ * next one after the URL's own, wrapping around. Null when the URL is on none of them, or when
+ * the source has only the one.
+ */
+export function moveMoneyImportSourceUrl(
+  sourceId: string | null | undefined,
+  url: string,
+  origin?: string | null,
+): string | null {
+  const origins = getMoneyImportSourceDefinition(sourceId)?.siteOrigins ?? [];
+  const current = findMoneyImportSourceSiteOrigin(sourceId, url);
+  if (!current || origins.length < 2) return null;
+  const target =
+    origin && origins.includes(origin)
+      ? origin
+      : origins[(origins.indexOf(current) + 1) % origins.length];
+  if (target === current) return null;
+  const parsed = new URL(url);
+  return `${target}${parsed.pathname}${parsed.search}${parsed.hash}`;
 }

@@ -156,3 +156,20 @@ describe("chooseReplacementTab", () => {
     expect(chooseReplacementTab([], () => false)).toBeNull();
   });
 });
+
+describe("describeSourceFreshness on a schedule", () => {
+  it("counts only the lateness past what the schedule asked it to wait", () => {
+    const lastOk = new Date(2026, 9, 14, 10).getTime(); // a Wednesday
+    const state = nextAutoRunState(null, lastOk, "ok");
+    const twoDaysOn = lastOk + 2 * DAY_MS;
+    expect(describeSourceFreshness(state, 0, twoDaysOn, DAY_MS).stale).toBe(true);
+    expect(
+      describeSourceFreshness(state, 0, twoDaysOn, DAY_MS, { kind: "week", at: "start" }).stale,
+    ).toBe(false);
+    // Due on Monday at midnight, and late a little after it, as a daily source is.
+    const tuesdayNoon = new Date(2026, 9, 20, 12).getTime();
+    expect(
+      describeSourceFreshness(state, 0, tuesdayNoon, DAY_MS, { kind: "week", at: "start" }).stale,
+    ).toBe(true);
+  });
+});

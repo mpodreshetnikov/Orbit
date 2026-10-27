@@ -167,6 +167,7 @@ describe("content-bridge", () => {
         ok: true,
         grant: { person_id: "person-1", allowed_sources: ["tbank_web"], received_at: "x" },
         sources: [{ source_id: "tbank_web", next_run: { kind: "now" } }],
+        schedule: null,
       },
       "*",
     );
@@ -283,6 +284,40 @@ describe("attention page requests", () => {
         request_id: "s-1",
         ok: true,
         stale_after_ms: 259_200_000,
+      },
+      "*",
+    );
+  });
+
+  it("relays the schedule and acks what was stored", () => {
+    const { bridge, runtimeSendMessage, windowPostMessage } = createBridge();
+    runtimeSendMessage.mockImplementation((_message, callback) =>
+      callback?.({ ok: true, schedule: { kind: "month", at: "end" } } as never),
+    );
+
+    bridge.handleWindowMessage(
+      new MessageEvent("message", {
+        source: window as unknown as MessageEventSource,
+        data: {
+          source: "orbit-webapp",
+          type: "MONEY_IMPORT_SET_AUTO_SCHEDULE",
+          request_id: "s-2",
+          schedule: { kind: "month", at: "end" },
+        },
+      }),
+    );
+
+    expect(runtimeSendMessage).toHaveBeenCalledWith(
+      { type: "MONEY_IMPORT_SET_AUTO_SCHEDULE", schedule: { kind: "month", at: "end" } },
+      expect.any(Function),
+    );
+    expect(windowPostMessage).toHaveBeenCalledWith(
+      {
+        source: "orbit-extension",
+        type: "MONEY_IMPORT_AUTO_SCHEDULE_ACK",
+        request_id: "s-2",
+        ok: true,
+        schedule: { kind: "month", at: "end" },
       },
       "*",
     );
