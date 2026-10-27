@@ -20,8 +20,10 @@ import { createSessionJanitor } from "./core/session-janitor.js";
 import { needsRearmAtStart, sweepAlarmSchedule } from "./core/auto-import-alarm.js";
 import { chooseReplacementTab, shouldAdoptRequestTab } from "./core/attention-policy.js";
 import {
+  createMovedTabStore,
   createPreferredSiteOriginStore,
   createSlowLoadFallback,
+  isSessionTab,
   toPreferredSiteUrl,
 } from "./core/slow-load-fallback.js";
 import {
@@ -655,14 +657,36 @@ async function adoptRequestTabIfDue(sourceId: string, tabId: number, nowMs: numb
  * while a session for it is stored -- that is still loading after a while, or could not reach the
  * bank at all, is moved to the bank's mirror. See `createSlowLoadFallback`.
  */
+// When this worker saw each tab created and each session arrive: what ties a new bank tab to the
+// import the page started in the same click (`isSessionTab`). In memory only -- a worker restarted
+// in between knows neither, and then the tab is left alone, which is the safe side.
+const tabCreatedAtMs = new Map<number, number>();
+let sessionSeen: { sessionId: unknown; atMs: number } | null = null;
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local" || !(SESSION_STORAGE_KEY in changes)) return;
+  const next = changes[SESSION_STORAGE_KEY]?.newValue as Record<string, unknown> | undefined;
+  const sessionId = next?.session_id ?? null;
+  if (sessionId === null) sessionSeen = null;
+  else if (sessionSeen?.sessionId !== sessionId) sessionSeen = { sessionId, atMs: Date.now() };
+});
+
 const slowLoadFallback = createSlowLoadFallback({
   store: preferredSiteOrigins,
+  moved: createMovedTabStore(chrome.storage.session ?? chrome.storage.local),
   isWatchedTab: async (tabId, sourceId) => {
     if (autoImportSweep.ownsTab(tabId)) return true;
-    const session = await sessionStore.getSession();
-    if (session && resolveSourceId(session) === sourceId) return true;
     const request = await attentionStore.findRequestForTab(tabId, Date.now());
-    return Boolean(request && request.sourceId === sourceId);
+    if (request && request.sourceId === sourceId) return true;
+    const session = await sessionStore.getSession();
+    const seen = sessionSeen;
+    return isSessionTab({
+      tabId,
+      sourceId,
+      session,
+      tabCreatedAtMs: tabCreatedAtMs.get(tabId) ?? null,
+      sessionSeenAtMs: seen && session && seen.sessionId === session.session_id ? seen.atMs : null,
+    });
   },
   // A first load that has not answered yet is only in `pendingUrl`; `url` is still blank.
   getTab: async (tabId) => {
@@ -687,7 +711,10 @@ const slowLoadFallback = createSlowLoadFallback({
   onSwitched: (attrs) => telemetry.info("money_import_bank_mirror_switched", attrs),
 });
 
-chrome.tabs.onRemoved.addListener((tabId) => slowLoadFallback.onTabRemoved(tabId));
+chrome.tabs.onRemoved.addListener((tabId) => {
+  tabCreatedAtMs.delete(tabId);
+  slowLoadFallback.onTabRemoved(tabId);
+});
 // A new tab whose first page has not answered sends no update until it does, which is the very
 // wait this is for: its creation, and a look a moment later, are what name where it is going.
 // The look is for `window.open` -- how the import page opens the bank -- whose tab is created
@@ -702,6 +729,7 @@ function watchNewTabLoad(tab: chrome.tabs.Tab): void {
 }
 
 chrome.tabs.onCreated.addListener((tab) => {
+  if (typeof tab.id === "number") tabCreatedAtMs.set(tab.id, Date.now());
   watchNewTabLoad(tab);
   const tabId = tab.id;
   if (typeof tabId !== "number") return;

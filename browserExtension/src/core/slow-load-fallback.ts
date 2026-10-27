@@ -57,8 +57,71 @@ export async function toPreferredSiteUrl(
   return moveMoneyImportSourceUrl(source.sourceId, url, preferred) ?? url;
 }
 
+const MOVED_TABS_STORAGE_KEY = "money_import_mirror_moved_tabs";
+
+/**
+ * How close together a new tab and a newly stored import session must be for the tab to count as
+ * the import's own. The import page opens the bank and hands over the session in the same click,
+ * so the two land within a second of each other; a tab the person opens on their own minutes
+ * earlier or later is theirs, and is not moved.
+ */
+export const SESSION_TAB_WINDOW_MS = 15_000;
+
+/**
+ * Whether a tab is the one a stored session's import runs in. Once the run has started the
+ * session names its tab; before that, the only tie is that the tab was created when the session
+ * arrived -- matching the bank alone would take every tab of that bank the person has open.
+ */
+export function isSessionTab(input: {
+  tabId: number;
+  sourceId: string;
+  session: Record<string, unknown> | null;
+  tabCreatedAtMs: number | null;
+  sessionSeenAtMs: number | null;
+}): boolean {
+  const { session } = input;
+  if (!session || session.source !== input.sourceId) return false;
+  if (typeof session.run_tab_id === "number") return session.run_tab_id === input.tabId;
+  if (input.tabCreatedAtMs === null || input.sessionSeenAtMs === null) return false;
+  return Math.abs(input.tabCreatedAtMs - input.sessionSeenAtMs) <= SESSION_TAB_WINDOW_MS;
+}
+
+/**
+ * The tabs already moved, kept where a restarted worker finds them: the worker is torn down when
+ * idle, and a tab waiting on a slow mirror would otherwise be moved back by the next one.
+ */
+export interface MovedTabStore {
+  has(tabId: number): Promise<boolean>;
+  add(tabId: number): Promise<void>;
+  delete(tabId: number): Promise<void>;
+}
+
+export function createMovedTabStore(storage: LocalStorageLike): MovedTabStore {
+  async function read(): Promise<number[]> {
+    const data = await storage.get([MOVED_TABS_STORAGE_KEY]);
+    const value = data[MOVED_TABS_STORAGE_KEY];
+    return Array.isArray(value) ? value.filter((id): id is number => typeof id === "number") : [];
+  }
+  return {
+    async has(tabId) {
+      return (await read()).includes(tabId);
+    },
+    async add(tabId) {
+      const ids = await read();
+      if (!ids.includes(tabId)) await storage.set({ [MOVED_TABS_STORAGE_KEY]: [...ids, tabId] });
+    },
+    async delete(tabId) {
+      const ids = await read();
+      if (ids.includes(tabId)) {
+        await storage.set({ [MOVED_TABS_STORAGE_KEY]: ids.filter((id) => id !== tabId) });
+      }
+    },
+  };
+}
+
 export interface SlowLoadFallbackDeps {
   store: PreferredSiteOriginStore;
+  moved: MovedTabStore;
   /** Whether a tab is one an import depends on; a person's own browsing is left alone. */
   isWatchedTab: (tabId: number, sourceId: string) => Promise<boolean>;
   getTab: (tabId: number) => Promise<{ url?: string; status?: string } | null>;
@@ -90,7 +153,7 @@ export interface SlowLoadFallback {
 export function createSlowLoadFallback(deps: SlowLoadFallbackDeps): SlowLoadFallback {
   const delayMs = deps.delayMs ?? SLOW_LOAD_FALLBACK_MS;
   const timers = new Map<number, unknown>();
-  const moved = new Set<number>();
+  const { moved } = deps;
 
   function cancel(tabId: number): void {
     const handle = timers.get(tabId);
@@ -105,11 +168,11 @@ export function createSlowLoadFallback(deps: SlowLoadFallbackDeps): SlowLoadFall
     url: string,
     reason: "slow" | "error_page",
   ): Promise<void> {
-    if (moved.has(tabId)) return;
+    if (await moved.has(tabId).catch(() => false)) return;
     const origin = findMoneyImportSourceSiteOrigin(sourceId, url);
     const target = moveMoneyImportSourceUrl(sourceId, url);
     if (!origin || !target) return;
-    moved.add(tabId);
+    await moved.add(tabId).catch(() => undefined);
     await deps.navigate(tabId, target);
     deps.onSwitched?.({
       source_id: sourceId,
@@ -158,7 +221,9 @@ export function createSlowLoadFallback(deps: SlowLoadFallbackDeps): SlowLoadFall
       // Whether the tab is watched is asked when the delay is up, not now: the import page opens
       // the bank first and hands the extension its session after, so a tab that starts loading
       // unwatched is often watched by the time it is slow.
-      if (moved.has(tabId) || timers.has(tabId) || source.siteOrigins.length < 2) return;
+      if (timers.has(tabId) || source.siteOrigins.length < 2) return;
+      if (await moved.has(tabId).catch(() => false)) return;
+      if (timers.has(tabId)) return;
       timers.set(
         tabId,
         deps.setTimer(() => {
@@ -168,7 +233,7 @@ export function createSlowLoadFallback(deps: SlowLoadFallbackDeps): SlowLoadFall
     },
     onTabRemoved(tabId) {
       cancel(tabId);
-      moved.delete(tabId);
+      void moved.delete(tabId).catch(() => undefined);
     },
   };
 }
