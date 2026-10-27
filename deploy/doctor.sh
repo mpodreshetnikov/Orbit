@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # What this server's network lets Orbit reach, in enough detail to tell the usual causes apart:
 # a link smaller than 1500 bytes, IPv4 or IPv6 missing or filtered, DNS answering differently for
-# containers, a provider that cuts long transfers short, a service that refuses the server.
+# containers, a provider that cuts long transfers short, a service that refuses the server. Also
+# what fills its disk.
 #
 #   sudo deploy/orbit doctor          on the server
 #   Actions -> Deploy to your server -> Run workflow, action "doctor"   from GitHub
@@ -52,6 +53,18 @@ echo "Docker:      $(docker version --format '{{.Server.Version}}' 2>/dev/null |
 net="$(docker inspect supabase-edge-functions --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}' 2>/dev/null | awk '{print $1}')"
 net="${net:-orbit_default}"
 echo "Orbit's net: $net, $(docker network inspect "$net" --format 'driver MTU {{or (index .Options "com.docker.network.driver.mtu") "default (1500)"}}, IPv6 {{.EnableIPv6}}' 2>/dev/null || echo 'not found')"
+
+# Sizes only, no file names below the top level: this log is public. A deploy warns under 15 GB free
+# (preflight_server in deploy/lib/common.sh); this says what holds the rest.
+echo
+echo "== Disk"
+df -h / /var/lib/docker /var/lib/orbit 2>/dev/null | awk 'NR == 1 || !seen[$1]++' | sed 's/^/   /'
+echo "Docker:"
+docker system df 2>/dev/null | sed 's/^/   /'
+echo "prebuilt images kept: $(docker images --format '{{.Tag}}' 2>/dev/null | grep -c -E '^[0-9a-f]{40}$')"
+echo "largest directories:"
+du -xsh /var/lib/docker /var/lib/orbit/* /var/log /var/cache /opt /home /root /tmp /orbit.swap 2>/dev/null |
+  sort -rh | head -12 | sed 's/^/   /'
 
 echo
 echo "== From the server"

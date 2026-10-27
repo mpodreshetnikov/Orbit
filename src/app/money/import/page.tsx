@@ -1,16 +1,23 @@
 "use client";
 
 import React from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useDropzone } from "react-dropzone";
-import { CheckCircle2, FileSpreadsheet, HelpCircle, LinkIcon, Plus, Upload } from "lucide-react";
+import { ChevronDown, LinkIcon, Upload } from "lucide-react";
 import { useUIStore } from "@/stores/ui-store";
-import { useMoneyAccounts, useCreateMoneyAccount, useMoneyCardsByAccountIds } from "@/hooks";
 import { getConnectors } from "@/lib/import/connector-types";
-import { getAccountHint, importAccountHints, importBatchRows } from "@/types/money-import-rows";
+import { importBatchRows } from "@/types/money-import-rows";
+import {
+  canRunImportExtension,
+  importBankOfSource,
+  importBankOptions,
+  type ImportBankId,
+  type ImportBankOption,
+  type ImportMethodOption,
+} from "@/types/money-import-sources";
 import {
   MoneyImportAutoStatus,
   MoneyImportGrants,
@@ -26,48 +33,43 @@ import {
   type ExtensionRelease,
 } from "@/lib/import/extension-release";
 import {
-  MONEY_ACCOUNT_SOURCES,
-  type BatchTransactionRow,
-  type CanonicalTransactionRow,
-  type MoneyAccountSource,
   type MoneyImportConnector,
   type MoneyImportParseStrategy,
   type MoneyImportPreviewResult,
   type MoneyImportSessionCreateResult,
-  type MoneyImportSessionStatus,
 } from "@/types";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { formatMoney } from "@/lib/money";
+import { Card, CardContent } from "@/components/ui/card";
 import { format, subMonths } from "date-fns";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
 
 import "@/lib/import/connectors/tbank-csv";
 import "@/lib/import/connectors/tbank-web";
 import "@/lib/import/connectors/alfa-web";
 
-const TBANK_ICON_URL =
-  "https://cdn.tbank.ru/static/pfa-multimedia/images/ae288629-59d7-4eb6-b074-8bb0549a43b6.svg";
-
 const EXTENSION_WEBAPP_SOURCE = "orbit-webapp";
 const EXTENSION_BRIDGE_SOURCE = "orbit-extension";
-const EXTENSION_ID = process.env.NEXT_PUBLIC_EXTENSION_ID ?? "";
-const DEFAULT_ACCOUNT_STORAGE_PREFIX = "money-import-default-account";
 const DEFAULT_TBANK_PARSE_STRATEGY: MoneyImportParseStrategy = "full";
 const EXTENSION_PING_TIMEOUT_MS = 500;
-const CONNECTOR_ACCOUNT_SOURCE_BY_SOURCE_ID: Record<string, MoneyAccountSource> = {
-  tbank_web: "tbank",
-  alfa_web: "alfa",
+// The ping is answered by the service worker, which may be asleep; one 500 ms miss is a slow
+// wake as often as a missing extension, so the start asks a few times before giving up.
+const START_PROBE_OFFSETS_MS: readonly number[] = [0, 500, 1500, 3000];
+// Before 0.1.30 the extension acknowledged a session only after the bank tab the page had just
+// opened finished loading -- often longer than the old three seconds, while the import worked.
+const SESSION_HANDOFF_TIMEOUT_MS = 15_000;
+
+const BANK_KEYS: Record<ImportBankId, `money.importBank${string}`> = {
+  tbank: "money.importBankTbank",
+  alfa: "money.importBankAlfa",
+  other: "money.importBankOther",
+};
+// A letter on the bank's colour stands in for its logo, which the app does not host.
+const BANK_MARKS: Record<ImportBankId, { letter: string; className: string }> = {
+  tbank: { letter: "Т", className: "bg-yellow-300 text-neutral-900" },
+  alfa: { letter: "А", className: "bg-red-600 text-white" },
+  other: { letter: "…", className: "bg-muted text-muted-foreground" },
 };
 
 type ExtensionPingResult = {
@@ -76,37 +78,20 @@ type ExtensionPingResult = {
   extensionVersion: string | null;
 };
 
-function connectorSourceToAccountSource(sourceId: string): string {
-  return CONNECTOR_ACCOUNT_SOURCE_BY_SOURCE_ID[sourceId] ?? sourceId;
-}
-
-function formatAccountSourceTranslationKey(source: string): `money.accountSource${string}` {
-  return `money.accountSource${source.charAt(0).toUpperCase()}${source.slice(1)}`;
-}
-
-function resolveConnectorSourceLabel(
-  t: ReturnType<typeof useTranslations>,
-  connector: MoneyImportConnector | null | undefined,
-): string {
-  if (!connector) return "";
-  const accountSource = connectorSourceToAccountSource(connector.sourceId);
-  if ((MONEY_ACCOUNT_SOURCES as readonly string[]).includes(accountSource)) {
-    return t(formatAccountSourceTranslationKey(accountSource));
-  }
-  return connector.displayName;
-}
-
-function buildDefaultAccountStorageKey(personId: string, sourceId: string): string {
-  return `${DEFAULT_ACCOUNT_STORAGE_PREFIX}:${personId}:${sourceId}`;
-}
-
 import {
   callMoneyImportAction as callMoneyImportActionClient,
-  computeProgressPercent,
   getAccessToken,
   getFunctionUrl,
+  loadRecentImports,
+  type RecentImport,
 } from "./money-import-client";
 import { getAppEnvironmentKind } from "./extension-release-client";
+import {
+  probeExtensionUntilHeard,
+  reloadPage,
+  setExtensionAutoSchedule,
+  type ImportAutoSchedule,
+} from "@/lib/money/extension-bridge";
 import type {
   MoneyImportRangePresetKey,
   MoneyImportRangeSelectionMeta,
@@ -121,6 +106,16 @@ type ExtensionRangeChoice =
   | "preset:1y"
   | "preset:since_last_import"
   | "custom";
+
+const RANGE_CHOICES: ReadonlyArray<{ choice: ExtensionRangeChoice; key: string }> = [
+  { choice: "auto", key: "money.importRangeAuto" },
+  { choice: "preset:since_last_import", key: "money.importRangeSinceLastImport" },
+  { choice: "preset:1m", key: "money.importRange1m" },
+  { choice: "preset:3m", key: "money.importRange3m" },
+  { choice: "preset:6m", key: "money.importRange6m" },
+  { choice: "preset:1y", key: "money.importRange1y" },
+  { choice: "custom", key: "money.importRangeCustom" },
+];
 
 function toLocalDateTimeInput(value: string | null): string {
   if (!value) return "";
@@ -160,6 +155,16 @@ function defaultRangeChoiceForContext(
     return "auto";
   }
   return "preset:1y";
+}
+
+function rangeChoiceDisabled(
+  choice: ExtensionRangeChoice,
+  context: MoneyImportSourceContextResult | null,
+): boolean {
+  if (!context) return true;
+  if (choice === "auto") return context.requires_history_prompt;
+  if (choice === "preset:since_last_import") return !context.last_imported_at;
+  return false;
 }
 
 function buildRangeSelectionPayload(
@@ -230,7 +235,71 @@ function buildRangeSelectionPayload(
 
 function formatSelectedRange(windowFrom: string | null, windowTo: string | null): string {
   if (!windowFrom || !windowTo) return "-";
-  return `${format(new Date(windowFrom), "dd.MM.yyyy HH:mm")} -> ${format(new Date(windowTo), "dd.MM.yyyy HH:mm")}`;
+  return `${format(new Date(windowFrom), "dd.MM.yyyy HH:mm")} – ${format(new Date(windowTo), "dd.MM.yyyy HH:mm")}`;
+}
+
+/** A choice on the page: a bank or a way to import, greyed and inert where it is not offered. */
+function SourceChoice({
+  selected,
+  available,
+  onSelect,
+  mark,
+  title,
+  chip,
+  hint,
+  status,
+  compact,
+  testId,
+}: {
+  selected: boolean;
+  available: boolean;
+  onSelect: () => void;
+  mark?: React.ReactNode;
+  title: string;
+  chip?: string;
+  hint: string;
+  status?: React.ReactNode;
+  /** On a phone, a pill with no hint: the hints of what is unavailable are listed under the row. */
+  compact?: boolean;
+  testId: string;
+}) {
+  return (
+    <button
+      type="button"
+      data-testid={testId}
+      aria-pressed={selected}
+      disabled={!available}
+      onClick={onSelect}
+      className={cn(
+        "flex w-full flex-col items-start gap-2 rounded-xl border bg-card p-4 text-left transition-colors",
+        selected ? "border-foreground ring-1 ring-foreground" : "hover:border-foreground/30",
+        !available && "cursor-not-allowed bg-muted/50 text-muted-foreground hover:border-border",
+        compact && "max-sm:w-auto max-sm:rounded-[10px] max-sm:px-3.5 max-sm:py-2",
+      )}
+    >
+      <span className="flex w-full flex-wrap items-center gap-2.5">
+        {mark}
+        <span className="text-[15px] font-semibold">{title}</span>
+        {chip ? (
+          <span className="rounded-full border border-blue-200 bg-blue-50 px-1.5 text-[11px] font-semibold leading-5 text-blue-700 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-300">
+            {chip}
+          </span>
+        ) : null}
+      </span>
+      <span className={cn("text-[13px] text-muted-foreground", compact && "max-sm:hidden")}>
+        {hint}
+      </span>
+      {status}
+    </button>
+  );
+}
+
+function StepTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <h2 className="text-[13px] font-semibold uppercase tracking-wide text-muted-foreground">
+      {children}
+    </h2>
+  );
 }
 
 export default function MoneyImportPage() {
@@ -238,22 +307,15 @@ export default function MoneyImportPage() {
   const locale = useLocale();
   const router = useRouter();
   const selectedPersonId = useUIStore((state) => state.selectedPersonId);
-  const { data: accounts } = useMoneyAccounts(selectedPersonId);
-  const createAccountMutation = useCreateMoneyAccount();
 
   const connectors = getConnectors();
 
+  const [selectedBank, setSelectedBank] = useState<ImportBankId | null>(null);
   const [selectedSourceId, setSelectedSourceId] = useState<string>("");
-  const [file, setFile] = useState<File | null>(null);
-  const [parseResult, setParseResult] = useState<{
-    transactions: CanonicalTransactionRow[];
-    errors?: string[];
-  } | null>(null);
-  const [isParsing, setIsParsing] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const [accountMapping, setAccountMapping] = useState<Record<string, string>>({});
-  const [defaultAccountId, setDefaultAccountId] = useState<string>("");
+  const [fileStatus, setFileStatus] = useState<{ count: number } | "reading" | null>(null);
+  const [fileErrors, setFileErrors] = useState<string[]>([]);
+  // Rows the parser could not read never reach the server, so the report cannot tell of them.
+  const [fileSkipped, setFileSkipped] = useState<{ batchId: string; rows: number } | null>(null);
 
   const [extensionActive, setExtensionActive] = useState<boolean | null>(null);
   const [extensionAutoStatus, setExtensionAutoStatus] = useState<{
@@ -261,15 +323,16 @@ export default function MoneyImportPage() {
     status: ExtensionAutoStatus | null;
   }>({ state: "loading", status: null });
   const [extensionStatusMessage, setExtensionStatusMessage] = useState<string | null>(null);
-  const [installedExtensionId, setInstalledExtensionId] = useState<string | null>(null);
   const [installedExtensionVersion, setInstalledExtensionVersion] = useState<string | null>(null);
   const [latestExtensionRelease, setLatestExtensionRelease] = useState<ExtensionRelease | null>(
     null,
   );
   // Read after mount: the server render has no browser, and guessing one there would mismatch.
   const [extensionBrowser, setExtensionBrowser] = useState<ExtensionBrowser>("chrome");
+  const [extensionDevice, setExtensionDevice] = useState(true);
   useEffect(() => {
     setExtensionBrowser(detectExtensionBrowser(navigator.userAgent));
+    setExtensionDevice(canRunImportExtension(navigator.userAgent));
   }, []);
   const browserExtensionRelease = useMemo(
     () => extensionReleaseForBrowser(latestExtensionRelease, extensionBrowser),
@@ -286,13 +349,28 @@ export default function MoneyImportPage() {
   const [customRangeFrom, setCustomRangeFrom] = useState("");
   const [customRangeTo, setCustomRangeTo] = useState("");
 
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
-  const [sessionStatus, setSessionStatus] = useState<MoneyImportSessionStatus | null>(null);
-
-  const pollingRef = useRef<number | null>(null);
   const appEnvironmentKind = getAppEnvironmentKind();
 
+  const [recentImports, setRecentImports] = useState<RecentImport[]>([]);
+  useEffect(() => {
+    if (!selectedPersonId) return;
+    let cancelled = false;
+    void loadRecentImports(selectedPersonId).then((rows) => {
+      if (!cancelled) setRecentImports(rows);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedPersonId]);
+
+  const banks = useMemo(
+    () => importBankOptions(connectors, { extension: extensionDevice }),
+    [connectors, extensionDevice],
+  );
+  const bank = useMemo(
+    () => banks.find((one) => one.id === selectedBank) ?? null,
+    [banks, selectedBank],
+  );
   const selectedConnector = useMemo(
     () => connectors.find((c) => c.sourceId === selectedSourceId),
     [connectors, selectedSourceId],
@@ -308,10 +386,7 @@ export default function MoneyImportPage() {
         })),
     [connectors],
   );
-  const selectedConnectorSourceLabel = useMemo(
-    () => resolveConnectorSourceLabel(t, selectedConnector),
-    [selectedConnector, t],
-  );
+  const selectedBankLabel = bank ? t(BANK_KEYS[bank.id]) : "";
 
   const isFileConnector = selectedConnector?.kind === "file";
   const isExtensionConnector = selectedConnector?.kind === "extension";
@@ -323,297 +398,99 @@ export default function MoneyImportPage() {
       selectedConnector?.kind === "extension" &&
       Boolean(selectedConnector.release?.latestDownloadUrl));
 
-  const accountSourceForSelectedConnector = useMemo(() => {
-    if (!selectedConnector) return null;
-    return connectorSourceToAccountSource(selectedConnector.sourceId);
-  }, [selectedConnector]);
+  const resetSourceState = () => {
+    setFileStatus(null);
+    setFileErrors([]);
+    setFileSkipped(null);
+    setExtensionActive(null);
+    setExtensionStatusMessage(null);
+    setInstalledExtensionVersion(null);
+    setLatestExtensionRelease(null);
+    setExtensionImportContext(null);
+    setIsLoadingExtensionImportContext(false);
+    setExtensionRangeChoice("auto");
+    setExtensionParseStrategy(DEFAULT_TBANK_PARSE_STRATEGY);
+    setCustomRangeFrom("");
+    setCustomRangeTo("");
+  };
 
-  const sourceAccounts = useMemo(() => {
-    if (!accounts || !accountSourceForSelectedConnector) return [];
-    const source = accountSourceForSelectedConnector;
-    return accounts.filter((a) => a.source === source);
-  }, [accounts, accountSourceForSelectedConnector]);
+  const selectMethod = (method: ImportMethodOption) => {
+    if (!method.available || method.sourceId === selectedSourceId) return;
+    resetSourceState();
+    setSelectedSourceId(method.sourceId);
+  };
 
-  const sourceAccountIds = useMemo(() => sourceAccounts.map((a) => a.id), [sourceAccounts]);
-  const { data: cardsForImport } = useMoneyCardsByAccountIds(sourceAccountIds);
+  // The way a bank is usually imported comes chosen with it: the first one this device can do.
+  const selectBank = (option: ImportBankOption) => {
+    if (!option.available) return;
+    setSelectedBank(option.id);
+    const first = option.methods.find((method) => method.available);
+    if (first) selectMethod(first);
+  };
 
-  const hintToAccountIdFromCards = useMemo(() => {
-    const map: Record<string, string> = {};
-    (cardsForImport ?? []).forEach((card) => {
-      map[card.last4] = card.account_id;
-    });
-    return map;
-  }, [cardsForImport]);
-
-  useEffect(() => {
-    if (!parseResult?.transactions.length) return;
-    setAccountMapping((prev) => ({ ...hintToAccountIdFromCards, ...prev }));
-  }, [parseResult?.transactions.length, hintToAccountIdFromCards]);
-
-  useEffect(() => {
-    if (!selectedConnector || !selectedPersonId) {
-      setDefaultAccountId("");
-      return;
-    }
-
-    if (sourceAccounts.length === 0) {
-      setDefaultAccountId("");
-      return;
-    }
-
-    if (sourceAccounts.length === 1) {
-      const singleAccountId = sourceAccounts[0].id;
-      if (defaultAccountId !== singleAccountId) {
-        setDefaultAccountId(singleAccountId);
-      }
-      return;
-    }
-
-    if (sourceAccounts.some((account) => account.id === defaultAccountId)) return;
-    if (typeof window === "undefined") {
-      setDefaultAccountId("");
-      return;
-    }
-
-    const storedValue =
-      window.localStorage
-        .getItem(buildDefaultAccountStorageKey(selectedPersonId, selectedConnector.sourceId))
-        ?.trim() ?? "";
-
-    if (storedValue && sourceAccounts.some((account) => account.id === storedValue)) {
-      setDefaultAccountId(storedValue);
-      return;
-    }
-
-    setDefaultAccountId("");
-  }, [defaultAccountId, selectedConnector, selectedPersonId, sourceAccounts]);
-
-  useEffect(() => {
-    if (
-      typeof window === "undefined" ||
-      !selectedConnector ||
-      !selectedPersonId ||
-      !defaultAccountId
-    ) {
-      return;
-    }
-
-    const isValid = sourceAccounts.some((account) => account.id === defaultAccountId);
-    if (!isValid) return;
-
-    window.localStorage.setItem(
-      buildDefaultAccountStorageKey(selectedPersonId, selectedConnector.sourceId),
-      defaultAccountId,
-    );
-  }, [defaultAccountId, selectedConnector, selectedPersonId, sourceAccounts]);
-
-  useEffect(() => {
-    if (!activeSessionId) return;
-
-    const poll = async () => {
+  // A statement starts as soon as it is read: the server finds each card's account, or puts it
+  // on the bank's first account, and applies the batch on its own (T-261026-2ew).
+  const importFile = useCallback(
+    async (f: File) => {
+      if (!selectedPersonId || !selectedConnector || selectedConnector.kind !== "file") return;
+      setFileErrors([]);
+      setFileSkipped(null);
+      setFileStatus("reading");
       try {
+        const parsed = await selectedConnector.parse(f).catch(() => null);
+        if (!parsed) throw new Error(t("money.importParseError"));
+        if (parsed.transactions.length === 0) {
+          // The parser's own reasons are English and technical; the person needs only this.
+          setFileErrors([t("money.importFileEmpty")]);
+          setFileStatus(null);
+          return;
+        }
+        setFileStatus({ count: parsed.transactions.length });
         const accessToken = await getAccessToken();
-        const status = await callMoneyImportActionClient<MoneyImportSessionStatus>(
+        const result = await callMoneyImportActionClient<MoneyImportPreviewResult>(
           {
-            action: "session_status",
-            session_id: activeSessionId,
+            action: "preview_rows",
+            source: selectedConnector.sourceId,
+            payer_person_id: selectedPersonId,
+            import_type: "file",
+            file_path: f.name,
+            rows: importBatchRows(parsed.transactions),
           },
           accessToken,
         );
-
-        setSessionStatus(status);
-        if (status.batch?.id) {
-          setActiveBatchId(status.batch.id);
+        const skipped = parsed.errors?.length ?? 0;
+        if (skipped > 0) {
+          setFileSkipped({ batchId: result.batch_id, rows: skipped });
+          setFileStatus(null);
+          return;
         }
-
-        if (
-          (status.batch?.status === "pending" || status.batch?.status === "completed") &&
-          status.batch.id
-        ) {
-          if (pollingRef.current) {
-            window.clearInterval(pollingRef.current);
-            pollingRef.current = null;
-          }
-          router.push(`/money/import/reports/${status.batch.id}`);
-        }
+        router.push(`/money/import/reports/${result.batch_id}`);
       } catch (error) {
-        setExtensionStatusMessage(
-          error instanceof Error ? error.message : t("money.importPollFailed"),
-        );
-      }
-    };
-
-    poll();
-    pollingRef.current = window.setInterval(poll, 2000);
-
-    return () => {
-      if (pollingRef.current) {
-        window.clearInterval(pollingRef.current);
-        pollingRef.current = null;
-      }
-    };
-  }, [activeSessionId, router, t]);
-
-  useEffect(() => {
-    const onBridgeMessage = (event: MessageEvent) => {
-      const data = event.data as Record<string, unknown> | null;
-      if (!data || data.source !== EXTENSION_BRIDGE_SOURCE) return;
-
-      if (
-        data.type === "MONEY_IMPORT_PROGRESS" &&
-        typeof data.parsed_transactions_count === "number"
-      ) {
-        setSessionStatus((prev) => {
-          if (!prev?.batch) return prev;
-          return {
-            ...prev,
-            batch: {
-              ...prev.batch,
-              parsed_transactions_count: data.parsed_transactions_count as number,
-              parsed_through_at:
-                typeof data.parsed_through_at === "string"
-                  ? (data.parsed_through_at as string)
-                  : prev.batch.parsed_through_at,
-            },
-          };
-        });
-      }
-
-      // An unattended run says so, and is not followed. Navigating on it would take the person
-      // off whatever they were doing -- a manual import included -- and onto a report for a run
-      // they never started.
-      if (
-        data.type === "MONEY_IMPORT_DONE" &&
-        typeof data.batch_id === "string" &&
-        data.unattended !== true
-      ) {
-        router.push(`/money/import/reports/${data.batch_id}`);
-      }
-
-      if (data.type === "MONEY_IMPORT_ERROR") {
-        setExtensionStatusMessage(
-          typeof data.error === "string" ? data.error : t("money.importExtensionFailed"),
-        );
-      }
-    };
-
-    window.addEventListener("message", onBridgeMessage);
-    return () => window.removeEventListener("message", onBridgeMessage);
-  }, [router, t]);
-
-  const uniqueHints = useMemo(
-    () => importAccountHints(parseResult?.transactions ?? []),
-    [parseResult?.transactions],
-  );
-
-  const resolveAccountId = useCallback(
-    (row: CanonicalTransactionRow): string | null => {
-      const hint = getAccountHint(row) ?? "";
-      if (hint && accountMapping[hint]) return accountMapping[hint];
-      return defaultAccountId || null;
-    },
-    [accountMapping, defaultAccountId],
-  );
-
-  const allRowsResolved = useMemo(() => {
-    if (!parseResult?.transactions.length) return false;
-    return parseResult.transactions.every((row) => resolveAccountId(row));
-  }, [parseResult?.transactions, resolveAccountId]);
-
-  const handleCreateSourceAccount = useCallback(async () => {
-    if (!selectedConnector || !selectedPersonId) return;
-    await createAccountMutation.mutateAsync({
-      owner_person_id: selectedPersonId,
-      source: connectorSourceToAccountSource(selectedConnector.sourceId),
-      account_kind: "debit",
-      account_label: selectedConnector.displayName,
-      currency: "RUB",
-    });
-  }, [createAccountMutation, selectedConnector, selectedPersonId]);
-
-  const parseFile = useCallback(
-    async (f: File) => {
-      if (!selectedConnector || selectedConnector.kind !== "file") return;
-      setFile(f);
-      setParseResult(null);
-      setIsParsing(true);
-      try {
-        const result = await selectedConnector.parse(f);
-        setParseResult(result);
-      } catch {
-        setParseResult({
-          transactions: [],
-          errors: [t("money.importParseError")],
-        });
-      } finally {
-        setIsParsing(false);
+        setFileErrors([error instanceof Error ? error.message : t("money.importFailed")]);
+        setFileStatus(null);
       }
     },
-    [selectedConnector, t],
+    [router, selectedConnector, selectedPersonId, t],
   );
 
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+  const {
+    getRootProps,
+    getInputProps,
+    isDragActive,
+    open: openFilePicker,
+  } = useDropzone({
     accept: isFileConnector
       ? (selectedConnector?.fileAccept ?? {
           "text/csv": [".csv"],
         })
       : undefined,
     maxFiles: 1,
-    disabled: !isFileConnector || isParsing,
+    disabled: !isFileConnector || fileStatus !== null,
     onDropAccepted: (acceptedFiles) => {
       const f = acceptedFiles[0];
-      if (f) parseFile(f);
+      if (f) void importFile(f);
     },
   });
-
-  const buildBatchRows = useCallback((): BatchTransactionRow[] => {
-    if (!parseResult?.transactions.length) return [];
-    const rows = importBatchRows(parseResult.transactions, resolveAccountId);
-    if (!rows) throw new Error(t("money.importUnresolvedAccountMapping"));
-    return rows;
-  }, [parseResult?.transactions, resolveAccountId, t]);
-
-  const handleApplyFileImport = useCallback(async () => {
-    if (!selectedPersonId || !selectedConnector || selectedConnector.kind !== "file") return;
-    if (!parseResult?.transactions.length || !allRowsResolved) return;
-
-    setIsSubmitting(true);
-    setExtensionStatusMessage(null);
-
-    try {
-      const accessToken = await getAccessToken();
-      const rows = buildBatchRows();
-      const result = await callMoneyImportActionClient<MoneyImportPreviewResult>(
-        {
-          action: "preview_rows",
-          source: selectedConnector.sourceId,
-          payer_person_id: selectedPersonId,
-          import_type: "file",
-          file_path: file?.name ?? null,
-          rows,
-        },
-        accessToken,
-      );
-
-      router.push(`/money/import/reports/${result.batch_id}`);
-    } catch (error) {
-      setParseResult((prev) => ({
-        transactions: prev?.transactions ?? [],
-        errors: [error instanceof Error ? error.message : t("money.importFailed")],
-      }));
-    } finally {
-      setIsSubmitting(false);
-    }
-  }, [
-    allRowsResolved,
-    buildBatchRows,
-    file?.name,
-    parseResult?.transactions,
-    router,
-    selectedConnector,
-    selectedPersonId,
-    t,
-  ]);
 
   const pingExtension = useCallback(async (): Promise<ExtensionPingResult> => {
     return await new Promise<ExtensionPingResult>((resolve) => {
@@ -712,8 +589,8 @@ export default function MoneyImportPage() {
   }, []);
 
   // The extension's own account of what it will do on its own. Asked on its own ping rather
-  // than the connector's, because the grants panel above it is shown whatever source is
-  // selected -- and "nothing happens" is a question people bring to this screen first.
+  // than the connector's, because the auto-import panel is shown whatever source is selected --
+  // and "nothing happens" is a question people bring to this screen first.
   const refreshExtensionAutoStatus = useCallback(async () => {
     setExtensionAutoStatus({ state: "loading", status: null });
     const pingResult = await pingExtension();
@@ -733,22 +610,38 @@ export default function MoneyImportPage() {
     void refreshExtensionAutoStatus();
   }, [refreshExtensionAutoStatus]);
 
+  // What the extension kept goes into the status the panel shows, and then the status is read
+  // again: the next run it reports depends on the schedule.
+  const changeAutoSchedule = useCallback(
+    async (schedule: ImportAutoSchedule) => {
+      const kept = await setExtensionAutoSchedule(schedule);
+      if (kept) {
+        setExtensionAutoStatus((current) =>
+          current.status ? { ...current, status: { ...current.status, schedule: kept } } : current,
+        );
+        const status = await requestExtensionAutoStatus();
+        if (status) setExtensionAutoStatus({ state: "ready", status });
+      }
+      return kept;
+    },
+    [requestExtensionAutoStatus],
+  );
+
   const checkExtension = useCallback(async () => {
     setExtensionActive(null);
-    setInstalledExtensionId(null);
     setInstalledExtensionVersion(null);
     const pingResult = await pingExtension();
     setExtensionActive(pingResult.active);
-    setInstalledExtensionId(pingResult.extensionId);
     setInstalledExtensionVersion(pingResult.extensionVersion);
     setExtensionStatusMessage(null);
     void refreshExtensionAutoStatus();
   }, [pingExtension, refreshExtensionAutoStatus]);
 
+  // Again for each extension source picked: switching banks clears the last answer.
   useEffect(() => {
     if (!isExtensionConnector) return;
     void checkExtension();
-  }, [checkExtension, isExtensionConnector]);
+  }, [checkExtension, isExtensionConnector, selectedSourceId]);
 
   useEffect(() => {
     if (!isExtensionConnector || !shouldUsePublishedExtensionFlow) {
@@ -899,22 +792,18 @@ export default function MoneyImportPage() {
       Object.fromEntries(
         connectors
           .filter((connector) => connector.kind !== "file")
-          .map((connector) => [connector.sourceId, resolveConnectorSourceLabel(t, connector)]),
+          .map((connector) => [connector.sourceId, connectorBankLabel(t, connector)]),
       ) as Record<string, string>,
     [connectors, t],
   );
 
   const sendSessionToExtension = useCallback(
-    async (
-      payload: MoneyImportSessionCreateResult,
-      userAccessToken: string,
-      defaultExtensionAccountId: string | null,
-    ): Promise<boolean> => {
+    async (payload: MoneyImportSessionCreateResult, userAccessToken: string): Promise<boolean> => {
       return await new Promise<boolean>((resolve) => {
         const timeout = window.setTimeout(() => {
           window.removeEventListener("message", onMessage);
           resolve(false);
-        }, 3000);
+        }, SESSION_HANDOFF_TIMEOUT_MS);
 
         const onMessage = (event: MessageEvent) => {
           const data = event.data as Record<string, unknown> | null;
@@ -944,7 +833,8 @@ export default function MoneyImportPage() {
               window_to: payload.window_to,
               parse_strategy: payload.parse_strategy ?? null,
               range_selection_meta: payload.range_selection_meta ?? null,
-              default_account_id: defaultExtensionAccountId,
+              // Nobody picks an account: the server finds each card's (T-261026-2ew).
+              default_account_id: null,
               function_url: getFunctionUrl("money-import"),
               app_origin: window.location.origin,
               show_source_page_widget: true,
@@ -960,67 +850,33 @@ export default function MoneyImportPage() {
     [locale],
   );
 
-  const launchExtensionFallback = useCallback(
-    (
-      payload: MoneyImportSessionCreateResult,
-      defaultExtensionAccountId: string | null,
-    ): boolean => {
-      // Firefox gives every install its own moz-extension:// host, which no page can know.
-      if (extensionBrowser === "firefox") return false;
-      const resolvedExtensionId =
-        installedExtensionId ?? latestExtensionRelease?.extensionId ?? EXTENSION_ID;
-      if (!resolvedExtensionId) return false;
-      const launchUrl =
-        `chrome-extension://${resolvedExtensionId}/popup.html` +
-        `?session_token=${encodeURIComponent(payload.session_token)}` +
-        `&session_id=${encodeURIComponent(payload.session_id)}` +
-        `&batch_id=${encodeURIComponent(payload.batch_id)}` +
-        `&source=${encodeURIComponent(payload.source)}` +
-        `&function_url=${encodeURIComponent(getFunctionUrl("money-import"))}` +
-        `&payer_person_id=${encodeURIComponent(payload.payer_person_id)}` +
-        `&expires_at=${encodeURIComponent(payload.expires_at)}` +
-        `&last_imported_at=${encodeURIComponent(payload.last_imported_at ?? "")}` +
-        `&window_from=${encodeURIComponent(payload.window_from ?? "")}` +
-        `&window_to=${encodeURIComponent(payload.window_to ?? "")}` +
-        `&parse_strategy=${encodeURIComponent(payload.parse_strategy ?? "")}` +
-        `&show_source_page_widget=${encodeURIComponent("1")}` +
-        `&range_selection_meta=${encodeURIComponent(
-          JSON.stringify(payload.range_selection_meta ?? null),
-        )}` +
-        `&default_account_id=${encodeURIComponent(defaultExtensionAccountId ?? "")}` +
-        // The same field the postMessage path sends; the popup seeds a session from this URL
-        // and the widget would otherwise fall back to the browser's language on this path.
-        `&locale=${encodeURIComponent(locale)}`;
-
-      window.open(launchUrl, "_blank", "noopener,noreferrer");
-      return true;
-    },
-    [extensionBrowser, installedExtensionId, latestExtensionRelease?.extensionId, locale],
-  );
-
   const handleStartExtensionImport = useCallback(async () => {
     if (!selectedPersonId || !selectedConnector || selectedConnector.kind !== "extension") return;
-    if (sourceAccounts.length === 0) {
-      setExtensionStatusMessage(
-        t("money.importNoSourceAccounts", { source: selectedConnectorSourceLabel }),
-      );
-      return;
-    }
-    const selectedDefaultExtensionAccountId =
-      sourceAccounts.length === 1
-        ? sourceAccounts[0].id
-        : defaultAccountId.trim()
-          ? defaultAccountId
-          : null;
-    if (sourceAccounts.length > 1 && !selectedDefaultExtensionAccountId) {
-      setExtensionStatusMessage(t("money.selectAccount"));
-      return;
-    }
 
     setIsStartingExtension(true);
     setExtensionStatusMessage(null);
 
     try {
+      // The extension can stop answering after the page loaded -- reloaded, updated, disabled --
+      // so ask again before a session is created and the bank is opened for nothing.
+      const probe = await probeExtensionUntilHeard(
+        START_PROBE_OFFSETS_MS,
+        EXTENSION_PING_TIMEOUT_MS,
+      );
+      if (probe !== "alive") {
+        setExtensionActive(false);
+        setInstalledExtensionVersion(null);
+        // A stale bridge is the extension updated under this tab: only a reload brings it back.
+        setExtensionStatusMessage(
+          t(
+            probe === "stale"
+              ? "money.importExtensionStaleReload"
+              : "money.importExtensionNotAnswering",
+          ),
+        );
+        return;
+      }
+
       const importContext = extensionImportContext ?? (await loadExtensionImportContext());
       if (!importContext) {
         throw new Error(t("money.importContextUnavailable"));
@@ -1052,25 +908,14 @@ export default function MoneyImportPage() {
         accessToken,
       );
 
-      setActiveSessionId(session.session_id);
-      setActiveBatchId(session.batch_id);
-
-      const deliveredByMessage = await sendSessionToExtension(
-        session,
-        accessToken,
-        selectedDefaultExtensionAccountId,
-      );
+      const deliveredByMessage = await sendSessionToExtension(session, accessToken);
       if (deliveredByMessage) {
-        setExtensionStatusMessage(t("money.importExtensionSessionCreated"));
+        // The import's own page follows it from here and says when the bank tab can be closed.
+        router.push(`/money/import/reports/${session.batch_id}`);
         return;
       }
 
-      const launched = launchExtensionFallback(session, selectedDefaultExtensionAccountId);
-      if (launched) {
-        setExtensionStatusMessage(t("money.importExtensionSessionCreated"));
-      } else {
-        setExtensionStatusMessage(t("money.importExtensionOpenPopupManual"));
-      }
+      setExtensionStatusMessage(t("money.importExtensionHandoffFailed"));
     } catch (error) {
       setExtensionStatusMessage(
         error instanceof Error ? error.message : t("money.importStartFailed"),
@@ -1081,18 +926,15 @@ export default function MoneyImportPage() {
   }, [
     customRangeFrom,
     customRangeTo,
-    launchExtensionFallback,
-    defaultAccountId,
     extensionImportContext,
     extensionParseStrategy,
     extensionRangeChoice,
     isTbankExtensionConnector,
     loadExtensionImportContext,
+    router,
     selectedPersonId,
     selectedConnector,
-    selectedConnectorSourceLabel,
     sendSessionToExtension,
-    sourceAccounts,
     t,
   ]);
 
@@ -1104,11 +946,70 @@ export default function MoneyImportPage() {
     );
   }
 
+  const methodHint = (method: ImportMethodOption): string => {
+    if (method.kind === "file") return t("money.importMethodFileHint");
+    if (!method.available) return t("money.importMethodExtensionDesktopOnly");
+    return t("money.importMethodExtensionHint", { bank: selectedBankLabel });
+  };
+  const shortDate = new Intl.DateTimeFormat(locale, { day: "numeric", month: "short" });
+  const bankHint = (option: ImportBankOption): string => {
+    if (option.methods.length === 0) return t("money.importBankSoon");
+    if (!option.available) return t("money.importBankDesktopOnly");
+    const last = recentImports.find((one) => importBankOfSource(one.source) === option.id);
+    return last
+      ? t("money.importBankLast", { date: shortDate.format(new Date(last.created_at)) })
+      : t("money.importBankNever");
+  };
+  const lastImport = recentImports[0];
+  const extensionStatus = (method: ImportMethodOption) =>
+    method.kind === "extension" &&
+    method.sourceId === selectedSourceId &&
+    extensionActive !== null ? (
+      <span
+        className={cn(
+          "inline-flex items-center gap-1.5 text-xs",
+          extensionActive ? "text-green-700 dark:text-green-400" : "text-destructive",
+        )}
+      >
+        <span
+          aria-hidden
+          className={cn(
+            "h-1.5 w-1.5 rounded-full",
+            extensionActive ? "bg-green-600" : "bg-destructive",
+          )}
+        />
+        {!extensionActive
+          ? t("money.importExtensionInactive")
+          : installedExtensionVersion
+            ? t("money.importExtensionConnected", { version: installedExtensionVersion })
+            : t("money.importExtensionActive")}
+      </span>
+    ) : undefined;
+
   return (
-    <div className="space-y-6 max-w-5xl">
-      <div className="flex items-center justify-between gap-2 flex-wrap">
-        <h1 className="text-xl font-semibold">{t("money.importTitle")}</h1>
-        <div className="flex gap-2 flex-wrap">
+    <div className="max-w-6xl space-y-6">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-semibold tracking-tight">{t("money.importTitle")}</h1>
+          {lastImport && (
+            <p className="text-sm text-muted-foreground" data-testid="import-last">
+              {t("money.importLastImport", {
+                date: new Intl.DateTimeFormat(locale, {
+                  day: "numeric",
+                  month: "short",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                }).format(new Date(lastImport.created_at)),
+                bank:
+                  importBankOfSource(lastImport.source) === "other"
+                    ? lastImport.source
+                    : t(BANK_KEYS[importBankOfSource(lastImport.source)]),
+                count: lastImport.inserted_count,
+              })}
+            </p>
+          )}
+        </div>
+        <div className="flex w-full gap-2 sm:w-auto [&>*]:flex-1 sm:[&>*]:flex-none">
           <Button variant="outline" asChild>
             <Link href="/money/import/attention">{t("money.importAttentionTitle")}</Link>
           </Button>
@@ -1118,342 +1019,142 @@ export default function MoneyImportPage() {
         </div>
       </div>
 
-      <MoneyImportGrants
-        t={t}
-        personId={selectedPersonId}
-        availableSources={extensionConnectorOptions}
-        onSendToExtension={sendGrantToExtensionAndRefresh}
-      />
-
-      <MoneyImportAutoStatus
-        t={t}
-        state={extensionAutoStatus.state}
-        status={extensionAutoStatus.status}
-        selectedPersonId={selectedPersonId}
-        sourceLabels={extensionSourceLabels}
-        onRefresh={() => void refreshExtensionAutoStatus()}
-      />
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">{t("money.importSelectSource")}</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-wrap gap-3">
-          {connectors.map((connector) => (
-            <Button
-              key={connector.sourceId}
-              type="button"
-              variant={selectedSourceId === connector.sourceId ? "default" : "outline"}
-              size="sm"
-              className="gap-2"
-              onClick={() => {
-                setSelectedSourceId(connector.sourceId);
-                setFile(null);
-                setParseResult(null);
-                setAccountMapping({});
-                setDefaultAccountId("");
-                setExtensionActive(null);
-                setExtensionStatusMessage(null);
-                setInstalledExtensionId(null);
-                setInstalledExtensionVersion(null);
-                setLatestExtensionRelease(null);
-                setExtensionImportContext(null);
-                setIsLoadingExtensionImportContext(false);
-                setExtensionRangeChoice("auto");
-                setExtensionParseStrategy(DEFAULT_TBANK_PARSE_STRATEGY);
-                setCustomRangeFrom("");
-                setCustomRangeTo("");
-                setActiveSessionId(null);
-                setActiveBatchId(null);
-                setSessionStatus(null);
-              }}
-            >
-              {connector.sourceId.startsWith("tbank") ? (
-                // eslint-disable-next-line @next/next/no-img-element -- external T-Bank CDN not in next.config images
-                <img src={TBANK_ICON_URL} alt="" width={20} height={24} className="inline-block" />
-              ) : (
-                <FileSpreadsheet className="h-4 w-4" />
-              )}
-              {connector.displayName}
-              <Badge variant="secondary" className="ml-1">
-                {connector.kind === "file"
-                  ? t("money.importSourceTypeFile")
-                  : t("money.importSourceTypeExtension")}
-              </Badge>
-            </Button>
-          ))}
-        </CardContent>
-      </Card>
-
-      {!selectedConnector && (
-        <Card>
-          <CardContent className="pt-6 text-sm text-muted-foreground">
-            {t("money.importNoConnector")}
-          </CardContent>
-        </Card>
-      )}
-
-      {isFileConnector && selectedConnector && (
-        <>
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">{t("money.importUploadFile")}</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <div
-                {...getRootProps()}
-                className="flex min-h-[120px] cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-input bg-muted/30 px-4 py-6 text-center transition-colors hover:border-primary/50 hover:bg-muted/50"
-                data-drag-active={isDragActive || undefined}
-              >
-                <input {...getInputProps()} />
-                <Upload className="h-8 w-8 text-muted-foreground" />
-                <p className="text-sm text-muted-foreground">
-                  {isDragActive
-                    ? t("money.importUploadFile")
-                    : file
-                      ? `${file.name} (${file.size} bytes)`
-                      : t("money.importUploadFile")}
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
+        <div className="space-y-6">
+          <section className="space-y-3">
+            <StepTitle>{t("money.importStepBank")}</StepTitle>
+            <div className="flex flex-wrap gap-2 sm:grid sm:grid-cols-3 sm:gap-3">
+              {banks.map((option) => (
+                <SourceChoice
+                  key={option.id}
+                  compact
+                  testId={`import-bank-${option.id}`}
+                  selected={selectedBank === option.id}
+                  available={option.available}
+                  onSelect={() => selectBank(option)}
+                  mark={
+                    <span
+                      aria-hidden
+                      className={cn(
+                        "flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-sm font-bold max-sm:h-6 max-sm:w-6 max-sm:text-xs",
+                        BANK_MARKS[option.id].className,
+                      )}
+                    >
+                      {BANK_MARKS[option.id].letter}
+                    </span>
+                  }
+                  title={t(BANK_KEYS[option.id])}
+                  hint={bankHint(option)}
+                />
+              ))}
+            </div>
+            {banks
+              .filter((option) => !option.available)
+              .map((option) => (
+                <p key={option.id} className="text-xs text-muted-foreground sm:hidden">
+                  {`${t(BANK_KEYS[option.id])}: ${bankHint(option)}`}
                 </p>
+              ))}
+          </section>
+
+          {bank && (
+            <section className="space-y-3">
+              <StepTitle>{t("money.importStepMethod")}</StepTitle>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {bank.methods.map((method) => (
+                  <SourceChoice
+                    key={method.kind}
+                    testId={`import-method-${method.kind}`}
+                    selected={selectedSourceId === method.sourceId}
+                    available={method.available}
+                    onSelect={() => selectMethod(method)}
+                    title={t(
+                      method.kind === "file"
+                        ? "money.importMethodFile"
+                        : "money.importMethodExtension",
+                    )}
+                    chip={method.recommended ? t("money.importRecommended") : undefined}
+                    hint={methodHint(method)}
+                    status={extensionStatus(method)}
+                  />
+                ))}
               </div>
-              {isParsing && <p className="text-sm text-muted-foreground">{t("common.loading")}</p>}
-            </CardContent>
-          </Card>
-
-          {parseResult && parseResult.errors && parseResult.errors.length > 0 && (
-            <Card className="border-destructive/50">
-              <CardContent className="pt-4">
-                <ul className="text-sm text-destructive list-disc list-inside">
-                  {parseResult.errors.map((error, index) => (
-                    <li key={index}>{error}</li>
-                  ))}
-                </ul>
-              </CardContent>
-            </Card>
+            </section>
           )}
 
-          {parseResult && parseResult.transactions.length > 0 && (
-            <Card>
-              <CardHeader>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <CardTitle className="text-base">{t("money.importPreview")}</CardTitle>
-                  <span className="text-xs text-muted-foreground">
-                    {format(new Date(parseResult.transactions[0].posted_at), "dd.MM.yyyy HH:mm")}
-                    {" - "}
-                    {format(
-                      new Date(
-                        parseResult.transactions[parseResult.transactions.length - 1].posted_at,
-                      ),
-                      "dd.MM.yyyy HH:mm",
-                    )}
-                  </span>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {sourceAccounts.length === 0 ? (
-                  <div className="space-y-2">
-                    <p className="text-sm text-muted-foreground flex items-center gap-2">
-                      {t("money.importNoSourceAccounts", {
-                        source: selectedConnectorSourceLabel,
-                      })}
-                      <span
-                        className="inline-flex text-muted-foreground cursor-help"
-                        title={t("money.importNoSourceAccountsTooltip", {
-                          source: selectedConnectorSourceLabel,
-                        })}
-                      >
-                        <HelpCircle className="h-4 w-4" />
-                      </span>
-                    </p>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="gap-2"
-                      disabled={createAccountMutation.isPending}
-                      onClick={handleCreateSourceAccount}
-                    >
-                      <Plus className="h-4 w-4" />
-                      {t("money.importCreateSourceAccount", {
-                        source: selectedConnectorSourceLabel,
-                      })}
-                    </Button>
-                  </div>
-                ) : (
-                  <>
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">
-                        {t("money.importDefaultAccount")}
-                      </label>
-                      <Select value={defaultAccountId} onValueChange={setDefaultAccountId}>
-                        <SelectTrigger className="w-full max-w-xs">
-                          <SelectValue placeholder={t("money.selectAccount")} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {sourceAccounts.map((account) => (
-                            <SelectItem key={account.id} value={account.id}>
-                              {account.account_label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    {uniqueHints.length > 0 && (
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">{t("money.importMapAccount")}</label>
-                        <div className="flex flex-wrap gap-3">
-                          {uniqueHints.map((hint) => (
-                            <div key={hint} className="flex items-center gap-2">
-                              <span className="text-sm text-muted-foreground">*{hint}:</span>
-                              <Select
-                                value={accountMapping[hint] ?? ""}
-                                onValueChange={(value) =>
-                                  setAccountMapping((mapping) => ({ ...mapping, [hint]: value }))
-                                }
-                              >
-                                <SelectTrigger className="w-[180px]">
-                                  <SelectValue placeholder={t("money.importUnknownCard")} />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {sourceAccounts.map((account) => (
-                                    <SelectItem key={account.id} value={account.id}>
-                                      {account.account_label}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="overflow-x-auto rounded-md border">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="border-b bg-muted/50">
-                            <th className="p-2 text-left">{t("money.postedAt")}</th>
-                            <th className="p-2 text-right">{t("money.amount")}</th>
-                            <th className="p-2 text-left">{t("money.merchant")}</th>
-                            <th className="p-2 text-left">{t("money.importMapAccount")}</th>
-                            <th className="p-2 text-left">{t("money.type")}</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {parseResult.transactions.slice(0, 20).map((row, index) => (
-                            <tr key={index} className="border-b">
-                              <td className="p-2">
-                                {format(new Date(row.posted_at), "dd.MM.yyyy HH:mm")}
-                              </td>
-                              <td className="p-2 text-right">
-                                {formatMoney(row.amount, row.currency, "ru-RU")}
-                              </td>
-                              <td className="p-2">{row.merchant_name ?? "-"}</td>
-                              <td className="p-2">
-                                {getAccountHint(row) ? `*${getAccountHint(row)}` : "-"}
-                              </td>
-                              <td className="p-2">{row.transaction_type}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                      {parseResult.transactions.length > 20 && (
-                        <p className="p-2 text-xs text-muted-foreground">
-                          ... and {parseResult.transactions.length - 20} more
-                        </p>
-                      )}
-                    </div>
-
-                    <Button
-                      onClick={handleApplyFileImport}
-                      disabled={!allRowsResolved || isSubmitting}
-                      className="gap-2"
-                    >
-                      {isSubmitting ? (
-                        t("common.loading")
-                      ) : (
-                        <>
-                          <CheckCircle2 className="h-4 w-4" />
-                          {t("money.importConfirm")}
-                        </>
-                      )}
-                    </Button>
-                  </>
-                )}
-              </CardContent>
-            </Card>
-          )}
-        </>
-      )}
-
-      {isExtensionConnector && selectedConnector && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">{t("money.importExtensionTitle")}</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {sourceAccounts.length === 0 && (
-              <div className="space-y-2 rounded-md border p-3">
-                <p className="text-sm text-muted-foreground flex items-center gap-2">
-                  {t("money.importNoSourceAccounts", {
-                    source: selectedConnectorSourceLabel,
-                  })}
-                  <span
-                    className="inline-flex text-muted-foreground cursor-help"
-                    title={t("money.importNoSourceAccountsTooltip", {
-                      source: selectedConnectorSourceLabel,
-                    })}
-                  >
-                    <HelpCircle className="h-4 w-4" />
-                  </span>
-                </p>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-2"
-                  disabled={createAccountMutation.isPending}
-                  onClick={handleCreateSourceAccount}
+          {isFileConnector && selectedConnector && (
+            <Card className="rounded-xl">
+              <CardContent className="space-y-4 p-5">
+                <StepTitle>{t("money.importStepFile")}</StepTitle>
+                <div
+                  {...getRootProps()}
+                  className="flex min-h-[140px] cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-input bg-muted/30 px-4 py-6 text-center transition-colors hover:border-primary/50 hover:bg-muted/50"
+                  data-drag-active={isDragActive || undefined}
                 >
-                  <Plus className="h-4 w-4" />
-                  {t("money.importCreateSourceAccount", {
-                    source: selectedConnectorSourceLabel,
-                  })}
+                  <input {...getInputProps()} />
+                  <Upload className="h-8 w-8 text-muted-foreground" />
+                  <p className="font-medium">{t("money.importFileChoose")}</p>
+                  <p className="max-w-md text-sm text-muted-foreground">
+                    {t("money.importFileAutoStart")}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  className="h-12 w-full text-[15px] font-semibold sm:hidden"
+                  disabled={fileStatus !== null}
+                  onClick={openFilePicker}
+                >
+                  {t("money.importUploadFile")}
                 </Button>
-              </div>
-            )}
-
-            {extensionActive === null && (
-              <p className="text-sm text-muted-foreground">{t("money.importExtensionChecking")}</p>
-            )}
-
-            {extensionActive === true && (
-              <div className="space-y-4">
-                {sourceAccounts.length > 1 && (
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">{t("money.importDefaultAccount")}</label>
-                    <Select value={defaultAccountId} onValueChange={setDefaultAccountId}>
-                      <SelectTrigger className="w-full max-w-xs">
-                        <SelectValue placeholder={t("money.selectAccount")} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {sourceAccounts.map((account) => (
-                          <SelectItem key={account.id} value={account.id}>
-                            {account.account_label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                {fileStatus !== null && (
+                  <p role="status" className="text-sm text-muted-foreground">
+                    {fileStatus === "reading"
+                      ? t("money.importFileReading")
+                      : t("money.importFileUploading", { count: fileStatus.count })}
+                  </p>
+                )}
+                {fileErrors.length > 0 && (
+                  <ul className="list-inside list-disc text-sm text-destructive">
+                    {fileErrors.map((error, index) => (
+                      <li key={index}>{error}</li>
+                    ))}
+                  </ul>
+                )}
+                {fileSkipped && (
+                  <div
+                    role="alert"
+                    className="space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm"
+                  >
+                    <p>{t("money.importFileSkipped", { count: fileSkipped.rows })}</p>
+                    <Button asChild size="sm" variant="outline">
+                      <Link href={`/money/import/reports/${fileSkipped.batchId}`}>
+                        {t("money.importOpenReport")}
+                      </Link>
+                    </Button>
                   </div>
                 )}
-                {(installedExtensionVersion || browserExtensionRelease?.version) && (
-                  <div className="space-y-2 rounded-md border p-4">
-                    {installedExtensionVersion && (
+              </CardContent>
+            </Card>
+          )}
+
+          {isExtensionConnector && selectedConnector && (
+            <Card className="rounded-xl">
+              <CardContent className="space-y-4 p-5">
+                <StepTitle>{t("money.importStepPeriod")}</StepTitle>
+                {extensionActive === null && (
+                  <p className="text-sm text-muted-foreground">
+                    {t("money.importExtensionChecking")}
+                  </p>
+                )}
+
+                {extensionActive === true && (
+                  <div className="space-y-4">
+                    {installedExtensionVersion && extensionUpdateAvailable && (
                       <p className="text-sm text-muted-foreground">
                         {`${t("money.importExtensionVersionCurrent")}: ${installedExtensionVersion}`}
-                      </p>
-                    )}
-                    {browserExtensionRelease?.version && (
-                      <p className="text-sm text-muted-foreground">
-                        {`${t("money.importExtensionVersionLatest")}: ${browserExtensionRelease.version}`}
+                        {browserExtensionRelease?.version
+                          ? ` · ${t("money.importExtensionVersionLatest")}: ${browserExtensionRelease.version}`
+                          : ""}
                       </p>
                     )}
                     {extensionUpdateAvailable && extensionDownloadUrl && (
@@ -1470,262 +1171,236 @@ export default function MoneyImportPage() {
                         </Button>
                       </div>
                     )}
-                  </div>
-                )}
-                <div className="space-y-3 rounded-md border p-4">
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium">{t("money.importRangeTitle")}</div>
-                    <p className="text-sm text-muted-foreground">
-                      {isLoadingExtensionImportContext
-                        ? t("money.importRangeLoading")
-                        : extensionImportContext?.requires_history_prompt
-                          ? t("money.importRangePromptHistory")
-                          : t("money.importRangeContinue")}
-                    </p>
-                  </div>
 
-                  <div className="grid gap-2 md:grid-cols-3">
-                    <Button
-                      type="button"
-                      variant={extensionRangeChoice === "auto" ? "default" : "outline"}
-                      onClick={() => setExtensionRangeChoice("auto")}
-                      disabled={
-                        !extensionImportContext || extensionImportContext.requires_history_prompt
-                      }
-                    >
-                      {t("money.importRangeAuto")}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant={extensionRangeChoice === "preset:1y" ? "default" : "outline"}
-                      onClick={() => setExtensionRangeChoice("preset:1y")}
-                      disabled={!extensionImportContext}
-                    >
-                      {t("money.importRange1y")}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant={
-                        extensionRangeChoice === "preset:since_last_import" ? "default" : "outline"
-                      }
-                      onClick={() => setExtensionRangeChoice("preset:since_last_import")}
-                      disabled={!extensionImportContext?.last_imported_at}
-                    >
-                      {t("money.importRangeSinceLastImport")}
-                    </Button>
-                  </div>
-
-                  <div className="grid gap-2 md:grid-cols-4">
-                    <Button
-                      type="button"
-                      variant={extensionRangeChoice === "preset:1m" ? "default" : "outline"}
-                      onClick={() => setExtensionRangeChoice("preset:1m")}
-                      disabled={!extensionImportContext}
-                    >
-                      {t("money.importRange1m")}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant={extensionRangeChoice === "preset:3m" ? "default" : "outline"}
-                      onClick={() => setExtensionRangeChoice("preset:3m")}
-                      disabled={!extensionImportContext}
-                    >
-                      {t("money.importRange3m")}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant={extensionRangeChoice === "preset:6m" ? "default" : "outline"}
-                      onClick={() => setExtensionRangeChoice("preset:6m")}
-                      disabled={!extensionImportContext}
-                    >
-                      {t("money.importRange6m")}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant={extensionRangeChoice === "custom" ? "default" : "outline"}
-                      onClick={() => setExtensionRangeChoice("custom")}
-                      disabled={!extensionImportContext}
-                    >
-                      {t("money.importRangeCustom")}
-                    </Button>
-                  </div>
-
-                  {extensionRangeChoice === "custom" && (
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label htmlFor="customRangeFrom">{t("money.importRangeFrom")}</Label>
-                        <Input
-                          id="customRangeFrom"
-                          type="datetime-local"
-                          value={customRangeFrom}
-                          onChange={(event) => setCustomRangeFrom(event.target.value)}
-                        />
+                    <div className="space-y-3">
+                      {(isLoadingExtensionImportContext ||
+                        extensionImportContext?.requires_history_prompt) && (
+                        <p className="text-sm text-muted-foreground">
+                          {isLoadingExtensionImportContext
+                            ? t("money.importRangeLoading")
+                            : t("money.importRangePromptHistory")}
+                        </p>
+                      )}
+                      <div className="flex flex-wrap gap-2">
+                        {RANGE_CHOICES.map(({ choice, key }) => (
+                          <Button
+                            key={choice}
+                            type="button"
+                            size="sm"
+                            className="rounded-full"
+                            variant={extensionRangeChoice === choice ? "default" : "outline"}
+                            aria-pressed={extensionRangeChoice === choice}
+                            onClick={() => setExtensionRangeChoice(choice)}
+                            disabled={rangeChoiceDisabled(choice, extensionImportContext)}
+                          >
+                            {t(key)}
+                          </Button>
+                        ))}
                       </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="customRangeTo">{t("money.importRangeTo")}</Label>
-                        <Input
-                          id="customRangeTo"
-                          type="datetime-local"
-                          value={customRangeTo}
-                          onChange={(event) => setCustomRangeTo(event.target.value)}
-                        />
-                      </div>
-                    </div>
-                  )}
 
-                  <div className="text-sm text-muted-foreground">
-                    {t("money.importRangeSelected", {
-                      range: formatSelectedRange(
-                        resolvedExtensionRange?.windowFrom ??
-                          extensionImportContext?.window_from ??
-                          null,
-                        resolvedExtensionRange?.windowTo ??
-                          extensionImportContext?.window_to ??
-                          null,
-                      ),
-                    })}
-                  </div>
-                </div>
-                {isTbankExtensionConnector && (
-                  <div className="space-y-3 rounded-md border p-4">
-                    <div className="space-y-1">
-                      <div className="text-sm font-medium">{t("money.importStrategyTitle")}</div>
-                      <p className="text-sm text-muted-foreground">
-                        {t("money.importStrategyHint")}
+                      {extensionRangeChoice === "custom" && (
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <div className="space-y-2">
+                            <Label htmlFor="customRangeFrom">{t("money.importRangeFrom")}</Label>
+                            <Input
+                              id="customRangeFrom"
+                              type="datetime-local"
+                              value={customRangeFrom}
+                              onChange={(event) => setCustomRangeFrom(event.target.value)}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="customRangeTo">{t("money.importRangeTo")}</Label>
+                            <Input
+                              id="customRangeTo"
+                              type="datetime-local"
+                              value={customRangeTo}
+                              onChange={(event) => setCustomRangeTo(event.target.value)}
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      <p className="text-[13px] text-muted-foreground">
+                        {t("money.importRangeSelected", {
+                          range: formatSelectedRange(
+                            resolvedExtensionRange?.windowFrom ??
+                              extensionImportContext?.window_from ??
+                              null,
+                            resolvedExtensionRange?.windowTo ??
+                              extensionImportContext?.window_to ??
+                              null,
+                          ),
+                        })}
+                        . {t("money.importAccountsAuto")}
                       </p>
                     </div>
-                    <div className="grid gap-2 md:grid-cols-2">
+
+                    {isTbankExtensionConnector && (
+                      <details className="space-y-2 text-sm">
+                        <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                          {t("money.importStrategyMore")}
+                        </summary>
+                        <p className="pt-2 text-muted-foreground">
+                          {t("money.importStrategyHint")}
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {(["full", "fast"] as const).map((strategy) => (
+                            <Button
+                              key={strategy}
+                              type="button"
+                              size="sm"
+                              className="rounded-full"
+                              variant={extensionParseStrategy === strategy ? "default" : "outline"}
+                              data-state={extensionParseStrategy === strategy ? "on" : "off"}
+                              onClick={() => setExtensionParseStrategy(strategy)}
+                            >
+                              {t(
+                                strategy === "full"
+                                  ? "money.importStrategyFull"
+                                  : "money.importStrategyFast",
+                              )}
+                            </Button>
+                          ))}
+                        </div>
+                      </details>
+                    )}
+
+                    <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center">
                       <Button
-                        type="button"
-                        variant={extensionParseStrategy === "fast" ? "default" : "outline"}
-                        data-state={extensionParseStrategy === "fast" ? "on" : "off"}
-                        onClick={() => setExtensionParseStrategy("fast")}
+                        className="h-11 gap-2 px-6 text-[15px] font-semibold"
+                        onClick={handleStartExtensionImport}
+                        disabled={
+                          isStartingExtension ||
+                          isLoadingExtensionImportContext ||
+                          !extensionImportContext ||
+                          !resolvedExtensionRange
+                        }
                       >
-                        {t("money.importStrategyFast")}
+                        {isStartingExtension ? t("common.loading") : t("money.importStartImport")}
                       </Button>
-                      <Button
-                        type="button"
-                        variant={extensionParseStrategy === "full" ? "default" : "outline"}
-                        data-state={extensionParseStrategy === "full" ? "on" : "off"}
-                        onClick={() => setExtensionParseStrategy("full")}
-                      >
-                        {t("money.importStrategyFull")}
-                      </Button>
+                      <p className="text-sm text-muted-foreground">
+                        {t("money.importStartHint", { bank: selectedBankLabel })}
+                      </p>
                     </div>
                   </div>
                 )}
-                <ol className="list-decimal list-inside space-y-1.5 text-sm text-muted-foreground">
-                  <li>
-                    {t("money.importExtensionSourceStep1", {
-                      source: selectedConnectorSourceLabel,
-                    })}
-                  </li>
-                  <li>
-                    {t("money.importExtensionSourceStep2", {
-                      source: selectedConnectorSourceLabel,
-                    })}
-                  </li>
-                  <li>
-                    {t("money.importExtensionSourceStep3", {
-                      source: selectedConnectorSourceLabel,
-                    })}
-                  </li>
-                </ol>
-                <Button
-                  className="gap-2"
-                  onClick={handleStartExtensionImport}
-                  disabled={
-                    isStartingExtension ||
-                    isLoadingExtensionImportContext ||
-                    !extensionImportContext ||
-                    !resolvedExtensionRange ||
-                    sourceAccounts.length === 0 ||
-                    (sourceAccounts.length > 1 && !defaultAccountId)
-                  }
-                >
-                  {isStartingExtension ? t("common.loading") : t("money.importStartImport")}
-                </Button>
-              </div>
-            )}
 
-            {extensionActive === false && (
-              <div className="space-y-2">
-                <p className="text-sm text-muted-foreground">
-                  {!shouldUsePublishedExtensionFlow
-                    ? t("money.importExtensionInstallDev")
-                    : extensionBrowser === "firefox"
-                      ? t("money.importExtensionInstallFirefox")
-                      : t("money.importExtensionInstallProd")}
-                </p>
-                {shouldUsePublishedExtensionFlow && !extensionDownloadUrl && (
-                  <p className="text-sm text-muted-foreground">
-                    {t("money.importExtensionFirefoxUnavailable")}
+                {extensionActive === false && (
+                  <div className="space-y-2">
+                    <p className="text-sm text-muted-foreground">
+                      {!shouldUsePublishedExtensionFlow
+                        ? t("money.importExtensionInstallDev")
+                        : extensionBrowser === "firefox"
+                          ? t("money.importExtensionInstallFirefox")
+                          : t("money.importExtensionInstallProd")}
+                    </p>
+                    {shouldUsePublishedExtensionFlow && !extensionDownloadUrl && (
+                      <p className="text-sm text-muted-foreground">
+                        {t("money.importExtensionFirefoxUnavailable")}
+                      </p>
+                    )}
+                    {shouldUsePublishedExtensionFlow && extensionDownloadUrl && (
+                      <>
+                        <Button variant="outline" size="sm" asChild>
+                          <a href={extensionDownloadUrl}>
+                            {t("money.importExtensionDownloadLatest")}
+                          </a>
+                        </Button>
+                        {extensionBrowser === "firefox" ? (
+                          <ol className="list-decimal list-inside space-y-1.5 text-sm text-muted-foreground">
+                            <li>{t("money.importExtensionInstallFirefoxStep1")}</li>
+                            <li>{t("money.importExtensionInstallFirefoxStep2")}</li>
+                          </ol>
+                        ) : (
+                          <ol className="list-decimal list-inside space-y-1.5 text-sm text-muted-foreground">
+                            <li>{t("money.importExtensionInstallProdStep1")}</li>
+                            <li>{t("money.importExtensionInstallProdStep2")}</li>
+                            <li>{t("money.importExtensionInstallProdStep3")}</li>
+                            <li>{t("money.importExtensionInstallProdStep4")}</li>
+                          </ol>
+                        )}
+                      </>
+                    )}
+                    <p className="text-sm text-muted-foreground">
+                      {t("money.importExtensionReloadHint")}
+                    </p>
+                    <Button variant="outline" size="sm" className="gap-2" onClick={checkExtension}>
+                      <LinkIcon className="h-4 w-4" />
+                      {t("money.importExtensionRetryCheck")}
+                    </Button>
+                  </div>
+                )}
+
+                {extensionStatusMessage && extensionActive !== null && (
+                  <p
+                    role="status"
+                    className={
+                      extensionActive
+                        ? "text-sm text-muted-foreground"
+                        : "text-sm font-medium text-destructive"
+                    }
+                  >
+                    {extensionStatusMessage}
                   </p>
                 )}
-                {shouldUsePublishedExtensionFlow && extensionDownloadUrl && (
-                  <>
-                    <Button variant="outline" size="sm" asChild>
-                      <a href={extensionDownloadUrl}>{t("money.importExtensionDownloadLatest")}</a>
-                    </Button>
-                    {extensionBrowser === "firefox" ? (
-                      <ol className="list-decimal list-inside space-y-1.5 text-sm text-muted-foreground">
-                        <li>{t("money.importExtensionInstallFirefoxStep1")}</li>
-                        <li>{t("money.importExtensionInstallFirefoxStep2")}</li>
-                      </ol>
-                    ) : (
-                      <ol className="list-decimal list-inside space-y-1.5 text-sm text-muted-foreground">
-                        <li>{t("money.importExtensionInstallProdStep1")}</li>
-                        <li>{t("money.importExtensionInstallProdStep2")}</li>
-                        <li>{t("money.importExtensionInstallProdStep3")}</li>
-                        <li>{t("money.importExtensionInstallProdStep4")}</li>
-                      </ol>
-                    )}
-                  </>
-                )}
-                <p className="text-sm text-muted-foreground">
-                  {t("money.importExtensionReloadHint")}
-                </p>
-                <Button variant="outline" size="sm" className="gap-2" onClick={checkExtension}>
-                  <LinkIcon className="h-4 w-4" />
-                  {t("money.importExtensionRetryCheck")}
-                </Button>
-              </div>
-            )}
 
-            {extensionActive === false && (
-              <Badge variant="destructive">{t("money.importExtensionInactive")}</Badge>
-            )}
-
-            {extensionStatusMessage && extensionActive === true && (
-              <p className="text-sm text-muted-foreground">{extensionStatusMessage}</p>
-            )}
-
-            {activeSessionId && (
-              <div className="space-y-3 rounded-md border p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-sm font-medium">{t("money.importProgress")}</span>
-                  <span className="text-sm text-muted-foreground">
-                    {computeProgressPercent(sessionStatus)}%
-                  </span>
-                </div>
-                <Progress value={computeProgressPercent(sessionStatus)} />
-                <div className="text-sm text-muted-foreground">
-                  {t("money.importParsedTransactionsCount", {
-                    count: sessionStatus?.batch?.parsed_transactions_count ?? 0,
-                  })}
-                </div>
-                {activeBatchId && (
-                  <Button variant="outline" asChild>
-                    <Link href={`/money/import/reports/${activeBatchId}`}>
-                      {t("money.importOpenCurrentReport")}
-                    </Link>
+                {extensionStatusMessage && extensionActive === false && (
+                  <Button type="button" size="sm" onClick={() => reloadPage()}>
+                    {t("money.importAttentionReload")}
                   </Button>
                 )}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
+        <aside className="space-y-4" data-testid="import-auto-panel">
+          {extensionDevice ? (
+            <>
+              <MoneyImportAutoStatus
+                t={t}
+                state={extensionAutoStatus.state}
+                status={extensionAutoStatus.status}
+                selectedPersonId={selectedPersonId}
+                sourceLabels={extensionSourceLabels}
+                onRefresh={() => void refreshExtensionAutoStatus()}
+                onScheduleChange={changeAutoSchedule}
+              >
+                <details className="group text-sm">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-2 font-medium">
+                    {t("money.importGrantsCollapsed")}
+                    <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
+                  </summary>
+                  <div className="pt-2 [&>*]:border-0 [&>*]:shadow-none">
+                    <MoneyImportGrants
+                      t={t}
+                      personId={selectedPersonId}
+                      availableSources={extensionConnectorOptions}
+                      onSendToExtension={sendGrantToExtensionAndRefresh}
+                    />
+                  </div>
+                </details>
+              </MoneyImportAutoStatus>
+            </>
+          ) : (
+            <Card className="rounded-xl bg-muted/50 text-muted-foreground">
+              <CardContent className="space-y-1 p-5">
+                <p className="font-medium">{t("money.importAutoStatusTitle")}</p>
+                <p className="text-sm text-muted-foreground">{t("money.importAutoDesktopOnly")}</p>
+              </CardContent>
+            </Card>
+          )}
+        </aside>
+      </div>
     </div>
   );
+}
+
+function connectorBankLabel(
+  t: ReturnType<typeof useTranslations>,
+  connector: MoneyImportConnector,
+): string {
+  const bank = importBankOfSource(connector.sourceId);
+  return bank === "other" ? connector.displayName : t(BANK_KEYS[bank]);
 }

@@ -104,6 +104,20 @@ afterEach(() => {
 });
 
 describe("the money tab", () => {
+  it("leads to reports, categories and rules from tiles that say what is in them", async () => {
+    db.tables.money_category_rules = [
+      { id: "r1", person_id: PERSON.id, sort_order: 1 },
+      { id: "r2", person_id: PERSON.id, sort_order: 2 },
+    ];
+    await renderScreens(routes, "/money");
+    expect(await screen.findByLabelText("Отчеты")).toBeOnTheScreen();
+    expect(screen.getByText("октябрь")).toBeOnTheScreen();
+    expect(await screen.findByText("1")).toBeOnTheScreen();
+    expect(await screen.findByText("2")).toBeOnTheScreen();
+    expect(screen.getByText("Счета")).toBeOnTheScreen();
+    expect(screen.getByText("Импорт")).toBeOnTheScreen();
+  });
+
   it("lists the transactions by day with their categories, comments, items and accounts", async () => {
     await renderScreens(routes, "/money");
     expect(await screen.findByText("Пятёрочка")).toBeOnTheScreen();

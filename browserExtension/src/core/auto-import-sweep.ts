@@ -2,6 +2,7 @@ import type { StoredImportGrant, GrantStore } from "./grant-store.js";
 import type { SessionStore } from "./session-store.js";
 import type { AutoRunScope, AutoRunStore } from "./auto-run-store.js";
 import { nextAutoRunState, shouldAutoRun } from "./auto-run-policy.js";
+import type { AutoSchedule } from "./auto-schedule.js";
 
 /**
  * Decides and drives an import nobody asked for.
@@ -45,6 +46,8 @@ export interface AutoImportSweepDeps {
    * that lands before the person has finished signing in would spend it on the login screen.
    */
   isRunRequested?: (scope: AutoRunScope, nowMs: number) => Promise<boolean>;
+  /** How often a source is due again after a success, as the import page set it. */
+  getSchedule?: () => Promise<AutoSchedule>;
   clearRunRequest?: (scope: AutoRunScope) => Promise<void>;
   /**
    * The tab Update opened for a live request, when it is still there and still on the bank.
@@ -140,7 +143,8 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
     // in the hour after Update would try before they had signed in, and fail.
     const requestLive = (await deps.isRunRequested?.(scope, nowMs)) ?? false;
     const requested = trigger === "visit" && requestLive;
-    if (!requested && !shouldAutoRun(state, nowMs)) return;
+    const schedule = await deps.getSchedule?.();
+    if (!requested && !shouldAutoRun(state, nowMs, schedule ? { schedule } : {})) return;
     // Whose run this is, on the record as well as on the page: a run the request let start is
     // the person's, and the history must not call it automatic once it is over.
     const origin = requested ? "requested" : "auto";

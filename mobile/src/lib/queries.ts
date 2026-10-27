@@ -9,6 +9,7 @@ import * as Haptics from "expo-haptics";
 import type { CheckupItem, CheckupItemStatus } from "@orbit-types/checkup";
 import type { checkupColumns } from "@orbit-types/checkup-form";
 import type { UpdateConditionInput } from "@orbit-types/condition";
+import { importStillSettling } from "@orbit-types/money-import-review";
 import type { RoutingChoice } from "@orbit-types/notification-routing";
 import type { FindingSummary } from "@orbit-types/finding";
 import type {
@@ -25,6 +26,7 @@ import type {
 } from "@orbit-types/regimen";
 import type { CourseColumns } from "@orbit-types/regimen-form";
 import { withStatus } from "@/features/doses/dashboard";
+import { readTodayBlocks, writeTodayBlocks, type TodayBlocks } from "@/features/today/blocks";
 import type { DayDose, DoseStatus } from "@/features/doses/model";
 import {
   fetchDoseHistory,
@@ -81,7 +83,12 @@ import {
 } from "@/features/money/transactions";
 import { fetchCards, saveAccount, saveCard, type AccountColumns } from "@/features/money/accounts";
 import { saveCategory, type CategoryColumns } from "@/features/money/categories";
-import { fetchImportBatch, fetchImportBatches, moneyImportAction } from "@/features/money/import";
+import {
+  fetchImportBatch,
+  fetchImportBatches,
+  moneyImportAction,
+  rollbackImportBatch,
+} from "@/features/money/import";
 import {
   fetchCheckupReminders,
   fetchHousehold,
@@ -824,8 +831,34 @@ export function useImportBatches(personId: string | undefined) {
   });
 }
 
+/** How often a batch still being read is asked again, so its screen follows the import live. */
+const RUNNING_IMPORT_REFRESH_MS = 3000;
+
 export function useImportBatch(id: string) {
-  return useQuery({ queryKey: ["money-import-batch", id], queryFn: () => fetchImportBatch(id) });
+  return useQuery({
+    queryKey: ["money-import-batch", id],
+    queryFn: () => fetchImportBatch(id),
+    refetchInterval: (query) => {
+      const batch = query.state.data?.batch;
+      return batch && importStillSettling(batch, new Date()) ? RUNNING_IMPORT_REFRESH_MS : false;
+    },
+  });
+}
+
+/** Undo an applied import; the feed and the history follow. */
+export function useRollbackImportBatch() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => rollbackImportBatch(id),
+    onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
+    onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: ["money-import-batch"] });
+      void client.invalidateQueries({ queryKey: ["money-import-batches"] });
+      void client.invalidateQueries({ queryKey: ["money-feed"] });
+      void client.invalidateQueries({ queryKey: ["money-feed-summary"] });
+    },
+  });
 }
 
 /** Apply a batch's rows to the transactions, or mark it as not applied. */
@@ -889,5 +922,30 @@ export function useSaveNotificationSettings() {
     onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
     onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
     onSettled: () => void client.invalidateQueries({ queryKey: ["notification-settings"] }),
+  });
+}
+
+/** The blocks "Сегодня" shows on this phone. */
+export function useTodayBlocks() {
+  const { session } = useSession();
+  const userId = session?.user.id;
+  return useQuery({
+    queryKey: ["today-blocks", userId],
+    queryFn: () => readTodayBlocks(userId!),
+    enabled: Boolean(userId),
+    staleTime: Infinity,
+  });
+}
+
+/** Show or hide blocks on "Сегодня"; the screen follows at once. */
+export function useSaveTodayBlocks() {
+  const client = useQueryClient();
+  const { session } = useSession();
+  const userId = session?.user.id;
+  return useMutation({
+    mutationFn: (blocks: TodayBlocks) => writeTodayBlocks(userId!, blocks),
+    onMutate: (blocks) => client.setQueryData(["today-blocks", userId], blocks),
+    onSuccess: () => void Haptics.selectionAsync(),
+    onSettled: () => void client.invalidateQueries({ queryKey: ["today-blocks", userId] }),
   });
 }

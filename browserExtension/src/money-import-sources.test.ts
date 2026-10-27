@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  findMoneyImportSourceBySiteUrl,
+  findMoneyImportSourceSiteOrigin,
   getAllMoneyImportSourcePagePatterns,
+  moveMoneyImportSourceUrl,
   getMoneyImportSourceDefinition,
   getMoneyImportSourcePreset,
   matchesKnownMoneyImportSourcePageUrl,
@@ -73,5 +76,42 @@ describe("money-import-sources", () => {
     expect(getAllMoneyImportSourcePagePatterns()).toEqual(
       expect.arrayContaining(["https://www.tbank.ru/*", "https://web.alfabank.ru/*"]),
     );
+  });
+
+  it("treats the T-Bank mirror as the same bank", () => {
+    const mirror = "https://www.tbank-online.com/mybank/operations/?a=1";
+    expect(matchesMoneyImportSourcePageUrl("tbank_web", mirror)).toBe(true);
+    expect(matchesMoneyImportSourcePageUrl("tbank_web", "https://id.tbank-online.com/auth")).toBe(
+      true,
+    );
+    expect(matchesMoneyImportSourcePageUrl("tbank_web", "https://tbank-online.com.evil/")).toBe(
+      false,
+    );
+    expect(getAllMoneyImportSourcePagePatterns()).toContain("https://*.tbank-online.com/*");
+    expect(
+      new RegExp(getMoneyImportSourcePreset("tbank_web").apiUrlRegex).test(
+        "https://www.tbank-online.com/api/common/v1/operations",
+      ),
+    ).toBe(true);
+    expect(findMoneyImportSourceBySiteUrl(mirror)?.sourceId).toBe("tbank_web");
+    expect(findMoneyImportSourceBySiteUrl("https://id.tbank-online.com/")).toBeNull();
+    expect(findMoneyImportSourceSiteOrigin("tbank_web", mirror)).toBe(
+      "https://www.tbank-online.com",
+    );
+    expect(findMoneyImportSourceSiteOrigin("tbank_web", "not a url")).toBeNull();
+  });
+
+  it("moves a page between the bank's sites and keeps its path", () => {
+    expect(
+      moveMoneyImportSourceUrl("tbank_web", "https://www.tbank.ru/mybank/operations/?x=1#h"),
+    ).toBe("https://www.tbank-online.com/mybank/operations/?x=1#h");
+    expect(moveMoneyImportSourceUrl("tbank_web", "https://www.tbank-online.com/mybank/")).toBe(
+      "https://www.tbank.ru/mybank/",
+    );
+    expect(
+      moveMoneyImportSourceUrl("tbank_web", "https://www.tbank.ru/mybank/", "https://www.tbank.ru"),
+    ).toBeNull();
+    expect(moveMoneyImportSourceUrl("alfa_web", "https://web.alfabank.ru/")).toBeNull();
+    expect(moveMoneyImportSourceUrl("tbank_web", "https://id.tbank.ru/")).toBeNull();
   });
 });

@@ -24,6 +24,10 @@ function newRequestId(): string {
  * tab is from before an extension update and has no extension behind it any more; only a
  * reload of the page gets the script the new version injects. `silent`: no answer at all --
  * no extension, or one still waking up.
+ *
+ * A tab can hold both: since 0.1.30 an update injects a new script beside the orphaned one, and
+ * the orphan's stale notice arrives first because it needs no round trip. So a stale notice
+ * only decides the verdict when no live answer has come by the timeout.
  */
 export type ExtensionProbe = "alive" | "stale" | "silent";
 
@@ -34,12 +38,13 @@ export function probeExtension(timeoutMs: number = PING_TIMEOUT_MS): Promise<Ext
       window.removeEventListener("message", onMessage);
       resolve(verdict);
     };
-    const timeout = window.setTimeout(() => finish("silent"), timeoutMs);
+    let heardStale = false;
+    const timeout = window.setTimeout(() => finish(heardStale ? "stale" : "silent"), timeoutMs);
     const onMessage = (event: MessageEvent) => {
       const data = event.data as Record<string, unknown> | null;
       if (!data || data.source !== EXTENSION_BRIDGE_SOURCE) return;
       if (data.type === "MONEY_IMPORT_PONG") finish("alive");
-      else if (data.type === "MONEY_IMPORT_BRIDGE_STALE") finish("stale");
+      else if (data.type === "MONEY_IMPORT_BRIDGE_STALE") heardStale = true;
     };
     window.addEventListener("message", onMessage);
     window.postMessage(
@@ -108,8 +113,9 @@ export function reloadPage(): void {
 }
 
 /**
- * Sends one request and resolves with the reply that echoes its id, or null on timeout -- or
- * null at once when the bridge answers that it is stale, which `onBridgeStale` hears as well.
+ * Sends one request and resolves with the reply that echoes its id, or null on timeout. A stale
+ * notice does not end the wait: a live bridge injected beside the orphan may still answer (see
+ * `probeExtension`); `onBridgeStale` hears the notice either way.
  */
 export function requestFromExtension<T>(input: {
   type: string;
@@ -129,10 +135,6 @@ export function requestFromExtension<T>(input: {
     const onMessage = (event: MessageEvent) => {
       const data = event.data as Record<string, unknown> | null;
       if (!data || data.source !== EXTENSION_BRIDGE_SOURCE) return;
-      if (data.type === "MONEY_IMPORT_BRIDGE_STALE") {
-        finish(null);
-        return;
-      }
       if (data.type !== input.replyType || data.request_id !== requestId) return;
       finish(input.read(data));
     };
@@ -320,5 +322,44 @@ export function setExtensionStaleAfter(staleAfterMs: number): Promise<number | n
     payload: { stale_after_ms: staleAfterMs },
     read: (data) =>
       data.ok === true && typeof data.stale_after_ms === "number" ? data.stale_after_ms : null,
+  });
+}
+
+/**
+ * How often the extension imports on its own: every N days, at the start or end of each week
+ * (Monday or Sunday), or of each month (the first or the last day). The extension keeps it.
+ */
+export type ImportAutoSchedule =
+  | { kind: "days"; every: number }
+  | { kind: "week"; at: "start" | "end" }
+  | { kind: "month"; at: "start" | "end" };
+
+export const IMPORT_SCHEDULE_MAX_DAYS = 30;
+
+/** A schedule as the extension reported it; null for anything else, an older extension included. */
+export function readImportAutoSchedule(value: unknown): ImportAutoSchedule | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  if (record.kind === "days" && typeof record.every === "number" && record.every >= 1) {
+    return { kind: "days", every: Math.round(record.every) };
+  }
+  if (
+    (record.kind === "week" || record.kind === "month") &&
+    (record.at === "start" || record.at === "end")
+  ) {
+    return { kind: record.kind, at: record.at };
+  }
+  return null;
+}
+
+/** Stores the schedule; resolves with what the extension kept, or null when it did not answer. */
+export function setExtensionAutoSchedule(
+  schedule: ImportAutoSchedule,
+): Promise<ImportAutoSchedule | null> {
+  return requestFromExtension({
+    type: "MONEY_IMPORT_SET_AUTO_SCHEDULE",
+    replyType: "MONEY_IMPORT_AUTO_SCHEDULE_ACK",
+    payload: { schedule },
+    read: (data) => (data.ok === true ? readImportAutoSchedule(data.schedule) : null),
   });
 }

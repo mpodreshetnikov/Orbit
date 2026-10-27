@@ -1,5 +1,6 @@
 const WEBAPP_SOURCE = "orbit-webapp";
 const BRIDGE_SOURCE = "orbit-extension";
+export const CONTENT_BRIDGE_PROBE = "ORBIT_CONTENT_BRIDGE_PROBE";
 
 type RuntimeSendMessage = (
   message: Record<string, unknown>,
@@ -22,6 +23,20 @@ export interface ContentBridgeDeps {
   nowMs?: () => number;
   /** A structured warning; the console in a content script, which has no extension to relay to. */
   onWarning?: (event: string, attrs: Record<string, unknown>) => void;
+}
+
+const BRIDGE_INSTALLED_KEY = "__orbitContentBridgeInstalled";
+
+/**
+ * True for the first caller in this isolated world, false after. The manifest's injection and
+ * the background's re-injection after an update can both reach a tab that was loading at the
+ * time, and two bridges would forward every request twice -- two bank tabs for one click. An
+ * orphaned script from before the update lives in another world and does not count.
+ */
+export function claimContentBridge(scope: Record<string, unknown>): boolean {
+  if (scope[BRIDGE_INSTALLED_KEY]) return false;
+  scope[BRIDGE_INSTALLED_KEY] = true;
+  return true;
 }
 
 export function createContentBridge(deps: ContentBridgeDeps) {
@@ -72,6 +87,7 @@ export function createContentBridge(deps: ContentBridgeDeps) {
       request_id?: unknown;
       source_id?: unknown;
       stale_after_ms?: unknown;
+      schedule?: unknown;
     };
     if (!data || data.source !== WEBAPP_SOURCE) return;
 
@@ -134,6 +150,9 @@ export function createContentBridge(deps: ContentBridgeDeps) {
               ok: Boolean(response?.ok),
               grant: response?.grant ?? null,
               sources: Array.isArray(response?.sources) ? response.sources : [],
+              // Absent from an extension older than the schedule; the page reads that as
+              // "update to set it".
+              schedule: response?.schedule ?? null,
             },
             "*",
           );
@@ -189,6 +208,26 @@ export function createContentBridge(deps: ContentBridgeDeps) {
       return;
     }
 
+    if (data.type === "MONEY_IMPORT_SET_AUTO_SCHEDULE") {
+      const requestId = typeof data.request_id === "string" ? data.request_id : null;
+      sendToRuntime(
+        { type: "MONEY_IMPORT_SET_AUTO_SCHEDULE", schedule: data.schedule },
+        (response: Record<string, unknown> | undefined) => {
+          deps.windowPostMessage(
+            {
+              source: BRIDGE_SOURCE,
+              type: "MONEY_IMPORT_AUTO_SCHEDULE_ACK",
+              request_id: requestId,
+              ok: Boolean(response?.ok),
+              schedule: response?.schedule ?? null,
+            },
+            "*",
+          );
+        },
+      );
+      return;
+    }
+
     if (data.type === "MONEY_IMPORT_SET_ATTENTION_SETTINGS") {
       const requestId = typeof data.request_id === "string" ? data.request_id : null;
       sendToRuntime(
@@ -232,8 +271,16 @@ export function createContentBridge(deps: ContentBridgeDeps) {
 
   function handleRuntimeMessage(
     message: (Record<string, unknown> & { type?: string }) | null,
+    _sender?: unknown,
+    sendResponse?: (response: unknown) => void,
   ): void {
     if (!message || typeof message !== "object") return;
+    // The background asks before it injects this script into an open tab, so a tab that already
+    // has a live bridge -- Firefox injects on install by itself -- never gets a second one.
+    if (message.type === CONTENT_BRIDGE_PROBE) {
+      sendResponse?.({ alive: true });
+      return;
+    }
     if (
       ![
         "MONEY_IMPORT_PROGRESS",

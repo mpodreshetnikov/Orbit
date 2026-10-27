@@ -453,6 +453,8 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
           status: data.status,
           obs_code: data.obs_code,
           is_user_verified: true,
+          // A row kept unrecognised at approval joins its history once the owner matches it.
+          ...(data.obs_code ? { is_applied: true } : {}),
         },
       });
     }
@@ -1587,6 +1589,8 @@ export function ObservationRowEditable({
     observation.status === "critical_low" ||
     observation.status === "critical_high";
   const isCustom = !observation.obs_code;
+  // Kept at approval although the catalogue does not know it: on the record, out of every history.
+  const isUnrecognised = !observation.is_applied;
 
   // Format reference range display
   const hasRefRange = observation.ref_range_low !== null || observation.ref_range_high !== null;
@@ -1598,14 +1602,22 @@ export function ObservationRowEditable({
       className={cn(
         "rounded-lg border p-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4",
         isBad && "border-orange-500/30 bg-orange-500/5",
-        isCustom && !isBad && "border-dashed border-muted-foreground/40",
+        (isCustom || isUnrecognised) && !isBad && "border-dashed border-muted-foreground/40",
         comparison?.isNew && !isBad && !isCustom && "border-amber-500/30 bg-amber-500/5",
       )}
     >
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-medium truncate">{observation.obs_name}</span>
-          {observation.obs_code ? (
+          {isUnrecognised ? (
+            <Badge
+              variant="outline"
+              className="text-xs border-dashed text-muted-foreground"
+              title={t("observations.unrecognisedHint")}
+            >
+              {t("observations.unrecognisedBadge")}
+            </Badge>
+          ) : observation.obs_code ? (
             <span className="text-xs text-muted-foreground shrink-0">({observation.obs_code})</span>
           ) : (
             <Badge
@@ -1617,10 +1629,10 @@ export function ObservationRowEditable({
             </Badge>
           )}
         </div>
-        {/* Subtle hint for custom observations */}
-        {isCustom && (
+        {/* Subtle hint for custom and unrecognised observations */}
+        {(isCustom || isUnrecognised) && (
           <p className="text-xs text-muted-foreground/70 mt-1 italic">
-            {t("observations.addToCatalogHint")}
+            {t(isUnrecognised ? "observations.unrecognisedHint" : "observations.addToCatalogHint")}
           </p>
         )}
       </div>
@@ -1657,7 +1669,7 @@ export function ObservationRowEditable({
         </div>
         <ObservationStatusBadge status={observation.status} />
         <div className="flex items-center gap-0.5 ms-auto sm:ms-0">
-          {observation.obs_code && (
+          {observation.obs_code && !isUnrecognised && (
             <Button
               variant="ghost"
               size="icon"

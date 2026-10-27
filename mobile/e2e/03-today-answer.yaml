@@ -1,23 +1,19 @@
-# Answering doses on "Сегодня": take one, skip another, then undo the take from its menu.
+# Answering doses on the medications tab, where the day's doses live: take one, skip another, then
+# undo the take from its menu.
 # It changes the data, so it runs after the read-only flows (they run in file-name order).
 appId: host.exp.Exponent
-name: Сегодня — ответы
+name: Приёмы — ответы
 ---
 - runFlow: setup/fresh.yaml
 # The link names the screen, as every flow's does: a tap on the tab right after a launch can land
 # before the client has settled and be lost.
-- openLink: exp://127.0.0.1:8081/--/today
+- openLink: exp://127.0.0.1:8081/--/medications
 - tapOn:
     text: "Open"
     optional: true
 - extendedWaitUntil:
-    visible: "Сегодня"
+    visible: "Курсы"
     timeout: 60000
-- runFlow:
-    when:
-      notVisible: "Omega-3.*"
-    commands:
-      - tapOn: "Сегодня"
 - extendedWaitUntil:
     visible: "Omega-3.*"
     timeout: 60000

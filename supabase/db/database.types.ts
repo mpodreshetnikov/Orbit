@@ -2371,6 +2371,7 @@ export type Database = {
       }
       record_attachments: {
         Row: {
+          content_sha256: string | null
           created_at: string
           file_size: number | null
           id: string
@@ -2381,6 +2382,7 @@ export type Database = {
           storage_path: string
         }
         Insert: {
+          content_sha256?: string | null
           created_at?: string
           file_size?: number | null
           id?: string
@@ -2391,6 +2393,7 @@ export type Database = {
           storage_path: string
         }
         Update: {
+          content_sha256?: string | null
           created_at?: string
           file_size?: number | null
           id?: string
@@ -3129,6 +3132,10 @@ export type Database = {
           is_exact: boolean
           rate: number
         }[]
+      }
+      money_rollback_import_batch: {
+        Args: { p_batch_id: string }
+        Returns: Json
       }
       money_run_category_rule_pipeline_internal: {
         Args: {

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { router } from "expo-router";
-import { ActionSheetIOS, Alert } from "react-native";
+import { Alert } from "react-native";
 import { fetchImportBatch, REPORT_PAGE } from "@/features/money/import";
 import ImportBatchScreen from "@/screens/import-batch-screen";
 import ImportHistoryScreen from "@/screens/import-history-screen";
@@ -64,16 +64,6 @@ const routes = {
   "money/import/[batch]": ImportBatchScreen,
 };
 
-const tbank = (id: string, label: string) => ({
-  id,
-  owner_person_id: PERSON.id,
-  account_label: label,
-  account_kind: "debit",
-  currency: "RUB",
-  source: "tbank",
-  is_active: true,
-});
-
 const batch = (id: string, status: string, created_at: string) => ({
   id,
   payer_person_id: PERSON.id,
@@ -87,12 +77,6 @@ const batch = (id: string, status: string, created_at: string) => ({
   completed_at: status === "completed" ? created_at : null,
   meta: null,
 });
-
-function pickOption(label: string) {
-  jest
-    .spyOn(ActionSheetIOS, "showActionSheetWithOptions")
-    .mockImplementationOnce((options, callback) => callback(options.options.indexOf(label)));
-}
 
 beforeEach(() => {
   jest.useFakeTimers({ now: NOW, advanceTimers: true });
@@ -143,31 +127,14 @@ afterEach(() => {
 const imports = () => calls.rpc.filter((call) => call.name === "money-import");
 
 describe("a statement import", () => {
-  it("reads the file, makes the T-Bank account it needs, and sends the rows for a preview", async () => {
+  it("starts as soon as the file is read, naming no account, and opens the import", async () => {
     await renderScreens(routes, "/money");
     await fireEvent.press(await screen.findByText("Импорт"));
-    await fireEvent.press(await screen.findByText("Загрузить файл"));
+    expect(await screen.findByText("1. БАНК")).toBeOnTheScreen();
+    await fireEvent.press(screen.getByText("Загрузить файл"));
 
-    expect(await screen.findByText("ops.csv · 2")).toBeOnTheScreen();
-    expect(screen.getByText("Кофейня")).toBeOnTheScreen();
-    expect(screen.getByText("Нет счетов T-Bank. Сначала добавьте счёт.")).toBeOnTheScreen();
-    expect(screen.getByText("Не для всех карт выбран счёт")).toBeOnTheScreen();
-
-    await fireEvent.press(screen.getByText("Создать счёт T-Bank"));
-    await waitFor(() =>
-      expect(db.tables.money_accounts).toEqual([
-        expect.objectContaining({ owner_person_id: PERSON.id, source: "tbank" }),
-      ]),
-    );
-    expect(
-      await screen.findByLabelText("Счёт по умолчанию для неизвестных карт: T-Bank"),
-    ).toBeOnTheScreen();
-    expect(screen.queryByText("Не для всех карт выбран счёт")).toBeNull();
-
-    await fireEvent.press(screen.getByText("Подтвердить импорт"));
-    expect(await screen.findByText("Импортировано 0, пропущено дубликатов: 0.")).toBeOnTheScreen();
+    expect(await screen.findByText("Импорт ждёт применения")).toBeOnTheScreen();
     const [preview] = imports();
-    const account = (db.tables.money_accounts[0] as { id: string }).id;
     expect(preview!.args).toEqual(
       expect.objectContaining({
         action: "preview_rows",
@@ -177,51 +144,84 @@ describe("a statement import", () => {
         file_path: "ops.csv",
       }),
     );
-    expect((preview!.args as { rows: { account_id: string }[] }).rows).toEqual([
-      expect.objectContaining({ account_id: account, amount: -120.5 }),
-      expect.objectContaining({ account_id: account, amount: -990 }),
+    const rows = (preview!.args as { rows: Record<string, unknown>[] }).rows;
+    expect(rows).toEqual([
+      expect.objectContaining({ account_hint: "1234", amount: -120.5 }),
+      expect.objectContaining({ account_hint: "5678", amount: -990 }),
     ]);
+    expect(rows[0]).not.toHaveProperty("account_id");
+    // The server opens the bank's account when there is none; the phone makes none itself.
+    expect(db.tables.money_accounts).toEqual([]);
   });
 
-  it("maps each card to its account, by the cards known and by hand", async () => {
-    seed({
-      ...db.tables,
-      money_accounts: [tbank("acc-a", "Тинькофф Black"), tbank("acc-b", "Тинькофф Platinum")],
-      money_cards: [{ id: "c1", account_id: "acc-a", last4: "1234", card_label: null }],
+  it("greys out what needs a computer, and the file is the way in", async () => {
+    await renderScreens(routes, "/money/import");
+
+    expect(await screen.findByTestId("import-bank-tbank")).toHaveProp("accessibilityState", {
+      selected: true,
+      disabled: false,
     });
+    expect(screen.getByTestId("import-bank-alfa")).toBeDisabled();
+    expect(
+      screen.getByText("Альфа-Банк: Только из личного кабинета, на компьютере"),
+    ).toBeOnTheScreen();
+    expect(screen.getByText("Другой банк: Скоро: выписка любого банка")).toBeOnTheScreen();
+    expect(await screen.findByTestId("import-last")).toHaveTextContent(
+      "Последний импорт 1 окт. · T-Bank · 2 операции",
+    );
+    await fireEvent.press(screen.getByText("Где взять выписку T-Bank?"));
+    expect(screen.getByText("2. Выписка, формат CSV, период")).toBeOnTheScreen();
+    expect(screen.getByTestId("import-bank-other")).toBeDisabled();
+    expect(screen.getByTestId("import-method-extension")).toBeDisabled();
+    expect(screen.getByText("Нужен браузер на компьютере с расширением Orbit")).toBeOnTheScreen();
+    expect(screen.getByText("рекомендуем")).toBeOnTheScreen();
+    expect(
+      screen.getByText("Настраивается в браузере на компьютере, где стоит расширение Orbit."),
+    ).toBeOnTheScreen();
+  });
+
+  it("imports a file handed over by another app", async () => {
     await renderScreens(routes, "/money/import?file=file%3A%2F%2F%2Fops.csv&name=ops.csv");
 
-    expect(await screen.findByLabelText("Счёт для карты *1234: Тинькофф Black")).toBeOnTheScreen();
-    expect(screen.getByText("Не для всех карт выбран счёт")).toBeOnTheScreen();
-
-    pickOption("Тинькофф Platinum");
-    await fireEvent.press(screen.getByLabelText("Счёт для карты *5678: Выберите счет..."));
-    expect(
-      await screen.findByLabelText("Счёт для карты *5678: Тинькофф Platinum"),
-    ).toBeOnTheScreen();
-
-    await fireEvent.press(screen.getByText("Подтвердить импорт"));
-    await waitFor(() => expect(imports()).toHaveLength(1));
-    expect((imports()[0]!.args as { rows: { account_id: string }[] }).rows).toEqual([
-      expect.objectContaining({ account_id: "acc-a" }),
-      expect.objectContaining({ account_id: "acc-b" }),
-    ]);
+    expect(await screen.findByText("Импорт ждёт применения")).toBeOnTheScreen();
+    expect(imports()).toHaveLength(1);
   });
 
-  it("says when the file cannot be read, and when the preview fails", async () => {
-    seed({ ...db.tables, money_accounts: [tbank("acc-a", "Тинькофф Black")] });
-    const alert = jest.spyOn(Alert, "alert").mockImplementation(() => {});
+  it("stays to say which rows of the file were not read, then opens the import", async () => {
+    mockFiles["file:///partly.csv"] = [
+      STATEMENT,
+      "не дата;;*1234;OK;-1,00;RUB;Кафе;5812;Сломано",
+    ].join("\n");
+    mockPicked.current = { name: "partly.csv", uri: "file:///partly.csv" };
+    await renderScreens(routes, "/money/import");
+    const upload = await screen.findByText("Загрузить файл");
+    await waitFor(() => expect(upload).toBeEnabled());
+    await fireEvent.press(upload);
+
+    expect(
+      await screen.findByText(
+        "Импорт запущен, но 1 строку файла не удалось прочитать: их в импорте нет.",
+      ),
+    ).toBeOnTheScreen();
+    expect(imports()).toHaveLength(1);
+    await fireEvent.press(screen.getByText("Открыть отчёт"));
+    expect(await screen.findByText("Импорт ждёт применения")).toBeOnTheScreen();
+  });
+
+  it("says when the file cannot be read, has nothing in it, or the upload fails", async () => {
     mockPicked.current = { name: "gone.csv", uri: "file:///gone.csv" };
     await renderScreens(routes, "/money/import");
-    await fireEvent.press(await screen.findByText("Загрузить файл"));
+    const upload = await screen.findByText("Загрузить файл");
+    await waitFor(() => expect(upload).toBeEnabled());
+    await fireEvent.press(upload);
     expect(await screen.findByText("Не удалось прочитать файл.")).toBeOnTheScreen();
 
-    mockPicked.current = null;
+    mockFiles["file:///empty.csv"] = HEADER;
+    mockPicked.current = { name: "empty.csv", uri: "file:///empty.csv" };
     await fireEvent.press(screen.getByText("Загрузить файл"));
-    expect(screen.getByText("gone.csv · 0")).toBeOnTheScreen();
+    expect(await screen.findByText("В файле нет операций.")).toBeOnTheScreen();
 
     mockPicked.current = { name: "ops.csv", uri: "file:///ops.csv" };
-    await fireEvent.press(screen.getByText("Загрузить файл"));
     jest.spyOn(supabase.functions, "invoke").mockResolvedValueOnce({
       data: null,
       error: {
@@ -229,10 +229,8 @@ describe("a statement import", () => {
         context: { json: async () => ({ error: "Пакет уже загружен" }) },
       },
     } as never);
-    await fireEvent.press(await screen.findByText("Подтвердить импорт"));
-    await waitFor(() =>
-      expect(alert).toHaveBeenCalledWith("Что-то пошло не так", "Пакет уже загружен"),
-    );
+    await fireEvent.press(screen.getByText("Загрузить файл"));
+    expect(await screen.findByText("Пакет уже загружен")).toBeOnTheScreen();
   });
 });
 
@@ -253,9 +251,6 @@ describe("the import history", () => {
     expect(await screen.findAllByText(/^\d{2}\.10\.2026/)).toHaveLength(1);
     await act(() => router.push("/money/import"));
     await fireEvent.press(await screen.findByText("Загрузить файл"));
-    await fireEvent.press(await screen.findByText("Создать счёт T-Bank"));
-    await screen.findByLabelText("Счёт по умолчанию для неизвестных карт: T-Bank");
-    await fireEvent.press(screen.getByText("Подтвердить импорт"));
     await screen.findByText("Применить пакет");
     await act(() => router.push("/money/import/history"));
     await waitFor(() => expect(screen.getAllByText(/^\d{2}\.10\.2026/)).toHaveLength(2));
@@ -316,7 +311,8 @@ describe("the import history", () => {
 
   it("shows a completed import without the review, and an empty history its hint", async () => {
     await renderScreens(routes, "/money/import/b-old");
-    expect(await screen.findByText("Импортировано 2, пропущено дубликатов: 0.")).toBeOnTheScreen();
+    expect(await screen.findByText("Готово. Добавлено операций: 2, уже были: 0")).toBeOnTheScreen();
+    expect(screen.getByText(/Вкладку банка можно закрыть/)).toBeOnTheScreen();
     expect(screen.getByText("В этой партии нет импортированных строк.")).toBeOnTheScreen();
     expect(screen.queryByText("Применить пакет")).toBeNull();
 
@@ -325,6 +321,113 @@ describe("the import history", () => {
     expect(
       await screen.findByText("Здесь появятся партии импорта для выбранного человека."),
     ).toBeOnTheScreen();
+  });
+
+  it("rolls an applied import back after a confirmation, and says when it cannot", async () => {
+    const alert = jest.spyOn(Alert, "alert");
+    rpcHandlers.money_rollback_import_batch = () => {
+      const target = db.tables.money_import_batches!.find((row) => row.id === "b-old")!;
+      target.status = "rolled_back";
+      target.meta = { rolled_back_transactions: 2 };
+      return { status: "rolled_back" };
+    };
+    await renderScreens(routes, "/money/import/b-old");
+    alert.mockImplementationOnce((_title, _message, buttons) => {
+      expect(_message).toBe(
+        "Удалим операции, которые добавил этот импорт (2), и позиции чеков, которые он дописал к уже существовавшим операциям. Остальное не тронем. Импорт потом можно запустить заново.",
+      );
+      buttons?.find((button) => button.style === "destructive")?.onPress?.();
+    });
+    await fireEvent.press(await screen.findByText("Откатить импорт"));
+    await waitFor(() =>
+      expect(calls.rpc).toContainEqual({
+        name: "money_rollback_import_batch",
+        args: { p_batch_id: "b-old" },
+      }),
+    );
+    expect(await screen.findByText("Импорт откачен")).toBeOnTheScreen();
+    expect(screen.getByText(/Удалено операций: 2/)).toBeOnTheScreen();
+    expect(screen.getByText("Откачен")).toBeOnTheScreen();
+    expect(screen.queryByText("Откатить импорт")).toBeNull();
+
+    seed({
+      ...db.tables,
+      money_import_batches: [batch("b-old", "completed", "2026-10-01T10:00:00Z")],
+    });
+    fail("money_rollback_import_batch");
+    await renderScreens(routes, "/money/import/b-old");
+    alert.mockImplementationOnce((_title, _message, buttons) =>
+      buttons?.find((button) => button.style === "destructive")?.onPress?.(),
+    );
+    alert.mockImplementationOnce(() => {});
+    await fireEvent.press(await screen.findByText("Откатить импорт"));
+    await waitFor(() =>
+      expect(alert).toHaveBeenLastCalledWith(
+        "Не удалось откатить импорт",
+        "money_rollback_import_batch failed",
+      ),
+    );
+  });
+
+  it("follows a running import until it lands", async () => {
+    seed({
+      ...db.tables,
+      money_import_batches: [
+        { ...batch("b-run", "running", "2026-10-20T10:00:00Z"), parsed_transactions_count: 7 },
+      ],
+    });
+    await renderScreens(routes, "/money/import/b-run");
+    expect(await screen.findByText("Импорт идёт")).toBeOnTheScreen();
+    expect(screen.getByText(/Прочитано операций: 7/)).toBeOnTheScreen();
+    expect(screen.queryByText("Откатить импорт")).toBeNull();
+
+    db.tables.money_import_batches![0] = batch("b-run", "completed", "2026-10-20T10:00:00Z");
+    await act(() => jest.advanceTimersByTimeAsync(3100));
+    expect(await screen.findByText("Готово. Добавлено операций: 2, уже были: 0")).toBeOnTheScreen();
+  });
+
+  it("reviews the imports of a week, a month, chosen days, or all time", async () => {
+    const daysAgo = (days: number) => new Date(NOW.getTime() - days * 86_400_000).toISOString();
+    seed({
+      ...db.tables,
+      money_import_batches: [
+        { ...batch("b-1", "completed", daysAgo(2)), inserted_count: 5 },
+        batch("b-2", "rolled_back", daysAgo(3)),
+        { ...batch("b-3", "completed", daysAgo(20)), inserted_count: 40, error_count: 1 },
+      ],
+    });
+    await renderScreens(routes, "/money/import/history");
+    expect(
+      await screen.findByText("Импортов: 3 · добавлено операций: 45 · уже были: 0 · ошибок: 1"),
+    ).toBeOnTheScreen();
+    expect(screen.getByText("Откачено импортов: 1")).toBeOnTheScreen();
+
+    await fireEvent.press(screen.getByText("Неделя"));
+    expect(
+      await screen.findByText("Импортов: 2 · добавлено операций: 5 · уже были: 0 · ошибок: 0"),
+    ).toBeOnTheScreen();
+    expect(screen.getAllByText(/^\d{2}\.10\.2026/)).toHaveLength(2);
+
+    await fireEvent.press(screen.getByText("Месяц"));
+    expect(
+      await screen.findByText("Импортов: 3 · добавлено операций: 45 · уже были: 0 · ошибок: 1"),
+    ).toBeOnTheScreen();
+
+    await fireEvent.press(screen.getByText("Свой период"));
+    await fireEvent(screen.getByTestId("import-review-from"), "change", {
+      nativeEvent: { timestamp: NOW.getTime() - 25 * 86_400_000 },
+    });
+    await fireEvent(screen.getByTestId("import-review-to"), "change", {
+      nativeEvent: { timestamp: NOW.getTime() - 15 * 86_400_000 },
+    });
+    expect(
+      await screen.findByText("Импортов: 1 · добавлено операций: 40 · уже были: 0 · ошибок: 1"),
+    ).toBeOnTheScreen();
+
+    await fireEvent(screen.getByTestId("import-review-to"), "change", {
+      nativeEvent: { timestamp: NOW.getTime() - 24 * 86_400_000 },
+    });
+    expect(await screen.findByText("За этот период импортов не было.")).toBeOnTheScreen();
   });
 
   it("says when a report is not there", async () => {

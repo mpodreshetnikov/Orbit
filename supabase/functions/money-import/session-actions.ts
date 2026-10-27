@@ -358,7 +358,7 @@ export async function completeSessionAction(
       const batchPatch: Record<string, unknown> = {};
 
       // A batch that has been applied stays applied. The extension completes a session as
-      // failed whenever the last request failed, and with an unattended batch applied on the
+      // failed whenever the last request failed, and with its batch applied on the
       // server the last request can fail after the apply.
       if (batchStatus === "failed" && currentBatchStatus !== "completed") {
         batchPatch.status = "failed";

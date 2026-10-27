@@ -68,7 +68,60 @@ export async function searchMedicalRecords(
     throw new Error(`Failed to search medical records: ${error.message}`);
   }
 
-  return (data ?? []) as unknown as MedicalRecordSummary[];
+  // The RPC also returns each record's OCR text; an agent listing records does not need it, and on
+  // 2026-10-26 a single search answered 76,000 characters. get_medical_record has it on request.
+  return ((data ?? []) as unknown as MedicalRecordSummary[]).map((row) => ({
+    id: row.id,
+    person_id: row.person_id,
+    title: row.title,
+    record_type: row.record_type,
+    record_date: row.record_date,
+    status: row.status,
+    notes: row.notes,
+    llm_summary: row.llm_summary,
+    llm_keywords: row.llm_keywords,
+    attachment_count: row.attachment_count,
+    ...(row.search_rank !== undefined ? { search_rank: row.search_rank } : {}),
+  }));
+}
+
+/** Every status but `active`: a record still on its way to the chart, or stuck on the way. */
+export const PENDING_RECORD_STATUSES = ALL_RECORD_STATUSES.filter((status) => status !== "active");
+
+export interface PendingRecord {
+  id: string;
+  person_id: string;
+  title: string;
+  record_type: string;
+  record_date: string | null;
+  status: string;
+  structure_error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Records that are not on the chart yet, newest activity first: drafts waiting for pages or an
+ * ingest, drafts in review, and ones a pipeline step failed on. An agent that lost its record ids
+ * finds them here instead of guessing, and a record stuck since August stops being found by
+ * accident.
+ */
+export async function listPendingRecords(
+  supabase: SupabaseClient<Database>,
+  params: { personId?: string; limit: number },
+): Promise<PendingRecord[]> {
+  let query = supabase
+    .from("medical_records")
+    .select(
+      "id, person_id, title, record_type, record_date, status, structure_error, created_at, updated_at",
+    )
+    .in("status", PENDING_RECORD_STATUSES as never)
+    .order("updated_at", { ascending: false })
+    .limit(params.limit);
+  if (params.personId) query = query.eq("person_id", params.personId);
+  const { data, error } = await query;
+  if (error) throw new Error(`Failed to list pending records: ${error.message}`);
+  return (data ?? []) as unknown as PendingRecord[];
 }
 
 export async function getMedicalRecord(

@@ -1,7 +1,9 @@
 import React from "react";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import MoneyImportHistoryPage from "./page";
+import { feedQueryForReviewPeriod } from "@/types/money-import-review";
 
 let selectedPersonIdState: string | null = "person-1";
 let batchesResult:
@@ -19,7 +21,7 @@ vi.mock("next-intl", () => ({
     if (key === "money.importHistoryResultsSummary" && values) {
       return `${values.inserted}/${values.skipped}/${values.errors}`;
     }
-    return key;
+    return values ? `${key} ${Object.values(values).join(" ")}` : key;
   },
 }));
 
@@ -139,7 +141,7 @@ describe("MoneyImportHistoryPage", () => {
       error: null,
     };
 
-    const { container } = render(<MoneyImportHistoryPage />);
+    render(<MoneyImportHistoryPage />);
 
     await waitFor(() => {
       expect(screen.getByText("money.importHistoryTitle")).toBeInTheDocument();
@@ -148,21 +150,16 @@ describe("MoneyImportHistoryPage", () => {
     expect(eqMock).toHaveBeenCalledWith("payer_person_id", "person-1");
     expect(orderMock).toHaveBeenCalledWith("created_at", { ascending: false });
 
-    const rows = within(screen.getByTestId("import-history-table")).getAllByRole("row");
-    expect(rows).toHaveLength(3);
-    expect(within(rows[1]!).getByText("money.importBatchStatusRunning")).toBeInTheDocument();
-    expect(within(rows[2]!).getByText("money.importBatchStatusCompleted")).toBeInTheDocument();
-    expect(within(rows[1]!).getByText("8")).toBeInTheDocument();
-    expect(within(rows[1]!).getByText("0/0/1")).toBeInTheDocument();
-    expect(within(rows[2]!).getByText("3/1/0")).toBeInTheDocument();
-
-    const reportLinks = screen.getAllByRole("link", { name: "money.importOpenReport" });
-    expect(reportLinks[0]).toHaveAttribute("href", "/money/import/reports/batch-newest");
-    expect(reportLinks[1]).toHaveAttribute("href", "/money/import/reports/batch-oldest");
-
-    expect(container.textContent?.indexOf("batch-newest")).toBeLessThan(
-      container.textContent?.indexOf("batch-oldest") ?? Number.POSITIVE_INFINITY,
-    );
+    const cards = within(screen.getByTestId("import-history-cards")).getAllByRole("link");
+    expect(cards).toHaveLength(2);
+    expect(cards[0]).toHaveAttribute("href", "/money/import/reports/batch-newest");
+    expect(cards[0]).toHaveTextContent("money.importBatchStatusRunning");
+    expect(cards[0]).toHaveTextContent("money.importHistoryParsedRows: 8");
+    expect(cards[0]).toHaveTextContent("money.importResultsSummary 0 0");
+    expect(cards[0]).toHaveTextContent("money.importHistoryErrors 1");
+    expect(cards[1]).toHaveAttribute("href", "/money/import/reports/batch-oldest");
+    expect(cards[1]).toHaveTextContent("money.importBatchStatusCompleted");
+    expect(cards[1]).toHaveTextContent("money.importResultsSummary 3 1");
   });
 
   it("renders badges for every supported batch status", async () => {
@@ -173,17 +170,113 @@ describe("MoneyImportHistoryPage", () => {
         makeBatch({ id: "batch-completed", status: "completed" }),
         makeBatch({ id: "batch-failed", status: "failed" }),
         makeBatch({ id: "batch-discarded", status: "discarded" }),
+        makeBatch({ id: "batch-rolled-back", status: "rolled_back" }),
       ],
       error: null,
     };
 
     render(<MoneyImportHistoryPage />);
 
-    expect(await screen.findByText("money.importBatchStatusPending")).toBeInTheDocument();
-    expect(screen.getByText("money.importBatchStatusRunning")).toBeInTheDocument();
-    expect(screen.getByText("money.importBatchStatusCompleted")).toBeInTheDocument();
-    expect(screen.getByText("money.importBatchStatusFailed")).toBeInTheDocument();
-    expect(screen.getByText("money.importBatchStatusDiscarded")).toBeInTheDocument();
+    const table = within(await screen.findByTestId("import-history-cards"));
+    expect(table.getByText("money.importBatchStatusPending")).toBeInTheDocument();
+    expect(table.getByText("money.importBatchStatusRunning")).toBeInTheDocument();
+    expect(table.getByText("money.importBatchStatusCompleted")).toBeInTheDocument();
+    expect(table.getByText("money.importBatchStatusFailed")).toBeInTheDocument();
+    expect(table.getByText("money.importBatchStatusDiscarded")).toBeInTheDocument();
+    expect(table.getByText("money.importBatchStatusRolledBack")).toBeInTheDocument();
+  });
+
+  it("names the bank, the way and the window of each import on its card", async () => {
+    batchesResult = {
+      data: [
+        makeBatch({
+          id: "batch-unattended",
+          source: "tbank_web",
+          import_type: "web_export",
+          meta: { unattended: true },
+          status: "completed",
+          window_from: "2026-03-01T00:00:00.000Z",
+          window_to: "2026-03-07T00:00:00.000Z",
+          inserted_count: 4,
+          skipped_count: 2,
+          error_count: 0,
+        }),
+        makeBatch({
+          id: "batch-broken",
+          source: "sber_csv",
+          status: "failed",
+          inserted_count: 0,
+          error_count: 3,
+        }),
+        makeBatch({ id: "batch-alfa", source: "alfa_web", import_type: "web_export" }),
+      ],
+      error: null,
+    };
+
+    render(<MoneyImportHistoryPage />);
+
+    const cards = within(await screen.findByTestId("import-history-cards")).getAllByRole("link");
+    expect(cards).toHaveLength(3);
+    expect(cards[0]).toHaveAttribute("href", "/money/import/reports/batch-unattended");
+    expect(cards[0]).toHaveTextContent("money.importBatchStatusCompleted");
+    expect(cards[0]).toHaveTextContent(
+      "money.importBankTbank · money.importHistoryImportTypeUnattended · 01.03.2026 – 07.03.2026",
+    );
+    expect(cards[0]).toHaveTextContent("money.importResultsSummary 4 2");
+    expect(cards[0]).not.toHaveTextContent("money.importHistoryErrors");
+    expect(cards[1]).toHaveAttribute("href", "/money/import/reports/batch-broken");
+    expect(cards[1]).toHaveTextContent("money.importBatchStatusFailed");
+    expect(cards[1]).toHaveTextContent("sber_csv · money.importHistoryImportTypeFile");
+    expect(cards[1]).toHaveTextContent("money.importHistoryErrors 3");
+    expect(cards[2]).toHaveTextContent(
+      "money.importBankAlfa · money.importHistoryImportTypeWebExport",
+    );
+  });
+
+  it("reviews the imports of the last week, a custom period, or all time", async () => {
+    const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString();
+    batchesResult = {
+      data: [
+        makeBatch({ id: "batch-recent", created_at: daysAgo(2), inserted_count: 5 }),
+        makeBatch({ id: "batch-undone", created_at: daysAgo(3), status: "rolled_back" }),
+        makeBatch({ id: "batch-old", created_at: daysAgo(20), inserted_count: 40 }),
+      ],
+      error: null,
+    };
+
+    render(<MoneyImportHistoryPage />);
+
+    const summary = await screen.findByTestId("import-review-summary");
+    expect(summary).toHaveTextContent("money.importReviewSummary 3 45 2 0");
+    expect(screen.queryByRole("link", { name: "money.importReviewOpenFeed" })).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: "money.importReviewPeriodWeek" }));
+    expect(summary).toHaveTextContent("money.importReviewSummary 2 5 1 0");
+    expect(summary).toHaveTextContent("money.importReviewRolledBack 1");
+    expect(within(screen.getByTestId("import-history-cards")).getAllByRole("link")).toHaveLength(2);
+    expect(screen.getByRole("link", { name: "money.importReviewOpenFeed" })).toHaveAttribute(
+      "href",
+      "/money/transactions?preset=7d",
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "money.importReviewPeriodCustom" }));
+    const day = (offset: number) => daysAgo(offset).slice(0, 10);
+    fireEvent.change(screen.getByLabelText("money.importReviewFrom"), {
+      target: { value: day(25) },
+    });
+    fireEvent.change(screen.getByLabelText("money.importReviewTo"), {
+      target: { value: day(15) },
+    });
+    expect(summary).toHaveTextContent("money.importReviewSummary 1 40 1 0");
+    expect(screen.getByRole("link", { name: "money.importReviewOpenFeed" })).toHaveAttribute(
+      "href",
+      `/money/transactions?${feedQueryForReviewPeriod("custom", { from: day(25), to: day(15) })}`,
+    );
+
+    fireEvent.change(screen.getByLabelText("money.importReviewTo"), {
+      target: { value: day(24) },
+    });
+    expect(summary).toHaveTextContent("money.importReviewEmpty");
   });
 
   it("labels an import nobody started, and shows the window each batch covered", async () => {
@@ -212,8 +305,11 @@ describe("MoneyImportHistoryPage", () => {
     render(<MoneyImportHistoryPage />);
 
     // Two batches from one unattended visit are two windows; the label says nobody started them.
-    expect(await screen.findByText("money.importHistoryImportTypeUnattended")).toBeInTheDocument();
-    expect(screen.getByText("31.07.2026 – 31.08.2026")).toBeInTheDocument();
-    expect(screen.getByText("money.importHistoryImportTypeWebExport")).toBeInTheDocument();
+    const cards = within(await screen.findByTestId("import-history-cards")).getAllByRole("link");
+    expect(cards[0]).toHaveTextContent(
+      "money.importHistoryImportTypeUnattended · 31.07.2026 – 31.08.2026",
+    );
+    expect(cards[1]).toHaveTextContent("money.importHistoryImportTypeWebExport");
+    expect(cards[1]).not.toHaveTextContent("–");
   });
 });

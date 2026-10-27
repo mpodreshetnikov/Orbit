@@ -56,6 +56,11 @@ const UNIT_ALIASES: Record<string, string> = {
   "мме/л": "mIU/L",
   "ммє/л": "mIU/L",
   "мед/л": "mIU/L",
+  "мкме/мл": "uIU/mL",
+  "мкмед/мл": "uIU/mL",
+  "мэкв/л": "mEq/L",
+  "л/л": "L/L",
+  "тыс/мкл": "10^3/uL",
   пг: "pg",
   фл: "fL",
   мм: "mm",
@@ -101,6 +106,55 @@ export function resolveAcceptedUnitKey(
     if (alias && foldUnit(key) === foldUnit(alias)) return key;
   }
   return null;
+}
+
+/**
+ * Units this module can name for certain, folded. Two of them that differ measure different
+ * things, or the same thing on a different scale; anything outside the list could be either, and
+ * `unitFitsEntry` gives it the benefit of the doubt.
+ */
+const KNOWN_UNITS = new Set(
+  [
+    ...Object.values(UNIT_ALIASES),
+    "%",
+    "fL",
+    "pg",
+    "10^9/L",
+    "10^12/L",
+    "mIU/mL",
+    "IU/L",
+    "IU/mL",
+    "U/mL",
+    "ng/dL",
+  ].map(foldUnit),
+);
+
+function unitComparisonKey(unit: string): string {
+  const folded = foldUnit(unit);
+  const alias = UNIT_ALIASES[folded];
+  return alias ? foldUnit(alias) : folded;
+}
+
+/**
+ * Whether a value printed in `unit` can belong to this entry's history.
+ *
+ * It can when the entry converts from that unit or keeps its values in it. It cannot when both the
+ * printed unit and the entry's own are units this module knows and they differ with no conversion
+ * between them: PDW printed in fL is not the PDW kept in %, and filing 16.1 fL as 16.1 % puts a
+ * number into a history it cannot be compared with. An unfamiliar spelling (`ед.`, `у.е.`) proves
+ * nothing either way, so it fits, as it always did.
+ */
+export function unitFitsEntry(
+  entry: Pick<ObservationCatalogItem, "accepted_units" | "canonical_unit">,
+  unitInput: string | null | undefined,
+): boolean {
+  const unit = normalizeText(unitInput);
+  if (!unit) return true;
+  if (resolveAcceptedUnitKey(entry.accepted_units, unit) !== null) return true;
+  const printed = unitComparisonKey(unit);
+  const canonical = unitComparisonKey(entry.canonical_unit);
+  if (printed === canonical) return true;
+  return !(KNOWN_UNITS.has(printed) && KNOWN_UNITS.has(canonical));
 }
 
 export function evaluateFormula(formula: string, inputValue: number): number | null {

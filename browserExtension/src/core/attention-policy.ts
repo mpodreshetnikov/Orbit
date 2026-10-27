@@ -1,4 +1,5 @@
 import type { AutoRunState } from "./auto-run-policy.js";
+import { scheduleDueAtMs, DEFAULT_AUTO_SCHEDULE, type AutoSchedule } from "./auto-schedule.js";
 import { lastOkAtMsOf } from "./auto-run-policy.js";
 
 /**
@@ -39,6 +40,9 @@ export function normalizeStaleAfterMs(value: unknown): number {
   return Math.min(MAX_STALE_AFTER_MS, Math.max(MIN_STALE_AFTER_MS, Math.round(value)));
 }
 
+/** What the daily default waits after a success; anything a schedule waits beyond it is not lateness. */
+const DAILY_WAIT_MS = scheduleDueAtMs(DEFAULT_AUTO_SCHEDULE, 0);
+
 export interface SourceFreshness {
   /** When the source last imported successfully; null when it never has. */
   lastOkAtMs: number | null;
@@ -59,11 +63,24 @@ export function describeSourceFreshness(
   grantReceivedAtMs: number,
   nowMs: number,
   staleAfterMs: number,
+  schedule?: AutoSchedule,
 ): SourceFreshness {
   const lastOkAtMs = lastOkAtMsOf(state);
   const sinceMs = lastOkAtMs ?? grantReceivedAtMs;
   const staleForMs = Math.max(0, nowMs - sinceMs);
-  return { lastOkAtMs, sinceMs, staleForMs, stale: staleForMs >= staleAfterMs };
+  // The threshold is how late a run may be past its daily due time. A source imported weekly
+  // is not late on its second day: the wait the schedule asks for beyond the daily one is added,
+  // or the extension would open this page every day of the week it was told to wait.
+  const scheduledWaitMs =
+    schedule && lastOkAtMs !== null
+      ? Math.max(0, scheduleDueAtMs(schedule, lastOkAtMs) - lastOkAtMs - DAILY_WAIT_MS)
+      : 0;
+  return {
+    lastOkAtMs,
+    sinceMs,
+    staleForMs,
+    stale: staleForMs >= staleAfterMs + scheduledWaitMs,
+  };
 }
 
 export function shouldOpenAttentionPage(input: {
