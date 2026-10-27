@@ -86,7 +86,12 @@ import {
   type RecentImport,
 } from "./money-import-client";
 import { getAppEnvironmentKind } from "./extension-release-client";
-import { probeExtensionUntilHeard, reloadPage } from "@/lib/money/extension-bridge";
+import {
+  probeExtensionUntilHeard,
+  reloadPage,
+  setExtensionAutoSchedule,
+  type ImportAutoSchedule,
+} from "@/lib/money/extension-bridge";
 import type {
   MoneyImportRangePresetKey,
   MoneyImportRangeSelectionMeta,
@@ -604,6 +609,23 @@ export default function MoneyImportPage() {
   useEffect(() => {
     void refreshExtensionAutoStatus();
   }, [refreshExtensionAutoStatus]);
+
+  // What the extension kept goes into the status the panel shows, and then the status is read
+  // again: the next run it reports depends on the schedule.
+  const changeAutoSchedule = useCallback(
+    async (schedule: ImportAutoSchedule) => {
+      const kept = await setExtensionAutoSchedule(schedule);
+      if (kept) {
+        setExtensionAutoStatus((current) =>
+          current.status ? { ...current, status: { ...current.status, schedule: kept } } : current,
+        );
+        const status = await requestExtensionAutoStatus();
+        if (status) setExtensionAutoStatus({ state: "ready", status });
+      }
+      return kept;
+    },
+    [requestExtensionAutoStatus],
+  );
 
   const checkExtension = useCallback(async () => {
     setExtensionActive(null);
@@ -1343,6 +1365,7 @@ export default function MoneyImportPage() {
                 selectedPersonId={selectedPersonId}
                 sourceLabels={extensionSourceLabels}
                 onRefresh={() => void refreshExtensionAutoStatus()}
+                onScheduleChange={changeAutoSchedule}
               >
                 <details className="group text-sm">
                   <summary className="flex cursor-pointer list-none items-center justify-between gap-2 font-medium">

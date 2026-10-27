@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -133,6 +134,10 @@ export function MoneyImportGrants({
         : [],
     [grants, personId, nowMs],
   );
+  // Revoked keys only pile up; they wait folded under one line so the list stays short.
+  const liveGrants = visibleGrants.filter((grant) => !grant.revoked_at);
+  const revokedGrants = visibleGrants.filter((grant) => grant.revoked_at);
+  const [showRevoked, setShowRevoked] = useState(false);
   const sourceLabels = useMemo(
     () => new Map(availableSources.map((source) => [source.sourceId, source.label])),
     [availableSources],
@@ -275,6 +280,41 @@ export function MoneyImportGrants({
     }
   };
 
+  const renderGrant = (grant: MoneyImportGrant) => {
+    const state = grantState(grant, nowMs);
+    const banks = grant.allowed_sources.map((sourceId) => bankName(sourceId)).join(", ");
+    return (
+      <li
+        key={grant.id}
+        className={`flex items-center gap-3 px-3 py-2 ${state === "active" ? "" : "text-muted-foreground"}`}
+      >
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-medium">{grant.label}</div>
+          <div className="text-xs text-muted-foreground">
+            {state === "revoked"
+              ? t("money.importGrantRevoked")
+              : state === "expired"
+                ? t("money.importGrantExpired")
+                : describeLastUse(grant.last_used_at, t, nowMs)}
+            {banks && <span className="whitespace-nowrap"> · {banks}</span>}
+          </div>
+        </div>
+        {!grant.revoked_at && (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
+            onClick={() => void handleRevoke(grant.id)}
+            disabled={revokeGrant.isPending}
+          >
+            {t("money.importGrantRevoke")}
+          </Button>
+        )}
+      </li>
+    );
+  };
+
   return (
     <Card data-testid="money-import-grants">
       <CardContent className="space-y-4 p-0">
@@ -336,43 +376,35 @@ export function MoneyImportGrants({
           <p className="text-sm text-muted-foreground">{t("money.importGrantsEmpty")}</p>
         )}
 
-        {visibleGrants.length > 0 && (
+        {liveGrants.length > 0 && (
           <ul className="divide-y rounded-lg border" data-testid="money-import-grant-list">
-            {visibleGrants.map((grant) => {
-              const state = grantState(grant, nowMs);
-              const banks = grant.allowed_sources.map((sourceId) => bankName(sourceId)).join(", ");
-              return (
-                <li
-                  key={grant.id}
-                  className={`flex items-center gap-3 px-3 py-2 ${state === "active" ? "" : "text-muted-foreground"}`}
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium">{grant.label}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {state === "revoked"
-                        ? t("money.importGrantRevoked")
-                        : state === "expired"
-                          ? t("money.importGrantExpired")
-                          : describeLastUse(grant.last_used_at, t, nowMs)}
-                      {banks && <span className="whitespace-nowrap"> · {banks}</span>}
-                    </div>
-                  </div>
-                  {!grant.revoked_at && (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
-                      onClick={() => void handleRevoke(grant.id)}
-                      disabled={revokeGrant.isPending}
-                    >
-                      {t("money.importGrantRevoke")}
-                    </Button>
-                  )}
-                </li>
-              );
-            })}
+            {liveGrants.map(renderGrant)}
           </ul>
+        )}
+        {revokedGrants.length > 0 && (
+          <div>
+            <button
+              type="button"
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+              aria-expanded={showRevoked}
+              onClick={() => setShowRevoked((open) => !open)}
+            >
+              {showRevoked ? (
+                <ChevronDown className="h-3.5 w-3.5" />
+              ) : (
+                <ChevronRight className="h-3.5 w-3.5" />
+              )}
+              {t("money.importGrantRevokedToggle", { count: revokedGrants.length })}
+            </button>
+            {showRevoked && (
+              <ul
+                className="mt-2 divide-y rounded-lg border"
+                data-testid="money-import-grant-revoked-list"
+              >
+                {revokedGrants.map(renderGrant)}
+              </ul>
+            )}
+          </div>
         )}
         <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
           <div className="space-y-1">

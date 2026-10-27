@@ -519,6 +519,7 @@ const autoImportSweep = createAutoImportSweep({
   autoRunStore,
   isRunRequested: (scope, nowMs) => attentionStore.isRunRequested(scope, nowMs),
   clearRunRequest: (scope) => attentionStore.clearRunRequest(scope),
+  getSchedule: async () => (await attentionStore.getState()).autoSchedule,
   openTab: async (targetUrl) => {
     const url = await toPreferredSiteUrl(preferredSiteOrigins, targetUrl);
     // Out of the person's sight: a minimized window of its own. A background tab in their

@@ -26,6 +26,7 @@ function createHarness(
     openTab?: AutoImportSweepDeps["openTab"];
     waitForTabComplete?: AutoImportSweepDeps["waitForTabComplete"];
     sources?: AutoImportSweepDeps["listSources"];
+    getSchedule?: AutoImportSweepDeps["getSchedule"];
   } = {},
 ) {
   const states: Record<string, AutoRunState> = { ...(overrides.states ?? {}) };
@@ -76,6 +77,7 @@ function createHarness(
     runImport: overrides.runImport ?? vi.fn(async () => undefined),
     now: () => NOW,
     onWarning: (event, attrs) => warnings.push({ event, attrs }),
+    ...(overrides.getSchedule ? { getSchedule: overrides.getSchedule } : {}),
   };
 
   return {
@@ -245,6 +247,27 @@ describe("createAutoImportSweep", () => {
     await harness.sweep.run("alarm");
 
     expect(harness.openedTabs).toEqual([]);
+  });
+
+  it("waits for the schedule the page set, not the daily default", async () => {
+    // A success two days ago: due on the daily default, not on every three days.
+    const states = {
+      "tbank::person-1": {
+        lastRunAtMs: NOW - 2 * 24 * 60 * 60 * 1000,
+        lastResult: "ok" as const,
+        consecutiveFailures: 0,
+      },
+    };
+    const everyThreeDays = createHarness({
+      states: { ...states },
+      getSchedule: async () => ({ kind: "days", every: 3 }),
+    });
+    await everyThreeDays.sweep.run("alarm");
+    expect(everyThreeDays.openedTabs).toEqual([]);
+
+    const daily = createHarness({ states: { ...states } });
+    await daily.sweep.run("alarm");
+    expect(daily.openedTabs).toEqual(["https://www.tbank.ru/mybank/operations/"]);
   });
 
   it("refuses to start a second sweep while one is running", async () => {
