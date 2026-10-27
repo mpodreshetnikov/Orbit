@@ -583,7 +583,7 @@ describe("StructureReviewStep", () => {
     });
   }, 15000);
 
-  it("deletes unapplied custom observations before save", async () => {
+  it("keeps unapplied observations on save, out of history by is_applied", async () => {
     const deleteObservationMutation = createMutationMock();
     const updateMedicalRecordMutation = createMutationMock();
     hookMocks.useDeleteRecordObservation.mockReturnValue(deleteObservationMutation);
@@ -627,12 +627,8 @@ describe("StructureReviewStep", () => {
 
     await userEvent.setup().click(screen.getByRole("button", { name: "records.add.saveDraft" }));
 
-    await waitFor(() =>
-      expect(deleteObservationMutation.mutateAsync).toHaveBeenCalledWith({
-        id: "obs-custom",
-        recordId: "record-1",
-      }),
-    );
+    await waitFor(() => expect(onComplete).toHaveBeenCalled());
+    expect(deleteObservationMutation.mutateAsync).not.toHaveBeenCalled();
     expect(updateMedicalRecordMutation.mutateAsync).toHaveBeenCalledWith(
       expect.objectContaining({
         id: "record-1",

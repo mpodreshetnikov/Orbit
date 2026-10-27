@@ -1077,15 +1077,9 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
   };
 
   const runSave = async (activate: boolean) => {
-    // Drop observations the user left unapplied rather than persisting rows that would be
-    // filtered out of history anyway. The predicate must match the one the row renders with
-    // (is_applied alone); keying it on obs_code too meant coded-but-unresolved rows escaped the
-    // cleanup, were saved, and then never appeared anywhere.
-    const unapplied = observations?.filter((obs) => !obs.is_applied) ?? [];
-    await Promise.all(
-      unapplied.map((obs) => deleteObsMutation.mutateAsync({ id: obs.id, recordId: record.id })),
-    );
-
+    // Observations left unapplied are kept: they stay on the record with their printed label, and
+    // every history leaves them out by `is_applied`. Deleting them lost each row a catalogue gap
+    // left behind (T-261026-0gz); a person who does not want one deletes it on its row.
     // Proposals become real conditions here and nowhere else: this is the moment a person
     // approves what the model read. It runs before the record is activated, so a write that
     // fails leaves the record in review rather than active with half its diagnoses missing.

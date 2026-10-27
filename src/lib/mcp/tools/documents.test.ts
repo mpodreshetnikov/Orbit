@@ -452,7 +452,7 @@ describe("activate_medical_record", () => {
   it("reports closures it left pending", async () => {
     documents.getIngestableRecord.mockResolvedValue({ ...RECORD, status: "structure_review" });
     documents.activateMedicalRecord.mockResolvedValue({
-      droppedUnmatchedObservations: 1,
+      keptUnmatchedObservations: 1,
       proposalsMaterialized: 0,
       proposalsSkipped: 0,
       mentionsConfirmed: 0,
@@ -463,7 +463,9 @@ describe("activate_medical_record", () => {
       { record_id: RECORD_ID },
       ctx,
     );
-    expect(result.content[0].text).toContain("Dropped 1 unrecognised observation(s).");
+    expect(result.content[0].text).toContain(
+      "Kept 1 unrecognised observation(s) on the record, outside every history.",
+    );
     expect(result.content[0].text).toContain("1 closure(s) left awaiting confirmation");
   });
 });

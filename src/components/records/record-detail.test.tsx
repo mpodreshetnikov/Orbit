@@ -1,5 +1,5 @@
 import React from "react";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -678,6 +678,50 @@ describe("RecordDetail", () => {
     expect(await screen.findByText("observations.addObservation")).toBeInTheDocument();
   });
 
+  it("puts a row kept unrecognised into history once the owner matches it", async () => {
+    const updateObs = createMutationMock();
+    hookMocks.useUpdateRecordObservation.mockReturnValue(updateObs);
+    hookMocks.useRecordObservations.mockReturnValue({
+      data: [
+        {
+          id: "obs-kept",
+          record_id: "record-1",
+          obs_name: "Сахар крови",
+          obs_code: null,
+          is_applied: false,
+          value_numeric: 5.1,
+          value_text: "5.1",
+          value_canonical: null,
+          unit: "mmol/L",
+          unit_canonical: null,
+          ref_range_text: null,
+          ref_range_low: null,
+          ref_range_high: null,
+          ref_range_low_canonical: null,
+          ref_range_high_canonical: null,
+          status: null,
+        },
+      ],
+    });
+    const { RecordDetail } = await import("./record-detail");
+    render(<RecordDetail recordId="record-1" />);
+    const user = userEvent.setup();
+
+    const row = screen.getByText("Сахар крови").closest(".rounded-lg") as HTMLElement;
+    await user.click(within(row).getAllByRole("button")[0]);
+    await user.click(screen.getAllByRole("combobox")[0]);
+    await user.type(screen.getByPlaceholderText("observations.searchOrSelect"), "глю");
+    await user.click(await screen.findByText("Глюкоза"));
+    await user.click(screen.getByRole("button", { name: "common.save" }));
+
+    await waitFor(() =>
+      expect(updateObs.mutateAsync).toHaveBeenCalledWith({
+        id: "obs-kept",
+        updates: expect.objectContaining({ obs_code: "glucose", is_applied: true }),
+      }),
+    );
+  }, 20000);
+
   it("handles edit/save, remove, restore, and hard delete flows", async () => {
     const updateMutation = createMutationMock();
     updateMutation.mutate = vi.fn((_, options?: { onSuccess?: () => void }) =>
@@ -939,6 +983,7 @@ describe("RecordDetail", () => {
             id: "obs-custom",
             obs_name: "Custom marker",
             obs_code: null,
+            is_applied: true,
             value_numeric: null,
             value_text: "trace",
             unit: null,
@@ -964,6 +1009,33 @@ describe("RecordDetail", () => {
     await userEvent.setup().click(screen.getAllByRole("button")[1]);
     expect(onEdit).toHaveBeenCalled();
     expect(onDelete).toHaveBeenCalled();
+
+    // A row kept at approval although the catalogue did not know it says so, and has no history
+    // link to offer.
+    rerender(
+      <ObservationRowEditable
+        observation={
+          {
+            id: "obs-unrecognised",
+            obs_name: "Странный показатель",
+            obs_code: null,
+            is_applied: false,
+            value_numeric: 3,
+            value_text: "3",
+            unit: null,
+            ref_range_low: null,
+            ref_range_high: null,
+            status: null,
+          } as RecordObservationWithCatalog
+        }
+        onEdit={onEdit}
+        onDelete={onDelete}
+        isProcessing={false}
+      />,
+    );
+    expect(screen.getByText("observations.unrecognisedBadge")).toBeInTheDocument();
+    expect(screen.getByText("observations.unrecognisedHint")).toBeInTheDocument();
+    expect(screen.queryByText("observations.customBadge")).not.toBeInTheDocument();
 
     hookMocks.useObservationCatalog.mockReturnValue({
       data: [
