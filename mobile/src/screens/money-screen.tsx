@@ -9,10 +9,13 @@ import {
   ArrowDownLeft,
   ArrowRightLeft,
   ArrowUpRight,
+  ChartPie,
+  ListChecks,
   Plus,
   ReceiptText,
   RotateCcw,
   Scale,
+  Tags,
   type LucideIcon,
 } from "lucide-react-native";
 import { useEffect, useMemo, useState } from "react";
@@ -25,6 +28,7 @@ import {
   useMoneyCategories,
   useMoneyFeed,
   useMoneyFeedSummary,
+  useMoneyRules,
   usePerson,
 } from "@/lib/queries";
 import { radius, space, usePalette, type Palette } from "@/theme";
@@ -54,12 +58,16 @@ export function useDebounced<T>(value: T, ms: number): T {
   return settled;
 }
 
-/** The web money menu's other pages, a row above the feed. */
+/** The money pages read most, as tiles above the feed: what was spent, where it goes, and how. */
+const TILES: [string, string, LucideIcon][] = [
+  ["money.reports", "/money/reports", ChartPie],
+  ["money.categories", "/money/categories", Tags],
+  ["money.rules", "/money/rules", ListChecks],
+];
+
+/** The rest of the web money menu, a row under the tiles. */
 const SECTIONS: [string, string][] = [
   ["money.accounts", "/money/accounts"],
-  ["money.categories", "/money/categories"],
-  ["money.rules", "/money/rules"],
-  ["money.reports", "/money/reports"],
   ["money.import", "/money/import"],
 ];
 
@@ -104,6 +112,7 @@ export default function MoneyScreen() {
   const summary = useMoneyFeedSummary(personId, filters);
   const accounts = useMoneyAccounts(personId);
   const categories = useMoneyCategories();
+  const rules = useMoneyRules(personId);
 
   const items = useMemo(() => feed.data?.pages.flatMap((page) => page.items) ?? [], [feed.data]);
   const accountLabel = new Map(accounts.data?.map((one) => [one.id, one.account_label]));
@@ -174,6 +183,23 @@ export default function MoneyScreen() {
 
   const top = (
     <View style={{ gap: space.md, marginBottom: space.sm }}>
+      <View style={{ flexDirection: "row", gap: space.sm }}>
+        {TILES.map(([label, href, icon]) => (
+          <Tile
+            key={href}
+            label={t(label)}
+            icon={icon}
+            detail={
+              href === "/money/reports"
+                ? new Date().toLocaleDateString("ru", { month: "long" })
+                : href === "/money/categories"
+                  ? categories.data?.length
+                  : rules.data?.length
+            }
+            onPress={() => router.push(href as Href)}
+          />
+        ))}
+      </View>
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}>
         {SECTIONS.map(([label, href]) => (
           <Button
@@ -363,5 +389,45 @@ export default function MoneyScreen() {
         }}
       />
     </>
+  );
+}
+
+/** A money page as a tile: its icon, its name, and a word on what is in it once that is known. */
+function Tile({
+  label,
+  icon,
+  detail,
+  onPress,
+}: {
+  label: string;
+  icon: LucideIcon;
+  detail: string | number | undefined;
+  onPress: () => void;
+}) {
+  const palette = usePalette();
+  return (
+    <Pressable
+      accessibilityRole="link"
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={({ pressed }) => ({
+        flex: 1,
+        gap: space.xs,
+        padding: space.md,
+        borderRadius: radius.lg,
+        borderWidth: 1,
+        borderColor: palette.border,
+        backgroundColor: pressed ? palette.mutedHalf : palette.card,
+        transform: [{ scale: pressed ? 0.98 : 1 }],
+      })}
+    >
+      <Icon icon={icon} size={20} tone="primary" />
+      <Text size="sm" weight="semibold" numberOfLines={1}>
+        {label}
+      </Text>
+      <Text size="xs" tone="mutedForeground" numberOfLines={1}>
+        {detail ?? " "}
+      </Text>
+    </Pressable>
   );
 }
