@@ -68,7 +68,13 @@ describe("parseIncomingGrant", () => {
       function_url: FUNCTION_URL,
       app_origin: "https://orbit.example",
       received_at: NOW,
+      grant_id: null,
     });
+  });
+
+  it("keeps the key's id when the page names it", () => {
+    const parsed = parseIncomingGrant({ ...grant(), grant_id: " grant-7 " }, HOST_PERMISSIONS, NOW);
+    expect(parsed?.grant_id).toBe("grant-7");
   });
 
   it("refuses a grant whose function_url is outside the host permissions", () => {

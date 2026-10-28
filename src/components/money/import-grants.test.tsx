@@ -2,7 +2,7 @@ import React from "react";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { MoneyImportGrants } from "./import-grants";
+import { findBrowserGrantId, MoneyImportGrants } from "./import-grants";
 
 const mocks = vi.hoisted(() => ({
   grants: [] as unknown[],
@@ -71,6 +71,7 @@ describe("MoneyImportGrants", () => {
       token: "secret-key",
       personId: "person-1",
       allowedSources: ["tbank_web"],
+      grantId: "grant-1",
     });
     expect(screen.queryByTestId("money-import-grant-token")).not.toBeInTheDocument();
     expect(mocks.toast.success).toHaveBeenCalledWith("money.importGrantSentToExtension");
@@ -181,5 +182,97 @@ describe("MoneyImportGrants", () => {
       "revokedmoney.importGrantRevoked · money.importBankTbank",
     ]);
     vi.useRealTimers();
+  });
+});
+
+describe("findBrowserGrantId", () => {
+  const key = (id: string, createdAt: string, personId = "person-1") =>
+    ({
+      id,
+      person_id: personId,
+      label: id,
+      allowed_sources: ["tbank_web"],
+      expires_at: null,
+      revoked_at: null,
+      last_used_at: null,
+      created_at: createdAt,
+    }) as never;
+  const keys = [
+    key("old", "2026-10-01T10:00:00.000Z"),
+    key("new", "2026-10-20T10:00:00.000Z"),
+    key("other", "2026-10-20T10:00:05.000Z", "person-2"),
+  ];
+
+  it("takes the id the extension names, and only when that key is listed", () => {
+    const held = { person_id: "person-1", received_at: "2026-01-01T00:00:00.000Z" };
+    expect(findBrowserGrantId(keys, { ...held, grant_id: "old" })).toBe("old");
+    expect(findBrowserGrantId(keys, { ...held, grant_id: "gone" })).toBeNull();
+    expect(findBrowserGrantId(keys, null)).toBeNull();
+  });
+
+  it("recognises a key an older extension took by its person and the minute it arrived", () => {
+    expect(
+      findBrowserGrantId(keys, {
+        grant_id: null,
+        person_id: "person-1",
+        received_at: "2026-10-20T10:00:03.000Z",
+      }),
+    ).toBe("new");
+    expect(
+      findBrowserGrantId(keys, {
+        grant_id: null,
+        person_id: "person-1",
+        received_at: "2026-10-22T10:00:00.000Z",
+      }),
+    ).toBeNull();
+    expect(
+      findBrowserGrantId(keys, { grant_id: null, person_id: "person-1", received_at: "bad" }),
+    ).toBeNull();
+  });
+});
+
+describe("MoneyImportGrants and this browser", () => {
+  it("puts the key this browser holds first and marks it", () => {
+    mocks.grants = [
+      {
+        id: "used",
+        person_id: "person-1",
+        label: "work mac",
+        allowed_sources: ["tbank_web"],
+        expires_at: null,
+        revoked_at: null,
+        last_used_at: new Date().toISOString(),
+        created_at: "2026-09-01T10:00:00.000Z",
+      },
+      {
+        id: "mine",
+        person_id: "person-1",
+        label: "home pc",
+        allowed_sources: ["tbank_web"],
+        expires_at: null,
+        revoked_at: null,
+        last_used_at: null,
+        created_at: "2026-10-20T10:00:00.000Z",
+      },
+    ];
+    render(
+      <MoneyImportGrants
+        t={t}
+        personId="person-1"
+        availableSources={[{ sourceId: "tbank_web", label: "T-Bank Web" }]}
+        onSendToExtension={vi.fn()}
+        browserGrant={{
+          grant_id: "mine",
+          person_id: "person-1",
+          received_at: "2026-10-20T10:00:01.000Z",
+        }}
+      />,
+    );
+    const rows = within(screen.getByTestId("money-import-grant-list")).getAllByRole("listitem");
+    expect(rows[0]).toHaveTextContent("home pc");
+    expect(within(rows[0]).getByTestId("money-import-grant-this-browser")).toHaveTextContent(
+      "money.importGrantThisBrowser",
+    );
+    expect(within(rows[1]).queryByTestId("money-import-grant-this-browser")).toBeNull();
   });
 });
