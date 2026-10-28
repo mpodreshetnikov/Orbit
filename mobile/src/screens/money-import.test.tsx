@@ -323,6 +323,29 @@ describe("the import history", () => {
     ).toBeOnTheScreen();
   });
 
+  it("says why an import failed, without the connector's diagnostics", async () => {
+    seed({
+      ...db.tables,
+      money_import_batches: [
+        {
+          ...batch("b-failed", "failed", "2026-10-28T12:43:00Z"),
+          meta: {
+            unattended: true,
+            failure_message:
+              'T-Bank session is not authorized. Sign in and retry import. diagnostics={"tab_status":"complete"}',
+          },
+        },
+      ],
+    });
+    await renderScreens(routes, "/money/import/b-failed");
+    expect(
+      await screen.findByText(
+        "Причина: T-Bank session is not authorized. Sign in and retry import.",
+      ),
+    ).toBeOnTheScreen();
+    expect(screen.queryByText(/diagnostics=/)).toBeNull();
+  });
+
   it("rolls an applied import back after a confirmation, and says when it cannot", async () => {
     const alert = jest.spyOn(Alert, "alert");
     rpcHandlers.money_rollback_import_batch = () => {

@@ -34,6 +34,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { callMoneyImportAction, getAccessToken } from "../../money-import-client";
+import { readableImportFailure } from "@/types/money-import-failure";
 
 const VIRTUAL_ROW_HEIGHT = 84;
 const VIRTUAL_LINE_ROW_HEIGHT = 64;
@@ -707,8 +708,8 @@ export default function MoneyImportReportPage() {
   const filteredOutOfRangeCount = parseFiniteNumber(batchMeta.filtered_out_of_range_count) ?? 0;
   const filteredInvalidDateCount = parseFiniteNumber(batchMeta.filtered_invalid_date_count) ?? 0;
   const failureMessage =
-    typeof batchMeta.failure_message === "string" && batchMeta.failure_message.trim()
-      ? batchMeta.failure_message.trim()
+    typeof batchMeta.failure_message === "string"
+      ? readableImportFailure(batchMeta.failure_message)
       : null;
   const selectionMode = normalizeId(rangeSelectionMeta.selection_mode);
   const presetKey = normalizeId(rangeSelectionMeta.preset_key);
