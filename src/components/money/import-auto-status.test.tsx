@@ -115,7 +115,8 @@ describe("MoneyImportAutoStatus", () => {
               last_run_at: "2026-09-03T05:02:00.000Z",
               last_result: "error",
               consecutive_failures: 1,
-              last_error: "T-Bank did not stay on the operations page",
+              last_error:
+                'T-Bank did not stay on the operations page. diagnostics={"tab_status":"complete"}',
               last_run_origin: null,
               next_run: { kind: "after", at: "2026-09-04T01:02:00.000Z" },
               scheduled_at: null,
@@ -144,11 +145,13 @@ describe("MoneyImportAutoStatus", () => {
 
     const tbank = screen.getByTestId("money-import-auto-status-tbank_web");
     expect(tbank).toHaveAttribute("data-tone", "error");
+    // The reason, without the connector's diagnostics after it.
     expect(
       within(tbank).getByText(
-        /^money\.importAutoStatusLastFailed .* T-Bank did not stay on the operations page$/,
+        /^money\.importAutoStatusLastFailed .* T-Bank did not stay on the operations page\.$/,
       ),
     ).toBeInTheDocument();
+    expect(within(tbank).queryByText(/diagnostics=/)).toBeNull();
     expect(within(tbank).getByText(/^money\.importAutoStatusNextAfter /)).toBeInTheDocument();
 
     const alfa = screen.getByTestId("money-import-auto-status-alfa_web");

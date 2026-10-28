@@ -10,6 +10,7 @@ import {
   readImportAutoSchedule,
   type ImportAutoSchedule,
 } from "@/lib/money/extension-bridge";
+import { readableImportFailure } from "@/types/money-import-failure";
 
 /**
  * What the extension will do on its own, as it reports it.
@@ -134,7 +135,7 @@ function describeSource(
       lines.push(
         t("money.importAutoStatusLastFailed", {
           date: formatMoment(source.last_run_at),
-          error: source.last_error,
+          error: readableImportFailure(source.last_error) ?? "-",
         }),
       );
     }
@@ -152,7 +153,7 @@ function describeSource(
     lines.push(
       t("money.importAutoStatusLastFailed", {
         date: formatMoment(source.last_run_at),
-        error: source.last_error ?? "-",
+        error: readableImportFailure(source.last_error) ?? "-",
       }),
     );
   } else if (source.last_run_origin === "manual") {
