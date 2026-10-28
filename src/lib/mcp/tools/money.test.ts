@@ -116,6 +116,8 @@ describe("list_money_transactions", () => {
         categories: ["food"],
         search: "кофе",
         direction: "expense",
+        amount_min: 1000,
+        amount_max: 5000,
       },
       ctx,
     );
@@ -129,6 +131,8 @@ describe("list_money_transactions", () => {
       search: "кофе",
       categoryIds: ["food", "coffee"],
       amountSign: "expense",
+      amountMin: 1000,
+      amountMax: 5000,
       fromUtc: "2026-09-30T21:00:00.000Z",
       toUtc: "2026-10-31T20:59:59.999Z",
     });
@@ -144,6 +148,17 @@ describe("list_money_transactions", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('"nope"');
+    expect(money.listMoneyTransactions).not.toHaveBeenCalled();
+  });
+
+  it("refuses amount bounds that cross instead of returning nothing", async () => {
+    const result = await (await handlers()).get("list_money_transactions")!(
+      { ...DEFAULTS, amount_min: 5000, amount_max: 1000 },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("amount_min (5000) is above amount_max (1000)");
     expect(money.listMoneyTransactions).not.toHaveBeenCalled();
   });
 
