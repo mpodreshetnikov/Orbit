@@ -49,7 +49,8 @@ const BROWSER_GRANT_MATCH_MS = 60_000;
 /**
  * Which of the keys is the one this browser holds. The extension names it since 0.1.37; a key
  * it took before that is recognised by its person and by arriving within a minute of being
- * issued -- the page hands a key over the moment it exists.
+ * issued -- the page hands a key over the moment it exists -- but only when no other key of
+ * that person was issued in the same minute.
  */
 export function findBrowserGrantId(
   grants: MoneyImportGrant[],
@@ -63,14 +64,14 @@ export function findBrowserGrantId(
   }
   const receivedAtMs = new Date(browserGrant.received_at).getTime();
   if (!Number.isFinite(receivedAtMs)) return null;
-  let best: { id: string; distanceMs: number } | null = null;
-  for (const grant of grants) {
-    if (grant.person_id !== browserGrant.person_id) continue;
-    const distanceMs = Math.abs(receivedAtMs - new Date(grant.created_at).getTime());
-    if (!(distanceMs <= BROWSER_GRANT_MATCH_MS)) continue;
-    if (!best || distanceMs < best.distanceMs) best = { id: grant.id, distanceMs };
-  }
-  return best?.id ?? null;
+  const candidates = grants.filter(
+    (grant) =>
+      grant.person_id === browserGrant.person_id &&
+      Math.abs(receivedAtMs - new Date(grant.created_at).getTime()) <= BROWSER_GRANT_MATCH_MS,
+  );
+  // Two keys issued for the person within the same minute cannot be told apart by time, and a
+  // wrong "this browser" could get the other device's key revoked: then nothing is marked.
+  return candidates.length === 1 ? candidates[0].id : null;
 }
 
 type GrantState = "active" | "expired" | "revoked";

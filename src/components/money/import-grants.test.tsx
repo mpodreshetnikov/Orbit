@@ -228,6 +228,16 @@ describe("findBrowserGrantId", () => {
     expect(
       findBrowserGrantId(keys, { grant_id: null, person_id: "person-1", received_at: "bad" }),
     ).toBeNull();
+
+    // Another key of the same person issued in the same minute: no way to tell which, so none.
+    const twins = [...keys, key("twin", "2026-10-20T10:00:04.000Z")];
+    expect(
+      findBrowserGrantId(twins, {
+        grant_id: null,
+        person_id: "person-1",
+        received_at: "2026-10-20T10:00:05.000Z",
+      }),
+    ).toBeNull();
   });
 });
 
