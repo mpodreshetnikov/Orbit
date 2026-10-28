@@ -3,6 +3,7 @@ import { buildErrorRedirectUrl, validateAuthorizeRequest } from "@/lib/mcp/autho
 import {
   getOAuthSigningSecret,
   isMcpServerEnabled,
+  MCP_SCOPE_MONEY_READ,
   MCP_SCOPE_READ,
   MCP_SCOPE_WRITE,
 } from "@/lib/mcp/config";
@@ -31,6 +32,8 @@ const SCOPE_DESCRIPTIONS: Record<string, string> = {
     "View your health data: measurements, medical records, lab results, findings, diagnoses, checkups and medications.",
   [MCP_SCOPE_WRITE]:
     "Add and update health data: record measurements, edit catalog entries, and create or change medications.",
+  [MCP_SCOPE_MONEY_READ]:
+    "View your money: bank and manual transactions with their counterparties and receipt lines, accounts and categories.",
 };
 
 function ErrorPanel({ title, detail }: { title: string; detail: string }) {
