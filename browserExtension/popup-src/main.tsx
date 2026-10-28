@@ -7,7 +7,13 @@ import { Label } from "@shared/ui/label";
 import { Input } from "@shared/ui/input";
 import { Textarea } from "@shared/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@shared/ui/select";
-import { describeUpdateStatus, formatSession, toIsoFromInput, type UpdateStatus } from "./helpers";
+import {
+  describeUpdateStatus,
+  FIREFOX_ADDONS_PAGE,
+  formatSession,
+  toIsoFromInput,
+  type UpdateStatus,
+} from "./helpers";
 
 function sendMessage(message: Record<string, unknown>): Promise<unknown> {
   return new Promise((resolve) => {
@@ -43,6 +49,7 @@ interface DebugRunSummary {
 function UpdateCard() {
   const [status, setStatus] = React.useState<UpdateStatus | null>(null);
   const [checking, setChecking] = React.useState(false);
+  const [copied, setCopied] = React.useState<boolean | null>(null);
 
   React.useEffect(() => {
     void sendMessage({ type: "EXTENSION_UPDATE_STATUS" }).then((response) => {
@@ -63,8 +70,18 @@ function UpdateCard() {
     }
   };
 
+  const onCopyAddonsPage = async () => {
+    try {
+      await navigator.clipboard.writeText(FIREFOX_ADDONS_PAGE);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  };
+
   if (!status || status.phase === "unsupported") return null;
   const view = describeUpdateStatus(status);
+  const installUrl = view.installUrl;
 
   return (
     <Card>
@@ -75,12 +92,21 @@ function UpdateCard() {
         <p className="text-xs text-muted-foreground whitespace-pre-wrap">{view.text}</p>
         <Button
           variant={view.updateAvailable ? "default" : "secondary"}
-          onClick={onCheck}
+          onClick={installUrl ? () => void chrome.tabs.create({ url: installUrl }) : onCheck}
           disabled={checking || view.busy}
           className="w-full"
         >
           {checking ? "Checking..." : view.buttonLabel}
         </Button>
+        {view.offerAddonsPage ? (
+          <Button variant="outline" onClick={onCopyAddonsPage} className="w-full">
+            {copied === null
+              ? `Copy ${FIREFOX_ADDONS_PAGE}`
+              : copied
+                ? "Copied: paste it into the address bar"
+                : `Could not copy: type ${FIREFOX_ADDONS_PAGE} in the address bar`}
+          </Button>
+        ) : null}
       </CardContent>
     </Card>
   );

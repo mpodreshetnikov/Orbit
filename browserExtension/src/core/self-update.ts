@@ -31,6 +31,8 @@ export interface ReleaseInfo {
   download_url: string;
   /** The id the release's key gives it; null when the endpoint does not say. */
   extension_id: string | null;
+  /** The signed Firefox package, which Firefox installs from a link; null when not published. */
+  firefox_download_url: string | null;
 }
 
 export type SelfUpdatePhase =
@@ -57,6 +59,11 @@ export interface SelfUpdateStatus {
   latest_version: string | null;
   checked_at: string | null;
   error: string | null;
+  /**
+   * Where the browser installs `latest_version` from a link, permissions prompt included: Firefox
+   * holds back an update that asks for new permissions until the person agrees. Null otherwise.
+   */
+  install_url: string | null;
 }
 
 export interface NativeHostReply {
@@ -75,6 +82,8 @@ export interface SelfUpdaterDeps {
    * Firefox does not implement `runtime.requestUpdateCheck` -- so a check only reports.
    */
   browserManaged?: boolean;
+  /** The browser installs a signed package opened from a link (Firefox and its `.xpi`). */
+  installsFromLink?: boolean;
   /**
    * The version the browser is holding back. Kept outside the worker: the event comes once, and
    * an event page can be ended while the reload waits for an import.
@@ -143,7 +152,18 @@ export function parseReleaseInfo(payload: unknown): ReleaseInfo | null {
     typeof record.extension_id === "string" && record.extension_id.trim()
       ? record.extension_id.trim()
       : null;
-  return { version, sha256, download_url: url, extension_id: extensionId };
+  const firefox =
+    record.firefox && typeof record.firefox === "object"
+      ? (record.firefox as Record<string, unknown>)
+      : null;
+  const firefoxUrl = typeof firefox?.download_url === "string" ? firefox.download_url.trim() : "";
+  return {
+    version,
+    sha256,
+    download_url: url,
+    extension_id: extensionId,
+    firefox_download_url: firefoxUrl.startsWith("https://") ? firefoxUrl : null,
+  };
 }
 
 /**
@@ -192,6 +212,7 @@ export function createSelfUpdater(deps: SelfUpdaterDeps): SelfUpdater {
     latest_version: null,
     checked_at: null,
     error: null,
+    install_url: null,
   };
   /** The release staged by the host and not yet applied. */
   let staged: ReleaseInfo | null = null;
@@ -309,7 +330,7 @@ export function createSelfUpdater(deps: SelfUpdaterDeps): SelfUpdater {
     const current = state.current_version;
     const pending = (await deps.pendingStore?.get()) ?? null;
     if (pending && (compareExtensionVersions(pending, current) ?? 0) > 0) {
-      set({ latest_version: pending, phase: "reload_pending" });
+      set({ latest_version: pending, phase: "reload_pending", install_url: null });
       await reloadWhenIdle();
       return;
     }
@@ -317,17 +338,21 @@ export function createSelfUpdater(deps: SelfUpdaterDeps): SelfUpdater {
     // Only a check someone or something scheduled asks the server; a worker waking or an import
     // ending only looks for a held-back update, and they happen all the time.
     if (origin === "settled" || origin === "wake") {
-      set({ phase: "idle" });
+      set({ phase: "idle", install_url: null });
       return;
     }
     const latest = await fetchLatest();
     set({ checked_at: new Date(now()).toISOString(), latest_version: latest?.version ?? null });
     if (!latest) {
-      set({ phase: "error", error: "No published release was found." });
+      set({ phase: "error", error: "No published release was found.", install_url: null });
       return;
     }
     const order = compareExtensionVersions(latest.version, current);
-    set({ phase: order !== null && order > 0 ? "browser_will_install" : "up_to_date" });
+    const newer = order !== null && order > 0;
+    set({
+      phase: newer ? "browser_will_install" : "up_to_date",
+      install_url: newer && deps.installsFromLink ? latest.firefox_download_url : null,
+    });
   };
 
   const run = async (origin: string): Promise<SelfUpdateStatus> => {

@@ -387,6 +387,9 @@ const selfUpdater: Promise<SelfUpdater> = (async () => {
   return createSelfUpdater({
     supported: selfUpdateUsesHost || browserManaged,
     browserManaged,
+    // Firefox installs a signed .xpi opened from a link, which is how an update asking for new
+    // permissions gets the person's consent; it does not let an extension open about:addons.
+    installsFromLink: browserManaged && chrome.runtime.getURL("").startsWith("moz-extension:"),
     pendingStore: {
       get: async () => {
         const stored = (await chrome.storage.local.get(SELF_UPDATE_PENDING_KEY))[
@@ -886,9 +889,9 @@ if (chrome.alarms?.onAlarm) {
     if (alarm.name === AUTO_IMPORT_ALARM) {
       void autoImportSweep
         .run("alarm")
-        .then(() =>
-          refreshAttention("alarm", { mayOpenPage: true, onlyIfNotOpenedSinceStart: true }),
-        );
+        // A browser left open for days gets the page when the time to import has come, not
+        // only at its next start (Max, 2026-10-28); still at most once a day.
+        .then(() => refreshAttention("alarm", { mayOpenPage: true }));
       return;
     }
     if (alarm.name.startsWith(VISIT_SWEEP_ALARM_PREFIX)) {
