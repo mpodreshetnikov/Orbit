@@ -50,6 +50,11 @@ export interface SpendingCategory {
   last_year_income: number;
   last_year_expense: number;
   months: SpendingMonth[];
+  /**
+   * Set on the row `childCategories` adds for what was booked on a parent itself rather than on
+   * one of its subcategories; it carries the parent's id, so filtering by it filters by the parent.
+   */
+  direct?: boolean;
 }
 
 export interface SpendingDay {
@@ -254,6 +259,10 @@ export function parsePeriod(
   if (kind === "custom" && start && end && day.test(start) && day.test(end) && start <= end) {
     return { kind, start, end };
   }
+  if (kind === "last30" && start && day.test(start)) {
+    // The URL keeps a period's first day; thirty days run forward from it.
+    return { kind, start, end: addDays(start, 29) };
+  }
   const resolved = kind === "week" || kind === "last30" ? kind : "month";
   return periodContaining(resolved, start && day.test(start) ? start : today);
 }
@@ -306,14 +315,54 @@ export function lastYearOf(row: SpendingCategory, mode: SpendingReportMode): num
   return mode === "income" ? row.last_year_income : row.last_year_expense;
 }
 
-/** The categories directly under `parentId` (the roots when null) that moved money in this mode, largest first. */
+const AMOUNT_FIELDS = [
+  "income",
+  "expense",
+  "previous_income",
+  "previous_expense",
+  "last_year_income",
+  "last_year_expense",
+] as const;
+
+/**
+ * What a parent holds beyond its subcategories: money booked on the parent itself. Each total is
+ * the parent's rollup less its children's, so the parts of a breakdown add up to the parent.
+ */
+function directRemainder(parent: SpendingCategory, children: SpendingCategory[]): SpendingCategory {
+  const remainder: SpendingCategory = {
+    ...parent,
+    has_children: false,
+    direct: true,
+    months: parent.months.map((month, index) => ({
+      ...month,
+      income:
+        month.income - children.reduce((sum, child) => sum + (child.months[index]?.income ?? 0), 0),
+      expense:
+        month.expense -
+        children.reduce((sum, child) => sum + (child.months[index]?.expense ?? 0), 0),
+    })),
+  };
+  for (const field of AMOUNT_FIELDS) {
+    remainder[field] = parent[field] - children.reduce((sum, child) => sum + child[field], 0);
+  }
+  return remainder;
+}
+
+/**
+ * The categories directly under `parentId` (the roots when null) that moved money in this mode,
+ * largest first. Under a parent, money booked on the parent itself is one more row, so the
+ * breakdown adds up to the parent's total.
+ */
 export function childCategories(
   categories: SpendingCategory[],
   parentId: string | null,
   mode: SpendingReportMode,
 ): SpendingCategory[] {
-  return categories
-    .filter((category) => category.parent_id === parentId && amountOf(category, mode) > 0)
+  const children = categories.filter((category) => category.parent_id === parentId);
+  const parent = parentId ? categories.find((category) => category.id === parentId) : undefined;
+  const rows = parent ? [...children, directRemainder(parent, children)] : children;
+  return rows
+    .filter((category) => amountOf(category, mode) > 0.005)
     .sort((left, right) => amountOf(right, mode) - amountOf(left, mode));
 }
 

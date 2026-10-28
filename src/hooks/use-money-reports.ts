@@ -370,6 +370,9 @@ export function useCreateMoneyTransferSelfAlias() {
       queryClient.invalidateQueries({
         queryKey: ["money-budget-report", variables.personId],
       });
+      queryClient.invalidateQueries({
+        queryKey: ["money-spending-report", variables.personId],
+      });
     },
   });
 }
@@ -388,6 +391,7 @@ export function useDeleteMoneyTransferSelfAlias() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["money-transfer-self-aliases"] });
       queryClient.invalidateQueries({ queryKey: ["money-budget-report"] });
+      queryClient.invalidateQueries({ queryKey: ["money-spending-report"] });
     },
   });
 }

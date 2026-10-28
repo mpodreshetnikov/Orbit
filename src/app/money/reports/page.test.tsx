@@ -254,6 +254,14 @@ describe("MoneyReportsPage", () => {
     expect(lastUrl().has("category")).toBe(false);
   });
 
+  it("keeps the filter removable when the report no longer names its category", () => {
+    currentSearchParams = new URLSearchParams("period=month&start=2026-10-01&category=gone");
+    render(<MoneyReportsPage />);
+    expect(screen.getByText("money.spendingFilterUnnamed")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "money.spendingClearFilter" }));
+    expect(lastUrl().has("category")).toBe(false);
+  });
+
   it("moves between periods and kinds of period", () => {
     render(<MoneyReportsPage />);
     expect(screen.getByText("October 2026")).toBeInTheDocument();

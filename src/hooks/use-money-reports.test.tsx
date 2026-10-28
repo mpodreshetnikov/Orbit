@@ -606,6 +606,7 @@ describe("use-money-reports", () => {
     expect(aliasBuilder.eq).toHaveBeenCalledWith("id", "alias-1");
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["money-transfer-self-aliases"] });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["money-budget-report"] });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["money-spending-report"] });
   });
 
   it("supports array alias responses and throws on invalid alias payloads", async () => {

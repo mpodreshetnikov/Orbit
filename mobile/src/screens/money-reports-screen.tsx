@@ -72,8 +72,10 @@ const toneColor = (tone: "good" | "bad", scheme: ColorSchemeName | null) =>
 
 const money = (amount: number) => formatReportAmount(amount, CURRENCY, LOCALE);
 
-const categoryName = (category: Pick<SpendingCategory, "name_ru" | "name_en">) =>
-  category.name_ru || category.name_en;
+const categoryName = (category: Pick<SpendingCategory, "name_ru" | "name_en" | "direct">) => {
+  const name = category.name_ru || category.name_en;
+  return category.direct ? t("money.spendingDirect", { name }) : name;
+};
 
 const capitalized = (text: string) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
 
@@ -238,7 +240,7 @@ export default function MoneyReportsScreen() {
             })}
           </ScrollView>
         ) : null}
-        {filter ? (
+        {categoryId ? (
           <View
             style={{
               flexDirection: "row",
@@ -253,7 +255,9 @@ export default function MoneyReportsScreen() {
             }}
           >
             <Text size="sm" tone="background">
-              {t("money.spendingFilterChip", { name: categoryName(filter) })}
+              {filter
+                ? t("money.spendingFilterChip", { name: categoryName(filter) })
+                : t("money.spendingFilterUnnamed")}
             </Text>
             <Pressable
               accessibilityRole="button"

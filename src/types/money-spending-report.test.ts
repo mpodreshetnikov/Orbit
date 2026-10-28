@@ -154,6 +154,9 @@ describe("periods", () => {
     expect(parsePeriod("custom", "2026-10-20", "2026-10-05", "2026-10-28").kind).toBe("month");
     expect(parsePeriod("week", "2026-10-14", null, "2026-10-28").start).toBe("2026-10-12");
     expect(parsePeriod(null, "garbage", null, "2026-10-28").start).toBe("2026-10-01");
+    // The 30 days are written to the URL by their first day and read back the same.
+    const last30 = periodContaining("last30", "2026-10-28");
+    expect(parsePeriod("last30", last30.start, null, "2026-10-28")).toEqual(last30);
   });
 
   it("labels a month by name and anything else as a range", () => {
@@ -212,6 +215,31 @@ describe("categories", () => {
     ]);
     expect(topCategories(categories, "cafe", "expense").map((c) => c.id)).toEqual(["cafe"]);
     expect(topCategories(categories, null, "expense").map((c) => c.id)).toEqual(["cafe", "food"]);
+  });
+
+  it("keeps what was booked on a parent itself as one more row of its breakdown", () => {
+    const withDirect = [
+      {
+        ...category("food", null, 1000),
+        months: [{ month_start: "2026-10-01", income: 0, expense: 1000 }],
+      },
+      {
+        ...category("groceries", "food", 400),
+        months: [{ month_start: "2026-10-01", income: 0, expense: 400 }],
+      },
+      category("old", "food", 0),
+    ];
+    const rows = topCategories(withDirect, "food", "expense");
+    expect(rows.map((c) => [c.id, c.expense, Boolean(c.direct)])).toEqual([
+      ["food", 600, true],
+      ["groceries", 400, false],
+    ]);
+    expect(rows[0]!.has_children).toBe(false);
+    expect(rows[0]!.months[0]!.expense).toBe(600);
+    // A parent with only past subcategories still shows this period's money.
+    expect(
+      topCategories([category("food", null, 500), category("old", "food", 0)], "food", "expense"),
+    ).toHaveLength(1);
   });
 });
 

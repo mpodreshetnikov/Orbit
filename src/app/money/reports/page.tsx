@@ -74,8 +74,13 @@ const BAR_CLASS: Record<SpendingReportMode, string> = {
 
 type Translate = ReturnType<typeof useTranslations>;
 
-function categoryName(category: Pick<SpendingCategory, "name_ru" | "name_en">, locale: string) {
-  return (locale.startsWith("ru") ? category.name_ru : category.name_en) || category.name_en;
+function categoryName(
+  category: Pick<SpendingCategory, "name_ru" | "name_en" | "direct">,
+  locale: string,
+  t?: Translate,
+) {
+  const name = (locale.startsWith("ru") ? category.name_ru : category.name_en) || category.name_en;
+  return category.direct && t ? t("money.spendingDirect", { name }) : name;
 }
 
 function Change({
@@ -419,6 +424,7 @@ function CategoryMap({
   categories,
   mode,
   onOpen,
+  t,
   locale,
   isMobile,
 }: {
@@ -426,6 +432,7 @@ function CategoryMap({
   categories: SpendingCategory[];
   mode: SpendingReportMode;
   onOpen: (category: SpendingCategory) => void;
+  t: Translate;
   locale: string;
   isMobile: boolean;
 }) {
@@ -453,7 +460,7 @@ function CategoryMap({
             key={category.id}
             type="button"
             onClick={() => onOpen(category)}
-            title={`${categoryName(category, locale)} · ${formatReportAmount(amount, report.currency, locale)}`}
+            title={`${categoryName(category, locale, t)} · ${formatReportAmount(amount, report.currency, locale)}`}
             className={cn(
               "absolute flex flex-col justify-start overflow-hidden rounded-lg border-2 border-background p-2 text-left",
               SHADE_CLASS[mode][treemapShade(rank, tiles.length)],
@@ -474,7 +481,7 @@ function CategoryMap({
                   roomy && !isMobile ? "text-base" : "text-xs",
                 )}
               >
-                {categoryName(category, locale)}
+                {categoryName(category, locale, t)}
               </span>
             )}
             {roomy ? (
@@ -540,7 +547,7 @@ function CategoryList({
       <ul className="divide-y">
         {categories.map((category) => {
           const amount = amountOf(category, mode);
-          const name = categoryName(category, locale);
+          const name = categoryName(category, locale, t);
           const open = expanded.has(category.id);
           const children = category.has_children
             ? childCategories(allCategories, category.id, mode)
@@ -594,7 +601,7 @@ function CategoryList({
                       key={child.id}
                       className="flex justify-between text-sm text-muted-foreground"
                     >
-                      <span>{categoryName(child, locale)}</span>
+                      <span>{categoryName(child, locale, t)}</span>
                       <span>
                         {formatReportAmount(amountOf(child, mode), report.currency, locale)}
                       </span>
@@ -644,7 +651,7 @@ function CategoryTable({
     const amount = amountOf(category, mode);
     const children = category.has_children ? childCategories(allCategories, category.id, mode) : [];
     const open = expanded.has(category.id);
-    const name = categoryName(category, locale);
+    const name = categoryName(category, locale, t);
     return (
       <div key={category.id}>
         <div
@@ -947,10 +954,13 @@ export default function MoneyReportsPage() {
         </div>
       </div>
 
-      {filterCategory ? (
+      {categoryId ? (
         <div>
           <span className="inline-flex items-center gap-2 rounded-full bg-foreground py-1 pl-3 pr-1 text-sm text-background">
-            {t("money.spendingFilterChip", { name: categoryName(filterCategory, locale) })}
+            {/* Named when the report still lists it; an empty filtered report still lets it go. */}
+            {filterCategory
+              ? t("money.spendingFilterChip", { name: categoryName(filterCategory, locale) })
+              : t("money.spendingFilterUnnamed")}
             <button
               type="button"
               aria-label={t("money.spendingClearFilter")}
@@ -1056,6 +1066,7 @@ export default function MoneyReportsPage() {
                   report={report}
                   categories={mapCategories}
                   mode={mode}
+                  t={t}
                   locale={locale}
                   isMobile={isMobile}
                   onOpen={(category) => {

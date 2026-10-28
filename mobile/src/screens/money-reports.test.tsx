@@ -263,6 +263,28 @@ describe("the money report", () => {
     expect(screen.queryByTestId("spending-row-cafe")).toBeNull();
   });
 
+  it("lists money booked on a parent itself beside its subcategories", async () => {
+    rpcHandlers.money_get_spending_report = () => ({
+      ...REPORT,
+      categories: REPORT.categories.map((one) =>
+        one.id === "market" ? { ...one, expense: 15000, months: months(15000) } : one,
+      ),
+    });
+    await renderScreens(routes, "/money/reports");
+    await fireEvent.press(await screen.findByLabelText("Раскрыть «Продукты»"));
+    expect(screen.getByText("Продукты: без подкатегории")).toBeOnTheScreen();
+  });
+
+  it("keeps the filter removable when the filtered report is empty", async () => {
+    await renderScreens(routes, "/money/reports");
+    await fireEvent.press(await screen.findByLabelText(/^Кафе, /));
+    rpcHandlers.money_get_spending_report = () => ({ ...REPORT, categories: [] });
+    await fireEvent.press(screen.getByText("Наличные"));
+    expect(await screen.findByText("Выбранная категория")).toBeOnTheScreen();
+    await fireEvent.press(screen.getByLabelText("Снять фильтр"));
+    await waitFor(() => expect(reportArgs().at(-1)).toMatchObject({ p_category_id: null }));
+  });
+
   it("closes an open row again", async () => {
     await renderScreens(routes, "/money/reports");
     await fireEvent.press(await screen.findByLabelText("Раскрыть «Продукты»"));
