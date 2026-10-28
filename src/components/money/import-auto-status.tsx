@@ -366,6 +366,21 @@ export function MoneyImportAutoStatus({
         {state === "ready" && !grant && (
           <p className="text-muted-foreground">{t("money.importAutoStatusNoGrant")}</p>
         )}
+        {/* The schedule belongs to the extension, not to a key: it is set here before a key
+            arrives too, so the setting is never hidden behind a step people do not see. */}
+        {state === "ready" &&
+          onScheduleChange &&
+          (status?.schedule ? (
+            <ImportAutoScheduleEditor
+              t={t}
+              schedule={status.schedule}
+              onChange={onScheduleChange}
+            />
+          ) : (
+            <p className="text-muted-foreground" data-testid="money-import-auto-schedule-update">
+              {t("money.importScheduleNeedsUpdate")}
+            </p>
+          ))}
         {state === "ready" && grant && !grantIsForSelectedPerson && (
           <p className="text-muted-foreground" data-testid="money-import-auto-status-other-person">
             {t("money.importAutoStatusGrantOtherPerson", { date: formatMoment(grant.received_at) })}
@@ -381,21 +396,6 @@ export function MoneyImportAutoStatus({
                   .join(", "),
               })}
             </p>
-            {onScheduleChange &&
-              (status?.schedule ? (
-                <ImportAutoScheduleEditor
-                  t={t}
-                  schedule={status.schedule}
-                  onChange={onScheduleChange}
-                />
-              ) : (
-                <p
-                  className="text-muted-foreground"
-                  data-testid="money-import-auto-schedule-update"
-                >
-                  {t("money.importScheduleNeedsUpdate")}
-                </p>
-              ))}
             {status?.sources.map((source) => {
               const label = sourceLabels[source.source_id] ?? source.source_id;
               const described = describeSource(source, label, t);
