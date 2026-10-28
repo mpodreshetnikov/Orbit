@@ -5,6 +5,18 @@
 	email {$ORBIT_ACME_EMAIL}
 }
 
+# A deploy recreates the web app's container (deploy/orbit, start_migrated), and for the ten-odd
+# seconds until the new one listens, nothing answers on its port. Without this Caddy answered every
+# request in that window with an immediate 502; with it, a request that cannot connect waits and
+# tries again for up to 30s. Only a failed connection is retried, so a request the app has already
+# started on is never sent twice. A retry has to send the body again, so Caddy keeps the first MiB of
+# it: an MCP call fits, while a bigger upload that meets the window still gets the 502.
+(wait_for_upstream) {
+	lb_try_duration 30s
+	lb_try_interval 250ms
+	request_buffers 1MiB
+}
+
 {$ORBIT_SITE_ADDRESS} {
 	encode zstd gzip
 
@@ -12,11 +24,15 @@
 	# collides with an Orbit route (/auth/callback, /api/*, /.well-known/oauth-*).
 	@supabase path /auth/v1/* /rest/v1/* /graphql/v1* /realtime/v1/* /storage/v1/* /functions/v1/*
 	handle @supabase {
-		reverse_proxy api-gw:8000
+		reverse_proxy api-gw:8000 {
+			import wait_for_upstream
+		}
 	}
 
 	handle {
-		reverse_proxy web:3000
+		reverse_proxy web:3000 {
+			import wait_for_upstream
+		}
 	}
 
 	header -Server
