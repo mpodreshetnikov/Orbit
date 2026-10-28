@@ -19,3 +19,10 @@ name: Счета
     timeout: 10000
 - takeScreenshot: accounts-02-form
 - tapOn: "Отмена"
+# The self-transfer aliases moved here from the report (T-261028-yhm).
+- extendedWaitUntil:
+    visible: "Tinkoff Black"
+    timeout: 10000
+- tapOn: "Псевдонимы для переводов себе"
+- extendedWaitUntil: { visible: "Добавить", timeout: 10000 }
+- takeScreenshot: accounts-03-aliases

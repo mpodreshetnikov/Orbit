@@ -10,10 +10,16 @@ import {
   toStringOrNull,
 } from "@/types/money-reports";
 import type { MoneyBudgetReport, MoneyBudgetTarget, MoneyTransferSelfAlias } from "@/types";
+import {
+  isoDay,
+  normalizeSpendingReport,
+  type SpendingPeriod,
+  type SpendingReport,
+} from "@/types/money-spending-report";
 
 type SupabaseMoneyReportClient = ReturnType<typeof createClient> & {
   rpc: (
-    fn: "money_get_budget_report",
+    fn: "money_get_budget_report" | "money_get_spending_report",
     args: Record<string, unknown>,
   ) => Promise<{ data: unknown; error: { message: string } | null }>;
   functions: {
@@ -67,6 +73,71 @@ export function useMoneyBudgetReport(
     queryKey: ["money-budget-report", personId, monthStart, reportCurrency],
     queryFn: () => fetchMoneyBudgetReport(personId!, monthStart, reportCurrency),
     enabled: Boolean(personId),
+  });
+}
+
+export interface SpendingReportRequest {
+  personId: string;
+  period: Pick<SpendingPeriod, "start" | "end">;
+  currency: string;
+  accountIds: string[];
+  categoryId: string | null;
+}
+
+/**
+ * The money report (T-261028-yhm). Rates are synced first from the start of last year, because the
+ * report compares with last year's average and with twelve months of history, not only the period.
+ */
+async function fetchMoneySpendingReport(request: SpendingReportRequest): Promise<SpendingReport> {
+  const supabase = createClient() as SupabaseMoneyReportClient;
+  // The period's own rates, as the month report synced them: a period still ahead needs none, and
+  // the comparisons use the rates already stored for those days.
+  const today = isoDay(new Date());
+  const syncEnd = request.period.end < today ? request.period.end : today;
+  if (request.period.start <= syncEnd) {
+    const { error: syncError } = await supabase.functions.invoke("money-fx-sync", {
+      body: {
+        start_date: request.period.start,
+        end_date: syncEnd,
+        base_currency: "USD",
+        quote_currencies: ["RUB"],
+      },
+    });
+    if (syncError) throw new Error(syncError.message);
+  }
+
+  const { data, error } = await supabase.rpc("money_get_spending_report", {
+    p_person_id: request.personId,
+    p_start: request.period.start,
+    p_end: request.period.end,
+    p_report_currency: request.currency,
+    p_account_ids: request.accountIds.length > 0 ? request.accountIds : null,
+    p_category_id: request.categoryId,
+  });
+  if (error) throw new Error(error.message);
+  return normalizeSpendingReport(data);
+}
+
+export function useMoneySpendingReport(
+  request: Omit<SpendingReportRequest, "personId"> & {
+    personId: string | null;
+  },
+) {
+  const { personId, period, currency, accountIds, categoryId } = request;
+  return useQuery({
+    queryKey: [
+      "money-spending-report",
+      personId,
+      period.start,
+      period.end,
+      currency,
+      [...accountIds].sort().join(","),
+      categoryId,
+    ],
+    queryFn: () =>
+      fetchMoneySpendingReport({ personId: personId!, period, currency, accountIds, categoryId }),
+    enabled: Boolean(personId),
+    placeholderData: (previous) => previous,
   });
 }
 
@@ -302,6 +373,9 @@ export function useCreateMoneyTransferSelfAlias() {
       queryClient.invalidateQueries({
         queryKey: ["money-budget-report", variables.personId],
       });
+      queryClient.invalidateQueries({
+        queryKey: ["money-spending-report", variables.personId],
+      });
     },
   });
 }
@@ -320,6 +394,7 @@ export function useDeleteMoneyTransferSelfAlias() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["money-transfer-self-aliases"] });
       queryClient.invalidateQueries({ queryKey: ["money-budget-report"] });
+      queryClient.invalidateQueries({ queryKey: ["money-spending-report"] });
     },
   });
 }

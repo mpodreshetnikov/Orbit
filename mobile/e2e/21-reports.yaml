@@ -1,4 +1,4 @@
-# The budget report, opened by its link, and a category's target.
+# The money report, opened by its link: the totals, the map of categories, and a category opened.
 appId: host.exp.Exponent
 name: Отчеты
 ---
@@ -6,20 +6,23 @@ name: Отчеты
 - openLink: exp://127.0.0.1:8081/--/money/reports
 - tapOn: { text: "Open", optional: true }
 - extendedWaitUntil:
-    visible: "(Фактические доходы|Не удалось загрузить.*)" # The rates sync needs the edge function.
+    visible: "(Категории|Не удалось загрузить отчёт.)" # The rates sync needs the edge function.
     timeout: 60000
 - takeScreenshot: reports-01-month
 - runFlow:
-    when: { visible: "Изменить цель: Food" }
+    when: { visible: "Категории" }
     commands:
-      - tapOn: "Изменить цель: Food"
-      - extendedWaitUntil: { visible: "Сумма цели.*", timeout: 10000 }
-      - takeScreenshot: reports-02-target
-      - tapOn: "Отмена"
-# The link sits at the bottom of a long report, under the tab bar: bring it to the middle first.
-- scrollUntilVisible:
-    element: "Псевдонимы для переводов себе"
-    centerElement: true
-- tapOn: "Псевдонимы для переводов себе"
-- extendedWaitUntil: { visible: "Добавить", timeout: 10000 }
-- takeScreenshot: reports-03-aliases
+      - scrollUntilVisible:
+          element: "Категории"
+          centerElement: true
+      - takeScreenshot: reports-02-categories
+      - runFlow:
+          when: { visible: "Раскрыть «.*»" }
+          commands:
+            - tapOn: "Раскрыть «.*»"
+            - takeScreenshot: reports-03-category-open
+- tapOn: "Неделя"
+- extendedWaitUntil:
+    visible: "(Категории|Не удалось загрузить отчёт.)"
+    timeout: 30000
+- takeScreenshot: reports-04-week

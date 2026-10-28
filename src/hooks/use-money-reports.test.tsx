@@ -120,6 +120,116 @@ describe("use-money-reports", () => {
     expect(result.current.data?.categories[0]?.target?.target_amount).toBe(-600);
   });
 
+  it("syncs the period's rates up to today, then asks for the spending report with its filters", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-28T12:00:00Z"));
+    const invoke = vi.fn(async () => ({ data: { ok: true }, error: null }));
+    const rpc = vi.fn(async () => ({
+      data: { currency: "RUB", totals: { expense: 2200 }, forecast: null },
+      error: null,
+    }));
+    createClientMock.mockReturnValue({ functions: { invoke }, rpc });
+
+    const { useMoneySpendingReport } = await import("./use-money-reports");
+    const { result } = renderHookWithQueryClient(() =>
+      useMoneySpendingReport({
+        personId: "person-1",
+        period: { start: "2026-10-01", end: "2026-10-31" },
+        currency: "RUB",
+        accountIds: ["acc-2", "acc-1"],
+        categoryId: "food",
+      }),
+    );
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(invoke).toHaveBeenCalledWith("money-fx-sync", {
+      body: {
+        start_date: "2026-10-01",
+        end_date: "2026-10-28",
+        base_currency: "USD",
+        quote_currencies: ["RUB"],
+      },
+    });
+    expect(rpc).toHaveBeenCalledWith("money_get_spending_report", {
+      p_person_id: "person-1",
+      p_start: "2026-10-01",
+      p_end: "2026-10-31",
+      p_report_currency: "RUB",
+      p_account_ids: ["acc-2", "acc-1"],
+      p_category_id: "food",
+    });
+    expect(result.current.data?.totals.expense).toBe(2200);
+  });
+
+  it("asks for every account when none is picked, and surfaces a failed sync or query", async () => {
+    const invoke = vi.fn(async () => ({ data: null, error: null }));
+    const rpc = vi.fn(async () => ({ data: null, error: { message: "rpc failed" } }));
+    createClientMock.mockReturnValue({ functions: { invoke }, rpc });
+
+    const { useMoneySpendingReport } = await import("./use-money-reports");
+    const request = {
+      personId: "person-1",
+      period: { start: "2025-03-01", end: "2025-03-31" },
+      currency: "RUB",
+      accountIds: [] as string[],
+      categoryId: null,
+    };
+    const { result } = renderHookWithQueryClient(() => useMoneySpendingReport(request));
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("rpc failed");
+    expect(invoke).toHaveBeenCalledWith("money-fx-sync", {
+      body: expect.objectContaining({ start_date: "2025-03-01", end_date: "2025-03-31" }),
+    });
+    expect(rpc).toHaveBeenCalledWith(
+      "money_get_spending_report",
+      expect.objectContaining({ p_account_ids: null, p_category_id: null }),
+    );
+
+    invoke.mockResolvedValue({ data: null, error: { message: "sync failed" } } as never);
+    const second = renderHookWithQueryClient(() =>
+      useMoneySpendingReport({ ...request, categoryId: "other" }),
+    );
+    await waitFor(() => expect(second.result.current.isError).toBe(true));
+    expect(second.result.current.error?.message).toBe("sync failed");
+  });
+
+  it("syncs no rates for a period still ahead", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-28T12:00:00Z"));
+    const invoke = vi.fn();
+    const rpc = vi.fn(async () => ({ data: {}, error: null }));
+    createClientMock.mockReturnValue({ functions: { invoke }, rpc });
+    const { useMoneySpendingReport } = await import("./use-money-reports");
+    const { result } = renderHookWithQueryClient(() =>
+      useMoneySpendingReport({
+        personId: "person-1",
+        period: { start: "2026-11-01", end: "2026-11-30" },
+        currency: "RUB",
+        accountIds: [],
+        categoryId: null,
+      }),
+    );
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("waits for a person before asking for the spending report", async () => {
+    const rpc = vi.fn();
+    createClientMock.mockReturnValue({ functions: { invoke: vi.fn() }, rpc });
+    const { useMoneySpendingReport } = await import("./use-money-reports");
+    const { result } = renderHookWithQueryClient(() =>
+      useMoneySpendingReport({
+        personId: null,
+        period: { start: "2026-10-01", end: "2026-10-31" },
+        currency: "RUB",
+        accountIds: [],
+        categoryId: null,
+      }),
+    );
+    expect(result.current.fetchStatus).toBe("idle");
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
   it("builds nested categories from flat rpc rows and normalizes fx metadata", async () => {
     const invoke = vi.fn(async () => ({
       data: { ok: true },
@@ -516,6 +626,7 @@ describe("use-money-reports", () => {
     expect(aliasBuilder.eq).toHaveBeenCalledWith("id", "alias-1");
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["money-transfer-self-aliases"] });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["money-budget-report"] });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["money-spending-report"] });
   });
 
   it("supports array alias responses and throws on invalid alias payloads", async () => {

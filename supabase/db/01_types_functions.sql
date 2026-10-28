@@ -115,6 +115,7 @@ BEGIN;
 \i functions/money_budget_targets_enforce_invariants.sql
 \i functions/money_resolve_fx_rate.sql
 \i functions/money_get_budget_report.sql
+\i functions/money_get_spending_report.sql
 
 -- Cron entry point functions
 \i functions/run_med_event_generation_for_all_users.sql

@@ -1,246 +1,843 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import {
-  ArrowLeft,
-  ArrowRight,
-  BadgeAlert,
-  ChevronDown,
-  ChevronRight,
-  Pencil,
-  Plus,
-  Target,
-  Trash2,
-  TrendingDown,
-  TrendingUp,
-  Wallet,
-} from "lucide-react";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  Line,
-  LineChart,
-  Pie,
-  PieChart,
-  ReferenceLine,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
-import { toast } from "sonner";
-import {
-  useCreateMoneyTransferSelfAlias,
-  useDeleteMoneyBudgetTarget,
-  useDeleteMoneyTransferSelfAlias,
-  useIsMobile,
-  useMoneyBudgetReport,
-  useMoneyTransferSelfAliases,
-  useUpsertMoneyBudgetTarget,
-} from "@/hooks";
+import { ChevronDown, ChevronLeft, ChevronRight, Filter, X } from "lucide-react";
+import { useIsMobile, useMoneyAccounts, useMoneySpendingReport } from "@/hooks";
 import { useIntlLocale } from "@/lib/date-locale";
-import { formatMoney } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/stores/ui-store";
-import type { MoneyBudgetCategoryNode, MoneyBudgetChartMode } from "@/types";
 import {
-  actualForMode,
-  currentReportMonth,
-  reportMonthLabel,
-  shiftReportMonth,
-  signedTarget,
-  targetDraftOf,
-  targetForMode,
-  type TargetDraft,
-} from "@/types/money-reports";
-import { MONEY_CURRENCIES } from "@/types";
-import { Badge } from "@/components/ui/badge";
+  amountOf,
+  changeTone,
+  childCategories,
+  formatChange,
+  formatReportAmount,
+  isoDay,
+  lastYearOf,
+  parsePeriod,
+  percentChange,
+  periodContaining,
+  periodLabel,
+  previousOf,
+  shiftPeriod,
+  squarify,
+  topCategories,
+  treemapShade,
+  type SpendingCategory,
+  type SpendingPeriod,
+  type SpendingPeriodKind,
+  type SpendingReport,
+  type SpendingReportMode,
+} from "@/types/money-spending-report";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 
-const DEFAULT_REPORT_CURRENCY = "RUB";
-const COLORS = ["#2563eb", "#d97706", "#059669", "#dc2626", "#7c3aed", "#0f766e", "#64748b"];
+/**
+ * "Отчёт" (T-261028-yhm): the period's spending, income and net with a forecast on top, then a
+ * treemap and a table of categories against the previous period and last year's average, the
+ * days and the top merchants. Period, accounts and a category filter live in the URL so a report
+ * can be linked and reloaded as it was.
+ */
 
-type TargetEditorState = TargetDraft & { categoryId: string };
-type Translate = (key: string) => string;
+const REPORT_CURRENCY = "RUB";
+const PERIOD_KINDS: SpendingPeriodKind[] = ["week", "month", "last30", "custom"];
 
-function isMonthParam(value: string | null): value is string {
-  return Boolean(value && /^\d{4}-\d{2}$/.test(value));
-}
+const TONE_CLASS = {
+  good: "text-teal-800 dark:text-teal-300",
+  bad: "text-orange-800 dark:text-orange-300",
+  neutral: "text-muted-foreground",
+} as const;
 
-function monthStart(value: string) {
-  return `${value}-01`;
-}
+const SHADE_CLASS: Record<SpendingReportMode, Record<"strong" | "medium" | "light", string>> = {
+  expense: {
+    strong: "bg-orange-800 text-white",
+    medium: "bg-orange-600 text-white",
+    light: "bg-orange-200 text-orange-950",
+  },
+  income: {
+    strong: "bg-teal-800 text-white",
+    medium: "bg-teal-600 text-white",
+    light: "bg-teal-200 text-teal-950",
+  },
+};
 
-function formatTooltipMoney(
-  value: number | string | readonly (number | string)[] | undefined,
-  currency: string,
+const BAR_CLASS: Record<SpendingReportMode, string> = {
+  expense: "bg-orange-600",
+  income: "bg-teal-600",
+};
+
+type Translate = ReturnType<typeof useTranslations>;
+
+function categoryName(
+  category: Pick<SpendingCategory, "name_ru" | "name_en" | "direct">,
   locale: string,
+  t?: Translate,
 ) {
-  const firstValue = Array.isArray(value) ? value[0] : value;
-  const numericValue =
-    typeof firstValue === "number"
-      ? firstValue
-      : typeof firstValue === "string"
-        ? Number(firstValue)
-        : 0;
-  return formatMoney(Number.isFinite(numericValue) ? numericValue : 0, currency, locale);
+  const name = (locale.startsWith("ru") ? category.name_ru : category.name_en) || category.name_en;
+  return category.direct && t ? t("money.spendingDirect", { name }) : name;
 }
 
-function flattenCategories(
-  nodes: MoneyBudgetCategoryNode[],
-  map = new Map<string, MoneyBudgetCategoryNode>(),
-) {
-  nodes.forEach((node) => {
-    map.set(node.id, node);
-    flattenCategories(node.children, map);
-  });
-  return map;
+function Change({
+  value,
+  base,
+  mode,
+  label,
+}: {
+  value: number;
+  base: number;
+  mode: SpendingReportMode | "net";
+  label?: string;
+}) {
+  const change = percentChange(value, base);
+  const text = formatChange(change);
+  return (
+    <span className={TONE_CLASS[changeTone(change, mode)]}>
+      {text ?? "—"}
+      {label ? ` ${label}` : null}
+    </span>
+  );
 }
 
-function categoryPath(nodes: MoneyBudgetCategoryNode[], categoryId: string): string[] | null {
-  for (const node of nodes) {
-    if (node.id === categoryId) return [node.id];
-    const child = categoryPath(node.children, categoryId);
-    if (child) return [node.id, ...child];
-  }
-  return null;
+function PeriodControls({
+  period,
+  onChange,
+  t,
+  locale,
+}: {
+  period: SpendingPeriod;
+  onChange: (period: SpendingPeriod) => void;
+  t: Translate;
+  locale: string;
+}) {
+  const [customOpen, setCustomOpen] = useState(false);
+  const [from, setFrom] = useState(period.start);
+  const [to, setTo] = useState(period.end);
+  const labels: Record<SpendingPeriodKind, string> = {
+    week: t("money.spendingPeriodWeek"),
+    month: t("money.spendingPeriodMonth"),
+    last30: t("money.spendingPeriodLast30"),
+    custom: t("money.spendingPeriodCustom"),
+  };
+
+  return (
+    <>
+      <div role="group" className="flex rounded-lg bg-muted p-1">
+        {PERIOD_KINDS.map((kind) =>
+          kind === "custom" ? (
+            <Popover key={kind} open={customOpen} onOpenChange={setCustomOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  aria-pressed={period.kind === kind}
+                  className={cn(
+                    "rounded-md px-3 py-1.5 text-sm",
+                    period.kind === kind
+                      ? "bg-background font-semibold shadow-sm"
+                      : "text-muted-foreground",
+                  )}
+                >
+                  {labels[kind]}
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-64 space-y-3">
+                <label className="block space-y-1 text-sm">
+                  <span>{t("money.spendingCustomFrom")}</span>
+                  <Input
+                    type="date"
+                    value={from}
+                    onChange={(event) => setFrom(event.target.value)}
+                  />
+                </label>
+                <label className="block space-y-1 text-sm">
+                  <span>{t("money.spendingCustomTo")}</span>
+                  <Input type="date" value={to} onChange={(event) => setTo(event.target.value)} />
+                </label>
+                <Button
+                  type="button"
+                  className="w-full"
+                  disabled={!from || !to || from > to}
+                  onClick={() => {
+                    onChange({ kind: "custom", start: from, end: to });
+                    setCustomOpen(false);
+                  }}
+                >
+                  {t("money.spendingApply")}
+                </Button>
+              </PopoverContent>
+            </Popover>
+          ) : (
+            <button
+              key={kind}
+              type="button"
+              aria-pressed={period.kind === kind}
+              onClick={() => onChange(periodContaining(kind, isoDay(new Date())))}
+              className={cn(
+                "rounded-md px-3 py-1.5 text-sm",
+                period.kind === kind
+                  ? "bg-background font-semibold shadow-sm"
+                  : "text-muted-foreground",
+              )}
+            >
+              {labels[kind]}
+            </button>
+          ),
+        )}
+      </div>
+      <div className="flex items-center gap-1 rounded-lg border bg-background p-0.5">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label={t("money.spendingPrevious")}
+          onClick={() => onChange(shiftPeriod(period, -1))}
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
+        <span className="min-w-36 text-center text-sm font-semibold first-letter:uppercase">
+          {periodLabel(period, locale)}
+        </span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label={t("money.spendingNext")}
+          onClick={() => onChange(shiftPeriod(period, 1))}
+        >
+          <ChevronRight className="h-4 w-4" />
+        </Button>
+      </div>
+    </>
+  );
 }
 
-function BudgetTargetEditor({
-  node,
-  editorState,
-  isSaving,
-  isDeleting,
-  onDirectionChange,
-  onAmountChange,
-  onSave,
-  onDelete,
-  onCancel,
+function AccountFilter({
+  personId,
+  selected,
+  onChange,
   t,
 }: {
-  node: MoneyBudgetCategoryNode;
-  editorState: TargetEditorState;
-  isSaving: boolean;
-  isDeleting: boolean;
-  onDirectionChange: (direction: "income" | "expense") => void;
-  onAmountChange: (value: string) => void;
-  onSave: () => void;
-  onDelete: () => void;
-  onCancel: () => void;
+  personId: string | null;
+  selected: string[];
+  onChange: (ids: string[]) => void;
   t: Translate;
 }) {
+  const accounts = useMoneyAccounts(personId);
+  const label =
+    selected.length === 0
+      ? t("money.spendingAllAccounts")
+      : t("money.spendingAccountsCount", { count: selected.length });
   return (
-    <div className="space-y-4">
-      <div className="space-y-1">
-        <p className="text-sm font-semibold">{node.name_en}</p>
-        <p className="text-xs text-muted-foreground">{t("money.reportTargetEditorDescription")}</p>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {(["expense", "income"] as const).map((direction) => (
-          <Button
-            key={direction}
-            type="button"
-            size="sm"
-            variant={editorState.direction === direction ? "secondary" : "outline"}
-            onClick={() => onDirectionChange(direction)}
-          >
-            {direction === "expense"
-              ? t("money.reportDirectionExpense")
-              : t("money.reportDirectionIncome")}
-          </Button>
-        ))}
-      </div>
-      <div className="space-y-2">
-        <label className="text-sm font-medium">{t("money.reportTargetAmount")}</label>
-        <Input
-          autoFocus
-          inputMode="decimal"
-          value={editorState.amount}
-          onChange={(event) => onAmountChange(event.target.value)}
-          placeholder="0"
-        />
-      </div>
-      <div className="flex flex-wrap gap-2">
-        <Button type="button" onClick={onSave} disabled={isSaving}>
-          {t("common.save")}
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button type="button" variant="outline" className="gap-1">
+          {label}
+          <ChevronDown className="h-4 w-4" />
         </Button>
-        {node.target ? (
-          <Button type="button" variant="outline" onClick={onDelete} disabled={isDeleting}>
-            {t("common.delete")}
+      </PopoverTrigger>
+      <PopoverContent className="w-64 space-y-2">
+        {(accounts.data ?? []).map((account) => {
+          const checked = selected.includes(account.id);
+          return (
+            <label key={account.id} className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={checked}
+                onCheckedChange={(value) =>
+                  onChange(
+                    value
+                      ? [...selected, account.id]
+                      : selected.filter((accountId) => accountId !== account.id),
+                  )
+                }
+              />
+              {account.account_label}
+            </label>
+          );
+        })}
+        {selected.length > 0 ? (
+          <Button type="button" variant="ghost" size="sm" onClick={() => onChange([])}>
+            {t("money.spendingAllAccounts")}
           </Button>
         ) : null}
-        <Button type="button" variant="ghost" onClick={onCancel}>
-          {t("common.cancel")}
-        </Button>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function Forecast({ report, t, locale }: { report: SpendingReport; t: Translate; locale: string }) {
+  const { totals, forecast, period, currency } = report;
+  if (!forecast) return null;
+  const endLabel = new Intl.DateTimeFormat(locale, {
+    day: "numeric",
+    month: "long",
+    timeZone: "UTC",
+  }).format(new Date(`${period.end}T00:00:00Z`));
+  const done = forecast.expense > 0 ? Math.min(100, (totals.expense / forecast.expense) * 100) : 0;
+  return (
+    <div data-testid="spending-forecast" className="space-y-1.5">
+      <p className="flex justify-between gap-2 text-sm">
+        <span className="text-muted-foreground">
+          {t("money.spendingForecast", { date: endLabel })}
+        </span>
+        <span className="font-semibold">
+          ≈ {formatReportAmount(forecast.expense, currency, locale)}
+        </span>
+      </p>
+      <div className="relative h-2 overflow-hidden rounded bg-muted">
+        <div className="absolute inset-y-0 left-0 bg-orange-600" style={{ width: `${done}%` }} />
       </div>
+      <p className="text-xs text-muted-foreground">
+        {t("money.spendingForecastDaysLeft", { days: forecast.days_left })} ·{" "}
+        {t("money.spendingForecastHint")}
+      </p>
     </div>
   );
 }
 
-function SummaryMetric({
-  title,
-  value,
-  hint,
-  icon: Icon,
-  accent,
-  testId,
+function TotalCards({
+  report,
+  t,
+  locale,
+  isMobile,
 }: {
-  title: string;
-  value: string;
-  hint: string;
-  icon: React.ComponentType<{ className?: string }>;
-  accent: string;
-  testId?: string;
+  report: SpendingReport;
+  t: Translate;
+  locale: string;
+  isMobile: boolean;
 }) {
-  return (
-    <Card
-      data-testid={testId}
-      className="border-border/70 bg-gradient-to-br from-background via-background to-muted/40"
-    >
-      <CardHeader className="pb-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="space-y-1">
-            <CardDescription className="text-xs uppercase tracking-[0.16em]">
-              {title}
-            </CardDescription>
-            <CardTitle className="text-2xl font-semibold tracking-tight">{value}</CardTitle>
-          </div>
-          <div className={cn("rounded-full border p-2", accent)}>
-            <Icon className="h-4 w-4" />
-          </div>
+  const { totals, period, currency } = report;
+  const money = (amount: number) => formatReportAmount(amount, currency, locale);
+  const year = String(period.last_year);
+  const cards = [
+    {
+      key: "expense" as const,
+      title: t("money.spendingExpense"),
+      value: money(totals.expense),
+      current: totals.expense,
+      previous: totals.previous_expense,
+      lastYear: totals.last_year_expense,
+    },
+    {
+      key: "income" as const,
+      title: t("money.spendingIncome"),
+      value: money(totals.income),
+      current: totals.income,
+      previous: totals.previous_income,
+      lastYear: totals.last_year_income,
+    },
+    {
+      key: "net" as const,
+      title: t("money.spendingNet"),
+      value: `${totals.net > 0 ? "+" : ""}${money(totals.net)}`,
+      current: totals.net,
+      previous: totals.previous_net,
+      lastYear: totals.last_year_net,
+    },
+  ];
+  const netClass = (card: (typeof cards)[number]) =>
+    card.key === "net" && card.current > 0 && "text-teal-800 dark:text-teal-300";
+
+  if (isMobile) {
+    // Three narrow tiles side by side, the forecast under them: the phone sees all three numbers
+    // without scrolling, which three stacked cards would not allow.
+    return (
+      <div className="space-y-3">
+        <div className="grid grid-cols-3 gap-2">
+          {cards.map((card) => (
+            <Card key={card.key} data-testid={`spending-total-${card.key}`}>
+              <CardContent className="space-y-1 p-3">
+                <p className="text-xs text-muted-foreground">{card.title}</p>
+                <p className={cn("text-base font-bold leading-tight", netClass(card))}>
+                  {card.value}
+                </p>
+                <p className="text-xs">
+                  <Change
+                    value={card.current}
+                    base={card.previous}
+                    mode={card.key}
+                    label={t("money.spendingVsPreviousShort")}
+                  />
+                </p>
+                <p className="text-xs">
+                  <Change
+                    value={card.current}
+                    base={card.lastYear}
+                    mode={card.key}
+                    label={t("money.spendingVsLastYear", { year })}
+                  />
+                </p>
+              </CardContent>
+            </Card>
+          ))}
         </div>
+        {report.forecast ? (
+          <Card>
+            <CardContent className="p-4">
+              <Forecast report={report} t={t} locale={locale} />
+            </CardContent>
+          </Card>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-4 md:grid-cols-3">
+      {cards.map((card) => (
+        <Card key={card.key} data-testid={`spending-total-${card.key}`}>
+          <CardContent className="space-y-2 p-5">
+            <p className="text-sm text-muted-foreground">{card.title}</p>
+            <p className={cn("text-3xl font-bold tracking-tight", netClass(card))}>{card.value}</p>
+            <p className="flex flex-wrap gap-x-3 text-sm">
+              <Change
+                value={card.current}
+                base={card.previous}
+                mode={card.key}
+                label={t("money.spendingVsPrevious")}
+              />
+              <Change
+                value={card.current}
+                base={card.lastYear}
+                mode={card.key}
+                label={t("money.spendingVsLastYear", { year })}
+              />
+            </p>
+            {card.key === "expense" && report.forecast ? (
+              <div className="border-t pt-2">
+                <Forecast report={report} t={t} locale={locale} />
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+function CategoryMap({
+  report,
+  categories,
+  mode,
+  onOpen,
+  t,
+  locale,
+  isMobile,
+}: {
+  report: SpendingReport;
+  categories: SpendingCategory[];
+  mode: SpendingReportMode;
+  onOpen: (category: SpendingCategory) => void;
+  t: Translate;
+  locale: string;
+  isMobile: boolean;
+}) {
+  const total = categories.reduce((sum, category) => sum + amountOf(category, mode), 0);
+  const tiles = squarify(categories, (category) => amountOf(category, mode), isMobile ? 1 : 3);
+  return (
+    <div
+      data-testid="spending-treemap"
+      className={cn("relative w-full", isMobile ? "aspect-square" : "aspect-[3/1]")}
+    >
+      {tiles.map((tile, rank) => {
+        const category = tile.item;
+        const amount = amountOf(category, mode);
+        const share = total > 0 ? Math.round((amount / total) * 100) : 0;
+        // On a square phone map a tile needs a fifth of the width to fit a name and an amount.
+        const roomy = isMobile
+          ? tile.width > 0.22 && tile.height > 0.16
+          : tile.width > 0.08 && tile.height > 0.22;
+        // Too narrow for a word: the tile keeps its colour and its title, not a broken label.
+        const tiny = isMobile
+          ? tile.width < 0.14 || tile.height < 0.08
+          : tile.width < 0.04 || tile.height < 0.12;
+        return (
+          <button
+            key={category.id}
+            type="button"
+            onClick={() => onOpen(category)}
+            title={`${categoryName(category, locale, t)} · ${formatReportAmount(amount, report.currency, locale)}`}
+            className={cn(
+              "absolute flex flex-col justify-start overflow-hidden rounded-lg border-2 border-background p-2 text-left",
+              SHADE_CLASS[mode][treemapShade(rank, tiles.length)],
+              category.system_key === "uncategorized" &&
+                "outline-dashed outline-2 -outline-offset-4",
+            )}
+            style={{
+              left: `${tile.x * 100}%`,
+              top: `${tile.y * 100}%`,
+              width: `${tile.width * 100}%`,
+              height: `${tile.height * 100}%`,
+            }}
+          >
+            {tiny ? null : (
+              <span
+                className={cn(
+                  "block break-words font-semibold leading-tight",
+                  roomy && !isMobile ? "text-base" : "text-xs",
+                )}
+              >
+                {categoryName(category, locale, t)}
+              </span>
+            )}
+            {roomy ? (
+              <span className={cn("block", isMobile ? "text-xs" : "text-sm")}>
+                {formatReportAmount(amount, report.currency, locale)} · {share}%
+              </span>
+            ) : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function Sparkline({ category, mode }: { category: SpendingCategory; mode: SpendingReportMode }) {
+  const values = category.months.map((month) => (mode === "income" ? month.income : month.expense));
+  const max = Math.max(...values, 0);
+  return (
+    <span aria-hidden="true" className="flex h-6 items-end gap-0.5">
+      {values.map((value, index) => (
+        <span
+          key={category.months[index]?.month_start ?? index}
+          className={cn(
+            "w-1.5 rounded-sm",
+            index === values.length - 1 ? BAR_CLASS[mode] : "bg-muted-foreground/30",
+          )}
+          style={{ height: `${max > 0 ? Math.max(2, (value / max) * 24) : 2}px` }}
+        />
+      ))}
+    </span>
+  );
+}
+
+/**
+ * The phone's category list: a table would scroll sideways, so each row carries its comparisons
+ * under the name, and a tap opens the subcategories with the button that filters the report.
+ */
+function CategoryList({
+  report,
+  categories,
+  allCategories,
+  mode,
+  expanded,
+  onToggle,
+  onFilter,
+  t,
+  locale,
+}: {
+  report: SpendingReport;
+  categories: SpendingCategory[];
+  allCategories: SpendingCategory[];
+  mode: SpendingReportMode;
+  expanded: Set<string>;
+  onToggle: (id: string) => void;
+  onFilter: (category: SpendingCategory) => void;
+  t: Translate;
+  locale: string;
+}) {
+  const total = categories.reduce((sum, category) => sum + amountOf(category, mode), 0);
+  const year = String(report.period.last_year);
+  return (
+    <Card>
+      <ul className="divide-y">
+        {categories.map((category) => {
+          const amount = amountOf(category, mode);
+          const name = categoryName(category, locale, t);
+          const open = expanded.has(category.id);
+          const children = category.has_children
+            ? childCategories(allCategories, category.id, mode)
+            : [];
+          return (
+            <li key={category.id} data-testid={`spending-row-${category.id}`}>
+              <button
+                type="button"
+                aria-expanded={open}
+                aria-label={t(open ? "money.spendingCollapse" : "money.spendingExpand", { name })}
+                onClick={() => onToggle(category.id)}
+                className="flex min-h-14 w-full items-center gap-3 px-4 py-3 text-left"
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-1 text-[15px] font-medium">
+                    {open ? (
+                      <ChevronDown className="h-4 w-4 shrink-0" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4 shrink-0" />
+                    )}
+                    <span className="truncate">{name}</span>
+                  </span>
+                  <span className="mt-0.5 flex flex-wrap gap-x-2 text-xs">
+                    <Change
+                      value={amount}
+                      base={previousOf(category, mode)}
+                      mode={mode}
+                      label={t("money.spendingVsPreviousShort")}
+                    />
+                    <Change
+                      value={amount}
+                      base={lastYearOf(category, mode)}
+                      mode={mode}
+                      label={t("money.spendingVsLastYear", { year })}
+                    />
+                  </span>
+                </span>
+                <span className="text-right">
+                  <span className="block text-[15px] font-semibold">
+                    {formatReportAmount(amount, report.currency, locale)}
+                  </span>
+                  <span className="block text-xs text-muted-foreground">
+                    {total > 0 ? `${Math.round((amount / total) * 100)}%` : ""}
+                  </span>
+                </span>
+              </button>
+              {open ? (
+                <div className="space-y-2 px-4 pb-3 pl-9">
+                  {children.map((child) => (
+                    <p
+                      key={child.id}
+                      className="flex justify-between text-sm text-muted-foreground"
+                    >
+                      <span>{categoryName(child, locale, t)}</span>
+                      <span>
+                        {formatReportAmount(amountOf(child, mode), report.currency, locale)}
+                      </span>
+                    </p>
+                  ))}
+                  <Button type="button" className="min-h-11" onClick={() => onFilter(category)}>
+                    <Filter className="mr-1.5 h-4 w-4" />
+                    {t("money.spendingFilterByCategory", { name })}
+                  </Button>
+                </div>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+    </Card>
+  );
+}
+
+function CategoryTable({
+  report,
+  categories,
+  allCategories,
+  mode,
+  expanded,
+  onToggle,
+  onFilter,
+  t,
+  locale,
+}: {
+  report: SpendingReport;
+  categories: SpendingCategory[];
+  allCategories: SpendingCategory[];
+  mode: SpendingReportMode;
+  expanded: Set<string>;
+  onToggle: (id: string) => void;
+  onFilter: (category: SpendingCategory) => void;
+  t: Translate;
+  locale: string;
+}) {
+  const total = categories.reduce((sum, category) => sum + amountOf(category, mode), 0);
+  const year = String(report.period.last_year);
+  const columns =
+    "grid grid-cols-[minmax(10rem,2fr)_7rem_4rem_5.5rem_6.5rem_7rem_2.5rem] items-center gap-3";
+
+  function row(category: SpendingCategory, depth: number): React.ReactNode {
+    const amount = amountOf(category, mode);
+    const children = category.has_children ? childCategories(allCategories, category.id, mode) : [];
+    const open = expanded.has(category.id);
+    const name = categoryName(category, locale, t);
+    return (
+      <div key={category.id}>
+        <div
+          data-testid={`spending-row-${category.id}`}
+          className={cn(
+            columns,
+            "border-b px-4 py-2 text-sm",
+            depth > 0 && "text-muted-foreground",
+          )}
+        >
+          <span className="flex min-w-0 items-center gap-2" style={{ paddingLeft: depth * 20 }}>
+            {children.length > 0 ? (
+              <button
+                type="button"
+                aria-expanded={open}
+                aria-label={t(open ? "money.spendingCollapse" : "money.spendingExpand", { name })}
+                onClick={() => onToggle(category.id)}
+                className="text-muted-foreground"
+              >
+                {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+              </button>
+            ) : (
+              <span className="w-4" />
+            )}
+            <span className="truncate">{name}</span>
+          </span>
+          <span className="text-right font-semibold text-foreground">
+            {formatReportAmount(amount, report.currency, locale)}
+          </span>
+          <span className="text-right text-muted-foreground">
+            {depth === 0 && total > 0 ? `${Math.round((amount / total) * 100)}%` : ""}
+          </span>
+          <span className="text-right">
+            <Change value={amount} base={previousOf(category, mode)} mode={mode} />
+          </span>
+          <span className="text-right">
+            <Change value={amount} base={lastYearOf(category, mode)} mode={mode} />
+          </span>
+          <Sparkline category={category} mode={mode} />
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            className="h-8 w-8"
+            aria-label={t("money.spendingFilterByCategory", { name })}
+            title={t("money.spendingFilterByCategory", { name })}
+            onClick={() => onFilter(category)}
+          >
+            <Filter className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+        {open ? children.map((child) => row(child, depth + 1)) : null}
+      </div>
+    );
+  }
+
+  return (
+    <Card className="overflow-x-auto">
+      <div className="min-w-[46rem]">
+        <div className={cn(columns, "border-b px-4 py-3 text-xs text-muted-foreground")}>
+          <span>{t("money.spendingColumnCategory")}</span>
+          <span className="text-right">{t("money.spendingColumnAmount")}</span>
+          <span className="text-right">{t("money.spendingColumnShare")}</span>
+          <span className="text-right">{t("money.spendingColumnPrevious")}</span>
+          <span className="text-right">{t("money.spendingColumnLastYear", { year })}</span>
+          <span>{t("money.spendingColumnMonths")}</span>
+          <span />
+        </div>
+        {categories.map((category) => row(category, 0))}
+      </div>
+    </Card>
+  );
+}
+
+function DaysChart({
+  report,
+  mode,
+  t,
+  locale,
+}: {
+  report: SpendingReport;
+  mode: SpendingReportMode;
+  t: Translate;
+  locale: string;
+}) {
+  const today = isoDay(new Date());
+  const values = report.days.map((day) => (mode === "income" ? day.income : day.expense));
+  const max = Math.max(...values, 0);
+  const dayLabel = new Intl.DateTimeFormat(locale, {
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  });
+  return (
+    <Card className="min-w-0 flex-[999_1_34rem]">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">{t("money.spendingDays")}</CardTitle>
       </CardHeader>
-      <CardContent className="pt-0 text-sm text-muted-foreground">{hint}</CardContent>
+      <CardContent className="space-y-2">
+        <div data-testid="spending-days" className="flex h-36 items-end gap-0.5 border-b">
+          {report.days.map((day, index) => {
+            const value = values[index] ?? 0;
+            const label = t("money.spendingDayTooltip", {
+              date: dayLabel.format(new Date(`${day.date}T00:00:00Z`)),
+              amount: formatReportAmount(value, report.currency, locale),
+            });
+            return (
+              <span
+                key={day.date}
+                title={label}
+                className={cn(
+                  "flex-1 rounded-t-sm",
+                  day.date > today ? "bg-muted" : BAR_CLASS[mode],
+                  day.date === today && "opacity-70",
+                )}
+                style={{ height: `${max > 0 ? (value / max) * 100 : 0}%` }}
+              />
+            );
+          })}
+        </div>
+        <div className="flex justify-between text-xs text-muted-foreground">
+          <span>
+            {report.days[0] ? dayLabel.format(new Date(`${report.days[0].date}T00:00:00Z`)) : ""}
+          </span>
+          <span>
+            {report.days.at(-1)
+              ? dayLabel.format(new Date(`${report.days.at(-1)!.date}T00:00:00Z`))
+              : ""}
+          </span>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function MerchantList({
+  report,
+  t,
+  locale,
+}: {
+  report: SpendingReport;
+  t: Translate;
+  locale: string;
+}) {
+  if (report.merchants.length === 0) return null;
+  return (
+    <Card className="min-w-0 flex-[1_1_20rem]">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">{t("money.spendingMerchants")}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <ul data-testid="spending-merchants" className="space-y-3">
+          {report.merchants.slice(0, 6).map((merchant) => (
+            <li
+              key={`${merchant.brand_id ?? ""}:${merchant.name}`}
+              className="flex items-center gap-3"
+            >
+              {merchant.logo_url ? (
+                // eslint-disable-next-line @next/next/no-img-element -- brand logos come from many hosts
+                <img src={merchant.logo_url} alt="" className="h-9 w-9 rounded-lg object-cover" />
+              ) : (
+                <span
+                  aria-hidden="true"
+                  className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted font-semibold"
+                  style={
+                    merchant.base_color
+                      ? { background: merchant.base_color, color: "#fff" }
+                      : undefined
+                  }
+                >
+                  {merchant.name.charAt(0).toUpperCase()}
+                </span>
+              )}
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium">{merchant.name}</span>
+                <span className="block text-xs text-muted-foreground">
+                  {t("money.spendingMerchantCount", { count: merchant.transaction_count })}
+                </span>
+              </span>
+              <span className="text-sm font-semibold">
+                {formatReportAmount(merchant.expense, report.currency, locale)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </CardContent>
     </Card>
   );
 }
@@ -249,83 +846,35 @@ export default function MoneyReportsPage() {
   const t = useTranslations();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const intlLocale = useIntlLocale();
+  const locale = useIntlLocale();
   const isMobile = useIsMobile();
-  const selectedPersonId = useUIStore((state) => state.selectedPersonId);
+  const personId = useUIStore((state) => state.selectedPersonId);
   const paramsString = searchParams?.toString() ?? "";
-  const rawMonth = searchParams?.get("month") ?? null;
-  const rawCurrency = (searchParams?.get("currency") ?? "").toUpperCase();
-  const reportMonth = isMonthParam(rawMonth) ? rawMonth : currentReportMonth();
-  const reportCurrency = MONEY_CURRENCIES.includes(rawCurrency as (typeof MONEY_CURRENCIES)[number])
-    ? rawCurrency
-    : DEFAULT_REPORT_CURRENCY;
-  const [chartMode, setChartMode] = useState<MoneyBudgetChartMode>("expenses");
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
-  const [focusedCategoryId, setFocusedCategoryId] = useState<string | null>(null);
-  const [desktopEditorId, setDesktopEditorId] = useState<string | null>(null);
-  const [mobileEditorOpen, setMobileEditorOpen] = useState(false);
-  const [editorState, setEditorState] = useState<TargetEditorState | null>(null);
-  const [aliasesOpen, setAliasesOpen] = useState(false);
-  const [aliasDraft, setAliasDraft] = useState("");
-  const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const today = isoDay(new Date());
 
-  const reportQuery = useMoneyBudgetReport(
-    selectedPersonId,
-    monthStart(reportMonth),
-    reportCurrency,
+  const period = parsePeriod(
+    searchParams?.get("period") ?? null,
+    searchParams?.get("start") ?? null,
+    searchParams?.get("end") ?? null,
+    today,
   );
-  const aliasesQuery = useMoneyTransferSelfAliases(selectedPersonId);
-  const upsertTarget = useUpsertMoneyBudgetTarget();
-  const deleteTarget = useDeleteMoneyBudgetTarget();
-  const createAlias = useCreateMoneyTransferSelfAlias();
-  const deleteAlias = useDeleteMoneyTransferSelfAlias();
+  const accountIds = useMemo(
+    () => (searchParams?.get("accounts") ?? "").split(",").filter(Boolean),
+    [searchParams],
+  );
+  const categoryId = searchParams?.get("category") || null;
+  const [mode, setMode] = useState<SpendingReportMode>("expense");
+  const [mapParentId, setMapParentId] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  const reportQuery = useMoneySpendingReport({
+    personId,
+    period,
+    currency: REPORT_CURRENCY,
+    accountIds,
+    categoryId,
+  });
   const report = reportQuery.data;
-  const categoryMap = useMemo(
-    () => flattenCategories(report?.categories ?? []),
-    [report?.categories],
-  );
-  const activeEditorNode = editorState ? (categoryMap.get(editorState.categoryId) ?? null) : null;
-
-  const rootSeries = useMemo(
-    () =>
-      (report?.categories ?? [])
-        .map((node, index) => ({
-          id: node.id,
-          label: node.name_en,
-          actual: actualForMode(node, chartMode),
-          target: targetForMode(node, chartMode),
-          value: actualForMode(node, chartMode),
-          color: COLORS[index % COLORS.length],
-        }))
-        .filter((item) => item.actual !== 0 || item.target !== 0),
-    [chartMode, report?.categories],
-  );
-
-  useEffect(() => {
-    const next = new URLSearchParams(paramsString);
-    let changed = false;
-    if (next.get("month") !== reportMonth) {
-      next.set("month", reportMonth);
-      changed = true;
-    }
-    if ((next.get("currency") ?? "").toUpperCase() !== reportCurrency) {
-      next.set("currency", reportCurrency);
-      changed = true;
-    }
-    if (changed) {
-      router.replace(`/money/reports?${next.toString()}`, { scroll: false });
-    }
-  }, [paramsString, reportCurrency, reportMonth, router]);
-
-  useEffect(() => {
-    if (!focusedCategoryId) return;
-    const target = rowRefs.current[focusedCategoryId];
-    if (!target) return;
-    const frame = window.requestAnimationFrame(() => {
-      target.scrollIntoView({ behavior: "smooth", block: "center" });
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [focusedCategoryId, report?.categories]);
 
   function updateParams(update: (params: URLSearchParams) => void) {
     const next = new URLSearchParams(paramsString);
@@ -333,377 +882,42 @@ export default function MoneyReportsPage() {
     router.replace(`/money/reports?${next.toString()}`, { scroll: false });
   }
 
-  function focusCategory(categoryId: string) {
-    const path = categoryPath(report?.categories ?? [], categoryId);
-    if (path && path.length > 1) {
-      setExpandedIds((current) => {
-        const next = new Set(current);
-        path.slice(0, -1).forEach((id) => next.add(id));
-        return next;
-      });
-    }
-    setFocusedCategoryId(categoryId);
-  }
-
-  function openEditor(node: MoneyBudgetCategoryNode) {
-    setEditorState({ categoryId: node.id, ...targetDraftOf(node) });
-    if (isMobile) setMobileEditorOpen(true);
-    else setDesktopEditorId(node.id);
-  }
-
-  function closeEditor() {
-    setDesktopEditorId(null);
-    setMobileEditorOpen(false);
-    setEditorState(null);
-  }
-
-  function renderTargetEditor(node: MoneyBudgetCategoryNode) {
-    if (!editorState || editorState.categoryId !== node.id) return null;
-    return (
-      <BudgetTargetEditor
-        node={node}
-        editorState={editorState}
-        isSaving={upsertTarget.isPending}
-        isDeleting={deleteTarget.isPending}
-        onDirectionChange={(direction) =>
-          setEditorState((current) => (current ? { ...current, direction } : current))
-        }
-        onAmountChange={(amount) =>
-          setEditorState((current) => (current ? { ...current, amount } : current))
-        }
-        onSave={saveTarget}
-        onDelete={() => removeTarget(node)}
-        onCancel={closeEditor}
-        t={t}
-      />
-    );
-  }
-
-  async function saveTarget() {
-    if (!selectedPersonId || !editorState) return;
-    const targetAmount = signedTarget(editorState);
-    if (targetAmount === null) {
-      toast.error(t("money.reportTargetValidation"));
-      return;
-    }
-    try {
-      await upsertTarget.mutateAsync({
-        personId: selectedPersonId,
-        categoryId: editorState.categoryId,
-        monthStart: monthStart(reportMonth),
-        targetAmount,
-        currency: reportCurrency,
-      });
-      toast.success(t("money.reportTargetSaved"));
-      closeEditor();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : t("money.reportTargetSaveFailed"));
-    }
-  }
-
-  async function removeTarget(node: MoneyBudgetCategoryNode) {
-    if (!selectedPersonId) return;
-    try {
-      await deleteTarget.mutateAsync({
-        personId: selectedPersonId,
-        categoryId: node.id,
-        monthStart: monthStart(reportMonth),
-      });
-      toast.success(t("money.reportTargetDeleted"));
-      closeEditor();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : t("money.reportTargetDeleteFailed"));
-    }
-  }
-
-  async function addAlias() {
-    const value = aliasDraft.trim();
-    if (!selectedPersonId || !value) {
-      toast.error(t("money.reportAliasValidation"));
-      return;
-    }
-    try {
-      await createAlias.mutateAsync({ personId: selectedPersonId, alias: value });
-      setAliasDraft("");
-      toast.success(t("money.reportAliasSaved"));
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : t("money.reportAliasSaveFailed"));
-    }
-  }
-
-  async function removeAlias(id: string) {
-    try {
-      await deleteAlias.mutateAsync(id);
-      toast.success(t("money.reportAliasDeleted"));
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : t("money.reportAliasDeleteFailed"));
-    }
-  }
-
-  function AliasManagerContent() {
-    return (
-      <div className="space-y-4">
-        <p className="text-sm text-muted-foreground">{t("money.reportSelfAliasesDescription")}</p>
-        <div className="flex gap-2">
-          <Input
-            value={aliasDraft}
-            onChange={(event) => setAliasDraft(event.target.value)}
-            placeholder={t("money.reportAliasPlaceholder")}
-          />
-          <Button type="button" onClick={addAlias} disabled={createAlias.isPending}>
-            <Plus className="mr-1.5 h-4 w-4" />
-            {t("common.add")}
-          </Button>
-        </div>
-        <Separator />
-        <div className="space-y-2">
-          {(aliasesQuery.data ?? []).length === 0 ? (
-            <p className="text-sm text-muted-foreground">{t("money.reportAliasesEmpty")}</p>
-          ) : (
-            (aliasesQuery.data ?? []).map((alias) => (
-              <div
-                key={alias.id}
-                className="flex items-center justify-between rounded-xl border border-border/70 px-3 py-2"
-              >
-                <div>
-                  <p className="font-medium">{alias.alias}</p>
-                  <p className="text-xs text-muted-foreground">{alias.normalized_alias}</p>
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => removeAlias(alias.id)}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  function DesktopRows(nodes: MoneyBudgetCategoryNode[], level = 0): React.ReactNode {
-    return nodes.map((node) => {
-      const expanded = expandedIds.has(node.id);
-      const hasChildren = node.children.length > 0;
-      return (
-        <React.Fragment key={node.id}>
-          <div
-            ref={(element) => {
-              rowRefs.current[node.id] = element;
-            }}
-            data-testid={`budget-row-${node.id}`}
-            className={cn(
-              "grid grid-cols-[minmax(16rem,1.8fr),repeat(5,minmax(7rem,0.85fr)),auto] items-center gap-3 rounded-2xl px-4 py-3",
-              focusedCategoryId === node.id ? "bg-secondary/80 shadow-sm" : "hover:bg-muted/40",
-            )}
-          >
-            <div
-              className="flex min-w-0 items-center gap-2"
-              style={{ paddingLeft: `${level * 18}px` }}
-            >
-              {hasChildren ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 shrink-0"
-                  onClick={() =>
-                    setExpandedIds((current) => {
-                      const next = new Set(current);
-                      if (next.has(node.id)) next.delete(node.id);
-                      else next.add(node.id);
-                      return next;
-                    })
-                  }
-                >
-                  {expanded ? (
-                    <ChevronDown className="h-4 w-4" />
-                  ) : (
-                    <ChevronRight className="h-4 w-4" />
-                  )}
-                </Button>
-              ) : (
-                <span className="block h-7 w-7 shrink-0" />
-              )}
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="truncate font-medium">{node.name_en}</span>
-                  {node.is_uncategorized ? (
-                    <Badge variant="secondary">{t("money.reportUncategorizedBadge")}</Badge>
-                  ) : null}
-                  {node.target ? (
-                    <Badge variant="outline">{t("money.reportTargetBadge")}</Badge>
-                  ) : null}
-                </div>
-                {node.name_ru && node.name_ru !== node.name_en ? (
-                  <p className="truncate text-xs text-muted-foreground">{node.name_ru}</p>
-                ) : null}
-              </div>
-            </div>
-            <span className="text-right text-sm">
-              {formatMoney(node.actual_income, reportCurrency, intlLocale)}
-            </span>
-            <span className="text-right text-sm">
-              {formatMoney(node.actual_expenses, reportCurrency, intlLocale)}
-            </span>
-            <span className="text-right text-sm font-medium">
-              {formatMoney(node.actual_net, reportCurrency, intlLocale)}
-            </span>
-            <span className="text-right text-sm">
-              {formatMoney(node.target_amount, reportCurrency, intlLocale)}
-            </span>
-            <span
-              className={cn(
-                "text-right text-sm font-medium",
-                node.variance_amount > 0
-                  ? "text-emerald-600"
-                  : node.variance_amount < 0
-                    ? "text-rose-600"
-                    : "",
-              )}
-            >
-              {formatMoney(node.variance_amount, reportCurrency, intlLocale)}
-            </span>
-            <div className="flex justify-end">
-              <Popover
-                open={desktopEditorId === node.id}
-                onOpenChange={(open) => {
-                  if (open) openEditor(node);
-                  else if (desktopEditorId === node.id) closeEditor();
-                }}
-              >
-                <PopoverTrigger asChild>
-                  <Button type="button" variant="ghost" size="sm" className="gap-1.5">
-                    <Pencil className="h-4 w-4" />
-                    {t("money.reportEditTarget")}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent
-                  align="end"
-                  side="bottom"
-                  sideOffset={8}
-                  className="w-[24rem] rounded-2xl border-border/70 p-4"
-                >
-                  {renderTargetEditor(node)}
-                </PopoverContent>
-              </Popover>
-            </div>
-          </div>
-          {hasChildren && expanded ? DesktopRows(node.children, level + 1) : null}
-        </React.Fragment>
-      );
+  function setPeriod(next: SpendingPeriod) {
+    updateParams((params) => {
+      params.set("period", next.kind);
+      params.set("start", next.start);
+      if (next.kind === "custom") params.set("end", next.end);
+      else params.delete("end");
     });
   }
 
-  function MobileRows(nodes: MoneyBudgetCategoryNode[], level = 0): React.ReactNode {
-    return nodes.map((node) => {
-      const expanded = expandedIds.has(node.id);
-      return (
-        <div key={node.id} className="space-y-3">
-          <Card
-            ref={(element: HTMLDivElement | null) => {
-              rowRefs.current[node.id] = element;
-            }}
-            data-testid={`budget-row-${node.id}`}
-            className={focusedCategoryId === node.id ? "ring-1 ring-primary/40" : ""}
-          >
-            <CardContent className="space-y-4 p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0" style={{ paddingLeft: `${level * 10}px` }}>
-                  <div className="flex items-center gap-2">
-                    {node.children.length > 0 ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        onClick={() =>
-                          setExpandedIds((current) => {
-                            const next = new Set(current);
-                            if (next.has(node.id)) next.delete(node.id);
-                            else next.add(node.id);
-                            return next;
-                          })
-                        }
-                      >
-                        {expanded ? (
-                          <ChevronDown className="h-4 w-4" />
-                        ) : (
-                          <ChevronRight className="h-4 w-4" />
-                        )}
-                      </Button>
-                    ) : null}
-                    <div className="min-w-0">
-                      <p className="truncate font-medium">{node.name_en}</p>
-                      {node.name_ru && node.name_ru !== node.name_en ? (
-                        <p className="truncate text-xs text-muted-foreground">{node.name_ru}</p>
-                      ) : null}
-                    </div>
-                  </div>
-                </div>
-                <Button type="button" variant="ghost" size="sm" onClick={() => openEditor(node)}>
-                  <Pencil className="h-4 w-4" />
-                </Button>
-              </div>
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                    {t("money.reportActualIncome")}
-                  </p>
-                  <p>{formatMoney(node.actual_income, reportCurrency, intlLocale)}</p>
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                    {t("money.reportActualExpenses")}
-                  </p>
-                  <p>{formatMoney(node.actual_expenses, reportCurrency, intlLocale)}</p>
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                    {t("money.reportNet")}
-                  </p>
-                  <p>{formatMoney(node.actual_net, reportCurrency, intlLocale)}</p>
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                    {t("money.reportTarget")}
-                  </p>
-                  <p>{formatMoney(node.target_amount, reportCurrency, intlLocale)}</p>
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                    {t("money.reportVariance")}
-                  </p>
-                  <p
-                    className={cn(
-                      node.variance_amount > 0
-                        ? "text-emerald-600"
-                        : node.variance_amount < 0
-                          ? "text-rose-600"
-                          : "",
-                    )}
-                  >
-                    {formatMoney(node.variance_amount, reportCurrency, intlLocale)}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-          {node.children.length > 0 && expanded ? (
-            <div className="space-y-3 border-l border-dashed border-border/60 pl-3">
-              {MobileRows(node.children, level + 1)}
-            </div>
-          ) : null}
-        </div>
-      );
+  function toggleExpanded(id: string) {
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
     });
   }
 
-  if (!selectedPersonId) {
+  function setCategoryFilter(id: string | null) {
+    setMapParentId(null);
+    setExpanded(new Set());
+    updateParams((params) => {
+      if (id) params.set("category", id);
+      else params.delete("category");
+    });
+  }
+
+  const allCategories = report?.categories ?? [];
+  const filterCategory = allCategories.find((category) => category.id === categoryId) ?? null;
+  const tableCategories = report ? topCategories(allCategories, categoryId, mode) : [];
+  const mapParent = allCategories.find((category) => category.id === mapParentId) ?? null;
+  const mapCategories = mapParent
+    ? childCategories(allCategories, mapParent.id, mode)
+    : tableCategories;
+
+  if (!personId) {
     return (
       <div className="flex h-64 items-center justify-center text-muted-foreground">
         <p>{t("person.selectPrompt")}</p>
@@ -712,442 +926,196 @@ export default function MoneyReportsPage() {
   }
 
   return (
-    <div className="space-y-6 pb-8">
-      <div className="rounded-[2rem] border border-border/70 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 px-5 py-6 text-slate-50 shadow-sm md:px-7">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div className="space-y-3">
-            <Badge className="border-white/20 bg-white/10 text-white hover:bg-white/10">
-              {t("money.reports")}
-            </Badge>
-            <div>
-              <h1 className="text-3xl font-semibold tracking-tight">
-                {t("money.budgetReportTitle")}
-              </h1>
-              <p className="max-w-2xl text-sm text-slate-300">
-                {t("money.budgetReportDescription")}
-              </p>
-            </div>
-          </div>
-          <div className="flex flex-col gap-3 md:flex-row md:items-center">
-            <div className="flex items-center gap-2 rounded-full border border-white/15 bg-white/5 p-1">
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="rounded-full text-white hover:bg-white/10 hover:text-white"
-                onClick={() =>
-                  updateParams((params) => params.set("month", shiftReportMonth(reportMonth, -1)))
-                }
-                aria-label={t("money.reportPreviousMonth")}
-              >
-                <ArrowLeft className="h-4 w-4" />
-              </Button>
-              <div className="min-w-[11rem] text-center text-sm font-medium">
-                {reportMonthLabel(reportMonth, intlLocale)}
-              </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="rounded-full text-white hover:bg-white/10 hover:text-white"
-                onClick={() =>
-                  updateParams((params) => params.set("month", shiftReportMonth(reportMonth, 1)))
-                }
-                aria-label={t("money.reportNextMonth")}
-              >
-                <ArrowRight className="h-4 w-4" />
-              </Button>
-            </div>
-            <Select
-              value={reportCurrency}
-              onValueChange={(value) => updateParams((params) => params.set("currency", value))}
-            >
-              <SelectTrigger
-                data-testid="budget-currency-select"
-                className="w-[9rem] border-white/15 bg-white/5 text-white"
-              >
-                <SelectValue placeholder={t("money.currency")} />
-              </SelectTrigger>
-              <SelectContent>
-                {MONEY_CURRENCIES.map((currency) => (
-                  <SelectItem key={currency} value={currency}>
-                    {currency}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button
-              type="button"
-              variant="secondary"
-              className="gap-2"
-              onClick={() => setAliasesOpen(true)}
-            >
-              <Target className="h-4 w-4" />
-              {t("money.reportSelfAliases")}
-            </Button>
-          </div>
+    <div className="mx-auto flex max-w-6xl flex-col gap-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold">{t("money.spendingTitle")}</h1>
+        <div className="flex flex-wrap items-center gap-2">
+          <PeriodControls
+            key={`${period.start}:${period.end}`}
+            period={period}
+            onChange={setPeriod}
+            t={t}
+            locale={locale}
+          />
+          <AccountFilter
+            personId={personId}
+            selected={accountIds}
+            onChange={(ids) =>
+              updateParams((params) => {
+                if (ids.length > 0) params.set("accounts", ids.join(","));
+                else params.delete("accounts");
+              })
+            }
+            t={t}
+          />
+          <span className="text-sm text-muted-foreground">
+            {t("money.spendingCurrencyNote", { currency: REPORT_CURRENCY })}
+          </span>
         </div>
       </div>
-      {reportQuery.isLoading ? (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, index) => (
-            <Card key={index}>
-              <CardHeader>
-                <Skeleton className="h-4 w-28" />
-                <Skeleton className="h-8 w-32" />
-              </CardHeader>
-            </Card>
-          ))}
+
+      {categoryId ? (
+        <div>
+          <span className="inline-flex items-center gap-2 rounded-full bg-foreground py-1 pl-3 pr-1 text-sm text-background">
+            {/* Named when the report still lists it; an empty filtered report still lets it go. */}
+            {filterCategory
+              ? t("money.spendingFilterChip", { name: categoryName(filterCategory, locale) })
+              : t("money.spendingFilterUnnamed")}
+            <button
+              type="button"
+              aria-label={t("money.spendingClearFilter")}
+              onClick={() => setCategoryFilter(null)}
+              className="rounded-full bg-background/20 p-1"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </span>
         </div>
       ) : null}
 
-      {!reportQuery.isLoading && reportQuery.error ? (
-        <Card className="border-rose-200 bg-rose-50/70">
-          <CardContent className="flex items-start gap-3 p-5 text-rose-900">
-            <BadgeAlert className="mt-0.5 h-5 w-5 shrink-0" />
-            <div>
-              <p className="font-medium">{t("money.reportLoadFailed")}</p>
-              <p className="text-sm text-rose-800">
-                {reportQuery.error instanceof Error
-                  ? reportQuery.error.message
-                  : t("money.reportLoadFailed")}
-              </p>
-            </div>
+      {reportQuery.isError ? (
+        <Card>
+          <CardContent className="p-5 text-sm text-destructive">
+            {t("money.spendingLoadFailed")}
           </CardContent>
         </Card>
-      ) : null}
-
-      {!reportQuery.isLoading && report ? (
+      ) : !report ? (
+        <div className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-3">
+            {[0, 1, 2].map((index) => (
+              <Skeleton key={index} className="h-40 rounded-xl" />
+            ))}
+          </div>
+          <Skeleton className="h-80 rounded-xl" />
+        </div>
+      ) : (
         <>
-          {report.fx_status.mode === "approximate" ? (
-            <Card className="border-amber-200 bg-amber-50/70">
-              <CardContent className="flex items-start gap-3 p-5 text-amber-950">
-                <BadgeAlert className="mt-0.5 h-5 w-5 shrink-0" />
-                <div>
-                  <p className="font-medium">{t("money.reportFxApproximateTitle")}</p>
-                  <p className="text-sm text-amber-900">
-                    {report.fx_status.message ?? t("money.reportFxApproximateBody")}
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
+          {report.fx_status.status !== "ok" ? (
+            <p
+              role="status"
+              className="rounded-lg border border-orange-300 bg-orange-50 px-4 py-3 text-sm text-orange-950 dark:bg-orange-950 dark:text-orange-100"
+            >
+              {report.fx_status.status === "error"
+                ? t("money.spendingFxMissing", { pairs: report.fx_status.missing.join(", ") })
+                : t("money.spendingFxApproximate")}
+            </p>
           ) : null}
 
-          {report.fx_status.is_blocking ? (
-            <Card className="border-rose-200 bg-rose-50/70">
-              <CardContent className="flex items-start gap-3 p-5 text-rose-900">
-                <BadgeAlert className="mt-0.5 h-5 w-5 shrink-0" />
-                <div>
-                  <p className="font-medium">{t("money.reportFxMissingTitle")}</p>
-                  <p className="text-sm text-rose-800">
-                    {report.fx_status.message ?? t("money.reportFxMissingBody")}
-                  </p>
+          <TotalCards report={report} t={t} locale={locale} isMobile={isMobile} />
+
+          <Card>
+            <CardHeader className="space-y-3 pb-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                  <CardTitle className="text-base">{t("money.spendingCategories")}</CardTitle>
+                  {mapParent ? (
+                    <span className="text-sm">
+                      <button
+                        type="button"
+                        className="underline"
+                        onClick={() =>
+                          setMapParentId(
+                            mapParent.parent_id && mapParent.parent_id !== categoryId
+                              ? mapParent.parent_id
+                              : null,
+                          )
+                        }
+                      >
+                        {filterCategory
+                          ? categoryName(filterCategory, locale)
+                          : t("money.spendingAllCategories")}
+                      </button>
+                      {" › "}
+                      {categoryName(mapParent, locale)}
+                    </span>
+                  ) : null}
                 </div>
-              </CardContent>
-            </Card>
-          ) : (
-            <>
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
-                <SummaryMetric
-                  title={t("money.reportActualIncome")}
-                  value={formatMoney(report.summary.actual_income, reportCurrency, intlLocale)}
-                  hint={t("money.reportActualIncomeHint")}
-                  icon={TrendingUp}
-                  accent="border-emerald-400/30 bg-emerald-400/10 text-emerald-200"
-                  testId="budget-summary-actual-income"
-                />
-                <SummaryMetric
-                  title={t("money.reportActualExpenses")}
-                  value={formatMoney(report.summary.actual_expenses, reportCurrency, intlLocale)}
-                  hint={t("money.reportActualExpensesHint")}
-                  icon={TrendingDown}
-                  accent="border-rose-400/30 bg-rose-400/10 text-rose-200"
-                  testId="budget-summary-actual-expenses"
-                />
-                <SummaryMetric
-                  title={t("money.reportNet")}
-                  value={formatMoney(report.summary.actual_net, reportCurrency, intlLocale)}
-                  hint={t("money.reportActualNetHint")}
-                  icon={Wallet}
-                  accent="border-slate-300/30 bg-slate-200/10 text-slate-100"
-                  testId="budget-summary-actual-net"
-                />
-                <SummaryMetric
-                  title={t("money.reportTargetIncome")}
-                  value={formatMoney(report.summary.target_income, reportCurrency, intlLocale)}
-                  hint={t("money.reportTargetIncomeHint")}
-                  icon={TrendingUp}
-                  accent="border-emerald-400/30 bg-emerald-400/10 text-emerald-200"
-                  testId="budget-summary-target-income"
-                />
-                <SummaryMetric
-                  title={t("money.reportTargetExpenses")}
-                  value={formatMoney(report.summary.target_expenses, reportCurrency, intlLocale)}
-                  hint={t("money.reportTargetExpensesHint")}
-                  icon={TrendingDown}
-                  accent="border-rose-400/30 bg-rose-400/10 text-rose-200"
-                  testId="budget-summary-target-expenses"
-                />
-                <SummaryMetric
-                  title={t("money.reportTargetNet")}
-                  value={formatMoney(report.summary.target_net, reportCurrency, intlLocale)}
-                  hint={t("money.reportTargetNetHint")}
-                  icon={Target}
-                  accent="border-amber-400/30 bg-amber-400/10 text-amber-200"
-                  testId="budget-summary-target-net"
-                />
-                <SummaryMetric
-                  title={t("money.reportVarianceNet")}
-                  value={formatMoney(report.summary.variance_net, reportCurrency, intlLocale)}
-                  hint={t("money.reportVarianceNetHint")}
-                  icon={Wallet}
-                  accent="border-sky-400/30 bg-sky-400/10 text-sky-200"
-                  testId="budget-summary-variance-net"
-                />
-              </div>
-
-              <div className="grid gap-4 xl:grid-cols-[1.35fr,1fr]">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>{t("money.reportTrendTitle")}</CardTitle>
-                    <CardDescription>{t("money.reportTrendDescription")}</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="h-[19rem]" data-testid="budget-trend-chart">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={report.trend}>
-                          <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.2} />
-                          <XAxis dataKey="date" tickLine={false} axisLine={false} />
-                          <YAxis tickLine={false} axisLine={false} />
-                          <Tooltip
-                            formatter={(value) =>
-                              formatTooltipMoney(value, reportCurrency, intlLocale)
-                            }
-                          />
-                          <ReferenceLine y={0} stroke="#94a3b8" strokeOpacity={0.4} />
-                          <Line
-                            type="monotone"
-                            dataKey="income"
-                            stroke="#16a34a"
-                            strokeWidth={2.5}
-                            dot={false}
-                          />
-                          <Line
-                            type="monotone"
-                            dataKey="expenses"
-                            stroke="#dc2626"
-                            strokeWidth={2.5}
-                            dot={false}
-                          />
-                          <Line
-                            type="monotone"
-                            dataKey="net"
-                            stroke="#2563eb"
-                            strokeWidth={2.5}
-                            dot={false}
-                          />
-                        </LineChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader className="space-y-3">
-                    <div>
-                      <CardTitle>{t("money.reportRootShareTitle")}</CardTitle>
-                      <CardDescription>{t("money.reportRootShareDescription")}</CardDescription>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {(["expenses", "income", "net"] as const).map((mode) => (
-                        <Button
-                          key={mode}
-                          type="button"
-                          size="sm"
-                          variant={chartMode === mode ? "secondary" : "outline"}
-                          onClick={() => setChartMode(mode)}
-                        >
-                          {t(
-                            `money.reportChartMode${mode.charAt(0).toUpperCase()}${mode.slice(1)}`,
-                          )}
-                        </Button>
-                      ))}
-                    </div>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="h-[17rem]" data-testid="budget-donut-chart">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Tooltip
-                            formatter={(value) =>
-                              formatTooltipMoney(value, reportCurrency, intlLocale)
-                            }
-                          />
-                          <Pie
-                            data={rootSeries.filter((entry) => entry.value > 0)}
-                            dataKey="value"
-                            nameKey="label"
-                            innerRadius={56}
-                            outerRadius={86}
-                            paddingAngle={2}
-                            onClick={(entry) => {
-                              if (entry && typeof entry === "object" && "id" in entry) {
-                                focusCategory(String(entry.id));
-                              }
-                            }}
-                          >
-                            {rootSeries
-                              .filter((entry) => entry.value > 0)
-                              .map((entry) => (
-                                <Cell key={entry.id} fill={entry.color} />
-                              ))}
-                          </Pie>
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </div>
-                    <div className="space-y-2">
-                      {rootSeries.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">
-                          {t("money.reportChartEmpty")}
-                        </p>
-                      ) : (
-                        rootSeries.map((entry) => (
-                          <button
-                            key={entry.id}
-                            type="button"
-                            className="flex w-full items-center justify-between rounded-xl border border-border/60 px-3 py-2 text-left transition-colors hover:bg-muted/40"
-                            onClick={() => focusCategory(entry.id)}
-                          >
-                            <span className="flex items-center gap-2">
-                              <span
-                                className="block h-2.5 w-2.5 rounded-full"
-                                style={{ backgroundColor: entry.color }}
-                              />
-                              <span className="text-sm font-medium">{entry.label}</span>
-                            </span>
-                            <span className="text-sm text-muted-foreground">
-                              {formatMoney(entry.actual, reportCurrency, intlLocale)}
-                            </span>
-                          </button>
-                        ))
+                <div role="group" className="flex rounded-lg bg-muted p-1">
+                  {(["expense", "income"] as const).map((value) => (
+                    <button
+                      key={value}
+                      type="button"
+                      aria-pressed={mode === value}
+                      onClick={() => {
+                        setMode(value);
+                        setMapParentId(null);
+                      }}
+                      className={cn(
+                        "rounded-md px-3 py-1 text-sm",
+                        mode === value
+                          ? "bg-background font-semibold shadow-sm"
+                          : "text-muted-foreground",
                       )}
-                    </div>
-                  </CardContent>
-                </Card>
+                    >
+                      {value === "expense" ? t("money.spendingExpense") : t("money.spendingIncome")}
+                    </button>
+                  ))}
+                </div>
               </div>
+              <p className="text-sm text-muted-foreground">
+                {t(isMobile ? "money.spendingCategoriesHintTouch" : "money.spendingCategoriesHint")}
+              </p>
+            </CardHeader>
+            <CardContent>
+              {mapCategories.length === 0 ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">
+                  {t("money.spendingEmpty")}
+                </p>
+              ) : (
+                <CategoryMap
+                  report={report}
+                  categories={mapCategories}
+                  mode={mode}
+                  t={t}
+                  locale={locale}
+                  isMobile={isMobile}
+                  onOpen={(category) => {
+                    if (
+                      category.has_children &&
+                      childCategories(allCategories, category.id, mode).length > 0
+                    ) {
+                      setMapParentId(category.id);
+                    } else {
+                      setCategoryFilter(category.id);
+                    }
+                  }}
+                />
+              )}
+            </CardContent>
+          </Card>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle>{t("money.reportRootComparisonTitle")}</CardTitle>
-                  <CardDescription>{t("money.reportRootComparisonDescription")}</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="h-[18rem]" data-testid="budget-root-comparison-chart">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={rootSeries}>
-                        <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.2} />
-                        <XAxis dataKey="label" tickLine={false} axisLine={false} />
-                        <YAxis tickLine={false} axisLine={false} />
-                        <Tooltip
-                          formatter={(value) =>
-                            formatTooltipMoney(value, reportCurrency, intlLocale)
-                          }
-                        />
-                        <Bar
-                          dataKey="actual"
-                          fill="#2563eb"
-                          radius={[8, 8, 0, 0]}
-                          onClick={(entry) => {
-                            if (entry && typeof entry === "object" && "id" in entry) {
-                              focusCategory(String(entry.id));
-                            }
-                          }}
-                        />
-                        <Bar
-                          dataKey="target"
-                          fill="#f59e0b"
-                          radius={[8, 8, 0, 0]}
-                          onClick={(entry) => {
-                            if (entry && typeof entry === "object" && "id" in entry) {
-                              focusCategory(String(entry.id));
-                            }
-                          }}
-                        />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </CardContent>
-              </Card>
+          {tableCategories.length > 0 && isMobile ? (
+            <CategoryList
+              report={report}
+              categories={tableCategories}
+              allCategories={allCategories}
+              mode={mode}
+              expanded={expanded}
+              onToggle={toggleExpanded}
+              onFilter={(category) => setCategoryFilter(category.id)}
+              t={t}
+              locale={locale}
+            />
+          ) : tableCategories.length > 0 ? (
+            <CategoryTable
+              report={report}
+              categories={tableCategories}
+              allCategories={allCategories}
+              mode={mode}
+              expanded={expanded}
+              onToggle={toggleExpanded}
+              onFilter={(category) => setCategoryFilter(category.id)}
+              t={t}
+              locale={locale}
+            />
+          ) : null}
 
-              <Card>
-                <CardHeader>
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <CardTitle>{t("money.reportCategoriesTitle")}</CardTitle>
-                      <CardDescription>{t("money.reportCategoriesDescription")}</CardDescription>
-                    </div>
-                    <Badge variant="outline">{reportCurrency}</Badge>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {!isMobile ? (
-                    <>
-                      <div className="grid grid-cols-[minmax(16rem,1.8fr),repeat(5,minmax(7rem,0.85fr)),auto] gap-3 rounded-2xl border border-border/70 bg-muted/30 px-4 py-3 text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                        <span>{t("money.categories")}</span>
-                        <span className="text-right">{t("money.reportActualIncome")}</span>
-                        <span className="text-right">{t("money.reportActualExpenses")}</span>
-                        <span className="text-right">{t("money.reportNet")}</span>
-                        <span className="text-right">{t("money.reportTarget")}</span>
-                        <span className="text-right">{t("money.reportVariance")}</span>
-                        <span className="text-right">{t("common.edit")}</span>
-                      </div>
-                      <div className="space-y-1">{DesktopRows(report.categories)}</div>
-                    </>
-                  ) : (
-                    <div className="space-y-3">{MobileRows(report.categories)}</div>
-                  )}
-                </CardContent>
-              </Card>
-            </>
-          )}
+          <div className="flex flex-wrap items-start gap-4">
+            <DaysChart report={report} mode={mode} t={t} locale={locale} />
+            <MerchantList report={report} t={t} locale={locale} />
+          </div>
         </>
-      ) : null}
-
-      <Dialog open={aliasesOpen && !isMobile} onOpenChange={setAliasesOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>{t("money.reportSelfAliases")}</DialogTitle>
-            <DialogDescription>{t("money.reportSelfAliasesDescription")}</DialogDescription>
-          </DialogHeader>
-          <AliasManagerContent />
-        </DialogContent>
-      </Dialog>
-
-      <Sheet open={aliasesOpen && isMobile} onOpenChange={setAliasesOpen}>
-        <SheetContent side="bottom" className="max-h-[88vh] rounded-t-3xl">
-          <SheetHeader>
-            <SheetTitle>{t("money.reportSelfAliases")}</SheetTitle>
-            <SheetDescription>{t("money.reportSelfAliasesDescription")}</SheetDescription>
-          </SheetHeader>
-          <div className="mt-6">
-            <AliasManagerContent />
-          </div>
-        </SheetContent>
-      </Sheet>
-
-      <Sheet open={mobileEditorOpen} onOpenChange={setMobileEditorOpen}>
-        <SheetContent side="bottom" className="max-h-[88vh] rounded-t-3xl">
-          <SheetHeader>
-            <SheetTitle>
-              {activeEditorNode?.name_en ?? t("money.reportTargetEditorTitle")}
-            </SheetTitle>
-            <SheetDescription>{t("money.reportTargetEditorDescription")}</SheetDescription>
-          </SheetHeader>
-          <div className="mt-6">
-            {activeEditorNode ? renderTargetEditor(activeEditorNode) : null}
-          </div>
-        </SheetContent>
-      </Sheet>
+      )}
     </div>
   );
 }
