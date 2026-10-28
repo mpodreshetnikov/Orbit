@@ -1,37 +1,23 @@
 import React from "react";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { MoneyBudgetReport } from "@/types";
+import type { SpendingCategory, SpendingReport } from "@/types/money-spending-report";
 import MoneyReportsPage from "./page";
 
 const hookMocks = vi.hoisted(() => ({
   useIsMobile: vi.fn(),
-  useMoneyBudgetReport: vi.fn(),
-  useMoneyTransferSelfAliases: vi.fn(),
-  useUpsertMoneyBudgetTarget: vi.fn(),
-  useDeleteMoneyBudgetTarget: vi.fn(),
-  useCreateMoneyTransferSelfAlias: vi.fn(),
-  useDeleteMoneyTransferSelfAlias: vi.fn(),
+  useMoneyAccounts: vi.fn(),
+  useMoneySpendingReport: vi.fn(),
 }));
 
-const routerMock = vi.hoisted(() => ({
-  push: vi.fn(),
-  replace: vi.fn(),
-  refresh: vi.fn(),
-  prefetch: vi.fn().mockResolvedValue(undefined),
-}));
-
-const toastMock = vi.hoisted(() => ({
-  error: vi.fn(),
-  success: vi.fn(),
-}));
+const routerMock = vi.hoisted(() => ({ replace: vi.fn() }));
 
 let selectedPersonIdState: string | null = "person-1";
 let currentSearchParams = new URLSearchParams();
 
 vi.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
+  useTranslations: () => (key: string, values?: Record<string, unknown>) =>
+    values ? `${key}(${Object.values(values).join("|")})` : key,
 }));
 
 vi.mock("next/navigation", () => ({
@@ -46,675 +32,307 @@ vi.mock("@/stores/ui-store", () => ({
 
 vi.mock("@/hooks", () => ({
   useIsMobile: (...args: unknown[]) => hookMocks.useIsMobile(...args),
-  useMoneyBudgetReport: (...args: unknown[]) => hookMocks.useMoneyBudgetReport(...args),
-  useMoneyTransferSelfAliases: (...args: unknown[]) =>
-    hookMocks.useMoneyTransferSelfAliases(...args),
-  useUpsertMoneyBudgetTarget: (...args: unknown[]) => hookMocks.useUpsertMoneyBudgetTarget(...args),
-  useDeleteMoneyBudgetTarget: (...args: unknown[]) => hookMocks.useDeleteMoneyBudgetTarget(...args),
-  useCreateMoneyTransferSelfAlias: (...args: unknown[]) =>
-    hookMocks.useCreateMoneyTransferSelfAlias(...args),
-  useDeleteMoneyTransferSelfAlias: (...args: unknown[]) =>
-    hookMocks.useDeleteMoneyTransferSelfAlias(...args),
+  useMoneyAccounts: (...args: unknown[]) => hookMocks.useMoneyAccounts(...args),
+  useMoneySpendingReport: (...args: unknown[]) => hookMocks.useMoneySpendingReport(...args),
 }));
 
-vi.mock("@/lib/date-locale", () => ({
-  useIntlLocale: () => "en-US",
+vi.mock("@/lib/date-locale", () => ({ useIntlLocale: () => "en-US" }));
+
+// Every popover renders open: what is inside is what is under test, not Radix.
+vi.mock("@/components/ui/popover", () => ({
+  Popover: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  PopoverTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  PopoverContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
-vi.mock("sonner", () => ({
-  toast: toastMock,
-}));
-
-vi.mock("recharts", () => ({
-  ResponsiveContainer: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  LineChart: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  Line: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
-  BarChart: ({
-    children,
-    data,
-  }: {
-    children: React.ReactNode;
-    data?: Array<Record<string, unknown>>;
-  }) => (
-    <div data-testid="mock-bar-chart" data-chart={JSON.stringify(data ?? [])}>
-      {children}
-    </div>
-  ),
-  Bar: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
-  PieChart: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  Pie: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
-  Cell: () => <div />,
-  CartesianGrid: () => <div />,
-  Tooltip: () => <div />,
-  XAxis: () => <div />,
-  YAxis: () => <div />,
-  ReferenceLine: () => <div />,
-}));
-
-vi.mock("@/components/ui/popover", () => {
-  const PopoverContext = React.createContext<{
-    open: boolean;
-    onOpenChange?: (open: boolean) => void;
-  }>({ open: false });
-
-  return {
-    Popover: ({
-      children,
-      open,
-      onOpenChange,
-    }: {
-      children: React.ReactNode;
-      open?: boolean;
-      onOpenChange?: (open: boolean) => void;
-    }) => (
-      <PopoverContext.Provider value={{ open: Boolean(open), onOpenChange }}>
-        {children}
-      </PopoverContext.Provider>
-    ),
-    PopoverTrigger: ({ children }: { children: React.ReactElement<{ onClick?: () => void }> }) => {
-      const { open, onOpenChange } = React.useContext(PopoverContext);
-      return React.cloneElement(children, {
-        onClick: () => {
-          children.props.onClick?.();
-          onOpenChange?.(!open);
-        },
-      });
-    },
-    PopoverContent: ({ children }: { children: React.ReactNode }) => {
-      const { open } = React.useContext(PopoverContext);
-      return open ? <div>{children}</div> : null;
-    },
-    PopoverAnchor: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  };
-});
-
-vi.mock("@/components/ui/dialog", () => ({
-  Dialog: ({
-    open,
-    onOpenChange,
-    children,
-  }: {
-    open?: boolean;
-    onOpenChange?: (open: boolean) => void;
-    children: React.ReactNode;
-  }) => (
-    <div data-testid="dialog-root" data-open={open ? "true" : "false"}>
-      <button type="button" onClick={() => onOpenChange?.(false)}>
-        close-dialog
-      </button>
-      {open ? children : null}
-    </div>
-  ),
-  DialogContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DialogHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DialogTitle: ({ children }: { children: React.ReactNode }) => <h2>{children}</h2>,
-  DialogDescription: ({ children }: { children: React.ReactNode }) => <p>{children}</p>,
-}));
-
-vi.mock("@/components/ui/sheet", () => ({
-  Sheet: ({
-    open,
-    onOpenChange,
-    children,
-  }: {
-    open?: boolean;
-    onOpenChange?: (open: boolean) => void;
-    children: React.ReactNode;
-  }) => (
-    <div data-testid="sheet-root" data-open={open ? "true" : "false"}>
-      <button type="button" onClick={() => onOpenChange?.(false)}>
-        close-sheet
-      </button>
-      {open ? children : null}
-    </div>
-  ),
-  SheetContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  SheetHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  SheetTitle: ({ children }: { children: React.ReactNode }) => <h2>{children}</h2>,
-  SheetDescription: ({ children }: { children: React.ReactNode }) => <p>{children}</p>,
-}));
-
-function makeBaseReport(): MoneyBudgetReport {
-  return {
-    month_start: "2026-03-01",
-    currency: "RUB",
-    summary: {
-      actual_income: 1000,
-      actual_expenses: -450,
-      actual_net: 550,
-      target_income: 1200,
-      target_expenses: -600,
-      target_net: 600,
-      variance_net: -50,
-    },
-    fx_status: {
-      mode: "ok",
-      approximated_dates: [],
-      missing_pairs: [],
-      message: null,
-      is_blocking: false,
-    },
-    trend: [
-      { date: "2026-03-01", income: 1000, expenses: -100, net: 900 },
-      { date: "2026-03-02", income: 0, expenses: -350, net: -350 },
-    ],
-    categories: [
-      {
-        id: "food",
-        parent_id: null,
-        canonical_category_id: "food",
-        depth: 1,
-        name_en: "Food",
-        name_ru: "Food RU",
-        slug: "food",
-        archived_at: null,
-        is_uncategorized: false,
-        actual_income: 0,
-        actual_expenses: -450,
-        actual_net: -450,
-        target_amount: -500,
-        variance_amount: 50,
-        target: {
-          id: "target-food",
-          person_id: "person-1",
-          category_id: "food",
-          month_start: "2026-03-01",
-          target_amount: -500,
-          currency: "RUB",
-          created_at: "2026-03-01T00:00:00.000Z",
-          updated_at: "2026-03-01T00:00:00.000Z",
-        },
-        children: [
-          {
-            id: "coffee",
-            parent_id: "food",
-            canonical_category_id: "food",
-            depth: 2,
-            name_en: "Coffee",
-            name_ru: "Coffee RU",
-            slug: "coffee",
-            archived_at: null,
-            is_uncategorized: false,
-            actual_income: 0,
-            actual_expenses: -120,
-            actual_net: -120,
-            target_amount: 0,
-            variance_amount: -120,
-            target: null,
-            children: [],
-          },
-        ],
-      },
-    ],
-  };
+function months(expense: number) {
+  return Array.from({ length: 12 }, (_, index) => ({
+    month_start: `2026-${String(index + 1).padStart(2, "0")}-01`,
+    income: 0,
+    expense: index === 11 ? expense : expense / 2,
+  }));
 }
 
-type ReportShape = ReturnType<typeof makeBaseReport>;
-
-function makeReport(overrides: Partial<ReportShape> = {}): ReportShape {
-  const base = makeBaseReport();
+function category(
+  overrides: Partial<SpendingCategory> & Pick<SpendingCategory, "id">,
+): SpendingCategory {
   return {
-    ...base,
+    parent_id: null,
+    system_key: null,
+    name_en: overrides.id,
+    name_ru: overrides.id,
+    has_children: false,
+    income: 0,
+    expense: 0,
+    previous_income: 0,
+    previous_expense: 0,
+    last_year_income: 0,
+    last_year_expense: 0,
+    months: months(overrides.expense ?? 0),
     ...overrides,
-    summary: {
-      ...base.summary,
-      ...(overrides.summary ?? {}),
-    },
-    fx_status: {
-      ...base.fx_status,
-      ...(overrides.fx_status ?? {}),
-    },
-    trend: overrides.trend ?? base.trend,
-    categories: overrides.categories ?? base.categories,
   };
 }
 
-const RealDate = Date;
+const REPORT: SpendingReport = {
+  period: {
+    start: "2026-10-01",
+    end: "2026-10-31",
+    days: 31,
+    previous_start: "2026-08-31",
+    previous_end: "2026-09-30",
+    last_year: 2025,
+  },
+  currency: "RUB",
+  totals: {
+    income: 185000,
+    expense: 118420,
+    net: 66580,
+    previous_income: 185000,
+    previous_expense: 109650,
+    previous_net: 75350,
+    last_year_income: 174528,
+    last_year_expense: 122082,
+    last_year_net: 52446,
+  },
+  forecast: { expense: 131000, days_left: 3 },
+  categories: [
+    category({
+      id: "food",
+      name_en: "Food",
+      has_children: true,
+      expense: 32400,
+      previous_expense: 28929,
+      last_year_expense: 31154,
+    }),
+    category({ id: "groceries", parent_id: "food", name_en: "Groceries", expense: 24100 }),
+    category({ id: "market", parent_id: "food", name_en: "Market", expense: 8300 }),
+    category({ id: "cafe", name_en: "Cafe", expense: 18900, previous_expense: 19895 }),
+    category({ id: "salary", name_en: "Salary", income: 185000 }),
+  ],
+  days: [
+    { date: "2026-10-01", income: 0, expense: 2100 },
+    { date: "2026-10-02", income: 185000, expense: 5400 },
+  ],
+  merchants: [
+    {
+      brand_id: "b1",
+      name: "Pyaterochka",
+      logo_url: null,
+      base_color: "#b91c1c",
+      expense: 11240,
+      transaction_count: 14,
+    },
+  ],
+  fx_status: { status: "ok", missing: [] },
+};
 
-class MockDate extends Date {
-  constructor(value?: string | number | Date) {
-    if (value === undefined) {
-      super("2026-03-13T12:00:00.000Z");
-      return;
-    }
-    super(value);
-  }
-
-  static now() {
-    return new RealDate("2026-03-13T12:00:00.000Z").valueOf();
-  }
-}
-
-Object.defineProperty(MockDate, "parse", { value: RealDate.parse });
-Object.defineProperty(MockDate, "UTC", { value: RealDate.UTC });
-
-async function flushEffects() {
-  await act(async () => {
-    await Promise.resolve();
-  });
+function lastUrl(): URLSearchParams {
+  const calls = routerMock.replace.mock.calls;
+  const url = String(calls[calls.length - 1]?.[0] ?? "");
+  return new URLSearchParams(url.split("?")[1] ?? "");
 }
 
 describe("MoneyReportsPage", () => {
   beforeEach(() => {
-    vi.useRealTimers();
-    vi.stubGlobal("Date", MockDate);
-    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
-      callback(0);
-      return 1;
-    });
-    vi.stubGlobal("cancelAnimationFrame", vi.fn());
-    Object.defineProperty(Element.prototype, "scrollIntoView", {
-      configurable: true,
-      value: vi.fn(),
-    });
-
+    vi.clearAllMocks();
     selectedPersonIdState = "person-1";
-    currentSearchParams = new URLSearchParams();
-    routerMock.push.mockReset();
-    routerMock.replace.mockReset();
-    routerMock.refresh.mockReset();
-    routerMock.prefetch.mockReset();
-    routerMock.prefetch.mockResolvedValue(undefined);
-    toastMock.error.mockReset();
-    toastMock.success.mockReset();
-
+    currentSearchParams = new URLSearchParams("period=month&start=2026-10-01");
     hookMocks.useIsMobile.mockReturnValue(false);
-    hookMocks.useMoneyBudgetReport.mockReturnValue({
-      data: makeReport(),
-      isLoading: false,
-      error: null,
+    hookMocks.useMoneyAccounts.mockReturnValue({
+      data: [
+        { id: "acc-1", account_label: "T-Bank" },
+        { id: "acc-2", account_label: "Cash" },
+      ],
     });
-    hookMocks.useMoneyTransferSelfAliases.mockReturnValue({ data: [], isLoading: false });
-    hookMocks.useUpsertMoneyBudgetTarget.mockReturnValue({
-      mutateAsync: vi.fn().mockResolvedValue(undefined),
-      isPending: false,
-    });
-    hookMocks.useDeleteMoneyBudgetTarget.mockReturnValue({
-      mutateAsync: vi.fn().mockResolvedValue(undefined),
-      isPending: false,
-    });
-    hookMocks.useCreateMoneyTransferSelfAlias.mockReturnValue({
-      mutateAsync: vi.fn().mockResolvedValue(undefined),
-      isPending: false,
-    });
-    hookMocks.useDeleteMoneyTransferSelfAlias.mockReturnValue({
-      mutateAsync: vi.fn().mockResolvedValue(undefined),
-      isPending: false,
-    });
+    hookMocks.useMoneySpendingReport.mockReturnValue({ data: REPORT, isError: false });
   });
 
-  it("renders person prompt when no person is selected", () => {
+  it("asks for a person before anything else", () => {
     selectedPersonIdState = null;
-
     render(<MoneyReportsPage />);
-
     expect(screen.getByText("person.selectPrompt")).toBeInTheDocument();
   });
 
-  it("syncs default month and currency into the URL", async () => {
-    render(<MoneyReportsPage />);
-    await flushEffects();
-
-    expect(routerMock.replace).toHaveBeenCalledWith("/money/reports?month=2026-03&currency=RUB", {
-      scroll: false,
-    });
-  });
-
-  it("does not rewrite the URL when valid month and currency are already present", async () => {
-    currentSearchParams = new URLSearchParams("month=2026-03&currency=RUB");
-
-    render(<MoneyReportsPage />);
-    await flushEffects();
-
-    expect(routerMock.replace).not.toHaveBeenCalled();
-  });
-
-  it("renders loading skeletons while the report query is pending", () => {
-    hookMocks.useMoneyBudgetReport.mockReturnValue({
-      data: undefined,
-      isLoading: true,
-      error: null,
-    });
-
-    const view = render(<MoneyReportsPage />);
-
-    expect(view.container.querySelectorAll(".animate-pulse").length).toBeGreaterThanOrEqual(4);
-  });
-
-  it("renders the load error state when the report query fails", async () => {
-    hookMocks.useMoneyBudgetReport.mockReturnValue({
-      data: undefined,
-      isLoading: false,
-      error: new Error("budget rpc failed"),
-    });
-
-    render(<MoneyReportsPage />);
-    await flushEffects();
-
-    expect(screen.getAllByText("money.reportLoadFailed")[0]).toBeInTheDocument();
-    expect(screen.getByText("budget rpc failed")).toBeInTheDocument();
-  });
-
-  it("renders approximate FX warning while keeping the report visible", async () => {
-    hookMocks.useMoneyBudgetReport.mockReturnValue({
-      data: makeReport({
-        fx_status: {
-          mode: "approximate",
-          approximated_dates: ["2026-03-02"],
-          missing_pairs: [],
-          message: "Approximate FX",
-          is_blocking: false,
-        },
-      }),
-      isLoading: false,
-      error: null,
-    });
-
-    render(<MoneyReportsPage />);
-    await flushEffects();
-
-    expect(screen.getByText("money.reportFxApproximateTitle")).toBeInTheDocument();
-    expect(screen.getByText("Approximate FX")).toBeInTheDocument();
-    expect(screen.getByTestId("budget-trend-chart")).toBeInTheDocument();
-  });
-
-  it("renders blocking FX warning and hides charts when conversions are missing", async () => {
-    hookMocks.useMoneyBudgetReport.mockReturnValue({
-      data: makeReport({
-        fx_status: {
-          mode: "missing",
-          approximated_dates: [],
-          missing_pairs: ["USD:2026-03-01"],
-          message: "Missing FX",
-          is_blocking: true,
-        },
-      }),
-      isLoading: false,
-      error: null,
-    });
-
-    render(<MoneyReportsPage />);
-    await flushEffects();
-
-    expect(screen.getByText("money.reportFxMissingTitle")).toBeInTheDocument();
-    expect(screen.getByText("Missing FX")).toBeInTheDocument();
-    expect(screen.queryByTestId("budget-trend-chart")).not.toBeInTheDocument();
-  });
-
-  it("renders budget report content and focuses a category from the chart legend", async () => {
-    render(<MoneyReportsPage />);
-    await flushEffects();
-
-    expect(
-      screen.getByRole("heading", { level: 1, name: "money.budgetReportTitle" }),
-    ).toBeInTheDocument();
-    expect(screen.getByTestId("budget-trend-chart")).toBeInTheDocument();
-    expect(screen.getByTestId("budget-donut-chart")).toBeInTheDocument();
-    expect(screen.getByTestId("budget-root-comparison-chart")).toBeInTheDocument();
-    expect(screen.getByTestId("budget-row-food")).toBeInTheDocument();
-    expect(screen.queryByTestId("budget-row-coffee")).not.toBeInTheDocument();
-
-    await userEvent.setup().click(screen.getByRole("button", { name: /Food/ }));
-
-    expect(screen.getByTestId("budget-row-food").className).toContain("bg-secondary/80");
-  });
-
-  it("expands nested desktop categories when the tree toggle is clicked", async () => {
-    render(<MoneyReportsPage />);
-    await flushEffects();
-
-    expect(screen.queryByTestId("budget-row-coffee")).not.toBeInTheDocument();
-
-    await userEvent
-      .setup()
-      .click(screen.getByTestId("budget-row-food").querySelector("button") as HTMLButtonElement);
-
-    expect(screen.getByTestId("budget-row-coffee")).toBeInTheDocument();
-  });
-
-  it("opens the target editor and saves a target", async () => {
-    const mutateAsync = vi.fn().mockResolvedValue(undefined);
-    hookMocks.useUpsertMoneyBudgetTarget.mockReturnValue({
-      mutateAsync,
-      isPending: false,
-    });
-
-    render(<MoneyReportsPage />);
-    await flushEffects();
-    fireEvent.click(screen.getAllByRole("button", { name: "money.reportEditTarget" })[0]!);
-    const amountInput = screen.getByPlaceholderText("0");
-    fireEvent.change(amountInput, { target: { value: "550" } });
-    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
-
-    await waitFor(() => {
-      expect(mutateAsync).toHaveBeenCalledWith({
-        personId: "person-1",
-        categoryId: "food",
-        monthStart: "2026-03-01",
-        targetAmount: -550,
-        currency: "RUB",
-      });
-    });
-  });
-
-  it("deletes an existing target from the mobile sheet editor", async () => {
-    const mutateAsync = vi.fn().mockResolvedValue(undefined);
-    hookMocks.useIsMobile.mockReturnValue(true);
-    hookMocks.useDeleteMoneyBudgetTarget.mockReturnValue({
-      mutateAsync,
-      isPending: false,
-    });
-
-    render(<MoneyReportsPage />);
-    await flushEffects();
-
-    const buttons = screen.getByTestId("budget-row-food").querySelectorAll("button");
-    await userEvent.setup().click(buttons[1] as HTMLButtonElement);
-    await userEvent.setup().click(screen.getByRole("button", { name: "common.delete" }));
-
-    await waitFor(() => {
-      expect(mutateAsync).toHaveBeenCalledWith({
-        personId: "person-1",
-        categoryId: "food",
-        monthStart: "2026-03-01",
-      });
-    });
-    expect(toastMock.success).toHaveBeenCalledWith("money.reportTargetDeleted");
-  });
-
-  it("validates target amounts before saving", async () => {
-    render(<MoneyReportsPage />);
-    await flushEffects();
-
-    fireEvent.click(screen.getAllByRole("button", { name: "money.reportEditTarget" })[0]!);
-    fireEvent.change(screen.getByPlaceholderText("0"), { target: { value: "0" } });
-    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
-
-    expect(toastMock.error).toHaveBeenCalledWith("money.reportTargetValidation");
-  });
-
-  it("shows mutation error messages for failed target saves", async () => {
-    const mutateAsync = vi.fn().mockRejectedValue(new Error("save failed"));
-    hookMocks.useUpsertMoneyBudgetTarget.mockReturnValue({
-      mutateAsync,
-      isPending: false,
-    });
-
-    render(<MoneyReportsPage />);
-    await flushEffects();
-
-    fireEvent.click(screen.getAllByRole("button", { name: "money.reportEditTarget" })[0]!);
-    fireEvent.change(screen.getByPlaceholderText("0"), { target: { value: "550" } });
-    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
-
-    await waitFor(() => {
-      expect(toastMock.error).toHaveBeenCalledWith("save failed");
-    });
-  });
-
-  it("keeps the desktop target editor focused while typing", async () => {
-    render(<MoneyReportsPage />);
-    await flushEffects();
-
-    const user = userEvent.setup();
-
-    await user.click(screen.getAllByRole("button", { name: "money.reportEditTarget" })[0]!);
-
-    const amountInput = screen.getByPlaceholderText("0");
-    await user.clear(amountInput);
-    await user.type(amountInput, "1200");
-
-    const updatedInput = screen.getByPlaceholderText("0");
-    expect(updatedInput).toHaveValue("1200");
-    expect(updatedInput).toHaveFocus();
-  });
-
-  it("uses positive target magnitudes in the net comparison chart", async () => {
-    render(<MoneyReportsPage />);
-    await flushEffects();
-
-    await userEvent.setup().click(screen.getByRole("button", { name: "money.reportChartModeNet" }));
-
-    const chartData = JSON.parse(
-      screen.getByTestId("mock-bar-chart").getAttribute("data-chart") ?? "[]",
-    ) as Array<{
-      id: string;
-      actual: number;
-      target: number;
-    }>;
-
-    expect(chartData).toEqual([
-      expect.objectContaining({
-        id: "food",
-        actual: 450,
-        target: 500,
-      }),
-    ]);
-  });
-
-  it("shows the empty chart hint when every root category is zeroed out", async () => {
-    const base = makeReport();
-    hookMocks.useMoneyBudgetReport.mockReturnValue({
-      data: makeReport({
-        categories: [
-          {
-            ...base.categories[0],
-            actual_income: 0,
-            actual_expenses: 0,
-            actual_net: 0,
-            target_amount: 0,
-            variance_amount: 0,
-            target: null,
-            children: [],
-          },
-        ],
-      }),
-      isLoading: false,
-      error: null,
-    });
-
-    render(<MoneyReportsPage />);
-    await flushEffects();
-
-    expect(screen.getByText("money.reportChartEmpty")).toBeInTheDocument();
-  });
-
-  it("updates the selected month when navigation buttons are clicked", async () => {
-    currentSearchParams = new URLSearchParams("month=2026-03&currency=RUB");
-
-    render(<MoneyReportsPage />);
-    await flushEffects();
-
-    await userEvent
-      .setup()
-      .click(screen.getByRole("button", { name: "money.reportPreviousMonth" }));
-
-    expect(routerMock.replace).toHaveBeenLastCalledWith(
-      "/money/reports?month=2026-02&currency=RUB",
-      { scroll: false },
+  it("asks for the period, accounts and category in the URL", () => {
+    currentSearchParams = new URLSearchParams(
+      "period=custom&start=2026-10-05&end=2026-10-20&accounts=acc-1&category=food",
     );
-  });
-
-  it("creates self-transfer aliases from the dialog", async () => {
-    const mutateAsync = vi.fn().mockResolvedValue(undefined);
-    hookMocks.useCreateMoneyTransferSelfAlias.mockReturnValue({
-      mutateAsync,
-      isPending: false,
-    });
-
     render(<MoneyReportsPage />);
-    await flushEffects();
-    fireEvent.click(screen.getByRole("button", { name: "money.reportSelfAliases" }));
-    fireEvent.change(screen.getByPlaceholderText("money.reportAliasPlaceholder"), {
-      target: { value: "Savings alias" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "common.add" }));
-
-    await waitFor(() => {
-      expect(mutateAsync).toHaveBeenCalledWith({
-        personId: "person-1",
-        alias: "Savings alias",
-      });
+    expect(hookMocks.useMoneySpendingReport).toHaveBeenCalledWith({
+      personId: "person-1",
+      period: { kind: "custom", start: "2026-10-05", end: "2026-10-20" },
+      currency: "RUB",
+      accountIds: ["acc-1"],
+      categoryId: "food",
     });
   });
 
-  it("shows empty aliases state and validates blank alias submissions", async () => {
-    hookMocks.useMoneyTransferSelfAliases.mockReturnValue({ data: [], isLoading: false });
-
+  it("shows the three totals with their comparisons and the forecast", () => {
     render(<MoneyReportsPage />);
-    await flushEffects();
+    const expense = screen.getByTestId("spending-total-expense");
+    expect(within(expense).getByText("RUB 118,420")).toBeInTheDocument();
+    expect(within(expense).getByText(/▲ 8% money.spendingVsPrevious/)).toHaveClass(
+      "text-orange-800",
+    );
+    expect(within(expense).getByText(/▼ 3% money.spendingVsLastYear\(2025\)/)).toHaveClass(
+      "text-teal-800",
+    );
+    const forecast = within(expense).getByTestId("spending-forecast");
+    expect(forecast).toHaveTextContent("≈ RUB 131,000");
+    expect(forecast).toHaveTextContent("money.spendingForecastDaysLeft(3)");
 
-    fireEvent.click(screen.getByRole("button", { name: "money.reportSelfAliases" }));
-    expect(screen.getByText("money.reportAliasesEmpty")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "common.add" }));
-    expect(toastMock.error).toHaveBeenCalledWith("money.reportAliasValidation");
+    const net = screen.getByTestId("spending-total-net");
+    expect(within(net).getByText("+RUB 66,580")).toBeInTheDocument();
+    expect(within(net).getByText(/▼ 12% money.spendingVsPrevious/)).toHaveClass("text-orange-800");
   });
 
-  it("deletes aliases and reports alias mutation failures", async () => {
-    const deleteMutateAsync = vi.fn().mockRejectedValue(new Error("delete alias failed"));
-    const createMutateAsync = vi.fn().mockRejectedValue(new Error("save alias failed"));
-    hookMocks.useMoneyTransferSelfAliases.mockReturnValue({
-      data: [
-        {
-          id: "alias-1",
-          person_id: "person-1",
-          alias: "Own transfer",
-          normalized_alias: "owntransfer",
-          created_at: "2026-03-01T00:00:00.000Z",
-          updated_at: "2026-03-01T00:00:00.000Z",
-        },
-      ],
-      isLoading: false,
-    });
-    hookMocks.useDeleteMoneyTransferSelfAlias.mockReturnValue({
-      mutateAsync: deleteMutateAsync,
-      isPending: false,
-    });
-    hookMocks.useCreateMoneyTransferSelfAlias.mockReturnValue({
-      mutateAsync: createMutateAsync,
-      isPending: false,
-    });
-
+  it("draws the root categories as a treemap and opens a branch on a click", () => {
     render(<MoneyReportsPage />);
-    await flushEffects();
+    const map = screen.getByTestId("spending-treemap");
+    const tiles = within(map).getAllByRole("button");
+    expect(tiles.map((tile) => tile.textContent)).toEqual([
+      expect.stringContaining("Food"),
+      expect.stringContaining("Cafe"),
+    ]);
 
-    fireEvent.click(screen.getByRole("button", { name: "money.reportSelfAliases" }));
-    fireEvent.change(screen.getByPlaceholderText("money.reportAliasPlaceholder"), {
-      target: { value: "Alias failure" },
+    fireEvent.click(tiles[0]!);
+    const branch = within(screen.getByTestId("spending-treemap")).getAllByRole("button");
+    expect(branch.map((tile) => tile.textContent)).toEqual([
+      expect.stringContaining("Groceries"),
+      expect.stringContaining("Market"),
+    ]);
+    fireEvent.click(screen.getByText("money.spendingAllCategories"));
+    expect(within(screen.getByTestId("spending-treemap")).getAllByRole("button")).toHaveLength(2);
+  });
+
+  it("filters the report by a leaf tile", () => {
+    render(<MoneyReportsPage />);
+    fireEvent.click(within(screen.getByTestId("spending-treemap")).getByTitle(/^Cafe/));
+    expect(lastUrl().get("category")).toBe("cafe");
+  });
+
+  it("switches the map and the table to income", () => {
+    render(<MoneyReportsPage />);
+    fireEvent.click(screen.getAllByRole("button", { name: "money.spendingIncome" })[0]!);
+    const tiles = within(screen.getByTestId("spending-treemap")).getAllByRole("button");
+    expect(tiles).toHaveLength(1);
+    expect(tiles[0]).toHaveTextContent("Salary");
+    expect(screen.getByTestId("spending-row-salary")).toBeInTheDocument();
+  });
+
+  it("lists the categories with share and comparisons, expands a branch and filters by a row", () => {
+    render(<MoneyReportsPage />);
+    const food = screen.getByTestId("spending-row-food");
+    expect(food).toHaveTextContent("63%");
+    expect(food).toHaveTextContent("▲ 12%");
+    expect(food).toHaveTextContent("▲ 4%");
+    expect(screen.queryByTestId("spending-row-groceries")).not.toBeInTheDocument();
+
+    fireEvent.click(within(food).getByRole("button", { name: "money.spendingExpand(Food)" }));
+    expect(screen.getByTestId("spending-row-groceries")).toBeInTheDocument();
+    fireEvent.click(within(food).getByRole("button", { name: "money.spendingCollapse(Food)" }));
+    expect(screen.queryByTestId("spending-row-groceries")).not.toBeInTheDocument();
+
+    fireEvent.click(
+      within(screen.getByTestId("spending-row-cafe")).getByRole("button", {
+        name: "money.spendingFilterByCategory(Cafe)",
+      }),
+    );
+    expect(lastUrl().get("category")).toBe("cafe");
+  });
+
+  it("shows a category filter as a chip that clears it", () => {
+    currentSearchParams = new URLSearchParams("period=month&start=2026-10-01&category=food");
+    render(<MoneyReportsPage />);
+    expect(screen.getByText("money.spendingFilterChip(Food)")).toBeInTheDocument();
+    const tiles = within(screen.getByTestId("spending-treemap")).getAllByRole("button");
+    expect(tiles.map((tile) => tile.textContent)).toEqual([
+      expect.stringContaining("Groceries"),
+      expect.stringContaining("Market"),
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: "money.spendingClearFilter" }));
+    expect(lastUrl().has("category")).toBe(false);
+  });
+
+  it("moves between periods and kinds of period", () => {
+    render(<MoneyReportsPage />);
+    expect(screen.getByText("October 2026")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "money.spendingPrevious" }));
+    expect(lastUrl().get("start")).toBe("2026-09-01");
+    expect(lastUrl().get("period")).toBe("month");
+
+    fireEvent.click(screen.getByRole("button", { name: "money.spendingPeriodWeek" }));
+    expect(lastUrl().get("period")).toBe("week");
+
+    fireEvent.change(screen.getByLabelText("money.spendingCustomFrom"), {
+      target: { value: "2026-10-05" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "common.add" }));
-
-    await waitFor(() => {
-      expect(toastMock.error).toHaveBeenCalledWith("save alias failed");
+    fireEvent.change(screen.getByLabelText("money.spendingCustomTo"), {
+      target: { value: "2026-10-20" },
     });
+    fireEvent.click(screen.getByRole("button", { name: "money.spendingApply" }));
+    expect(lastUrl().get("period")).toBe("custom");
+    expect(lastUrl().get("end")).toBe("2026-10-20");
+  });
 
-    const aliasRow = screen.getByText("Own transfer").closest("div")?.parentElement;
-    fireEvent.click(aliasRow?.querySelector("button") as HTMLButtonElement);
+  it("narrows the report to the accounts picked", () => {
+    render(<MoneyReportsPage />);
+    fireEvent.click(screen.getByRole("checkbox", { name: "T-Bank" }));
+    expect(lastUrl().get("accounts")).toBe("acc-1");
 
-    await waitFor(() => {
-      expect(deleteMutateAsync).toHaveBeenCalledWith("alias-1");
+    currentSearchParams = new URLSearchParams("period=month&start=2026-10-01&accounts=acc-1");
+    render(<MoneyReportsPage />);
+    expect(screen.getByText("money.spendingAccountsCount(1)")).toBeInTheDocument();
+  });
+
+  it("shows the days and the merchants", () => {
+    render(<MoneyReportsPage />);
+    expect(screen.getByTestId("spending-days").children).toHaveLength(2);
+    const merchants = screen.getByTestId("spending-merchants");
+    expect(merchants).toHaveTextContent("Pyaterochka");
+    expect(merchants).toHaveTextContent("money.spendingMerchantCount(14)");
+  });
+
+  it("says when rates are missing, and when the report failed", () => {
+    hookMocks.useMoneySpendingReport.mockReturnValue({
+      data: { ...REPORT, fx_status: { status: "error", missing: ["USD:2026-10-03"] } },
+      isError: false,
     });
-    expect(toastMock.error).toHaveBeenCalledWith("delete alias failed");
+    const { unmount } = render(<MoneyReportsPage />);
+    expect(screen.getByRole("status")).toHaveTextContent("money.spendingFxMissing(USD:2026-10-03)");
+    unmount();
+
+    hookMocks.useMoneySpendingReport.mockReturnValue({ data: undefined, isError: true });
+    render(<MoneyReportsPage />);
+    expect(screen.getByText("money.spendingLoadFailed")).toBeInTheDocument();
+  });
+
+  it("fits the totals side by side on a phone and lists categories instead of a table", () => {
+    hookMocks.useIsMobile.mockReturnValue(true);
+    render(<MoneyReportsPage />);
+    const expense = screen.getByTestId("spending-total-expense");
+    expect(within(expense).getByText(/▲ 8% money.spendingVsPreviousShort/)).toBeInTheDocument();
+    expect(within(expense).queryByTestId("spending-forecast")).not.toBeInTheDocument();
+    expect(screen.getByTestId("spending-forecast")).toHaveTextContent("≈ RUB 131,000");
+
+    const food = screen.getByTestId("spending-row-food");
+    expect(food).toHaveTextContent("63%");
+    fireEvent.click(within(food).getByRole("button", { name: "money.spendingExpand(Food)" }));
+    expect(food).toHaveTextContent("Groceries");
+    fireEvent.click(
+      within(food).getByRole("button", { name: "money.spendingFilterByCategory(Food)" }),
+    );
+    expect(lastUrl().get("category")).toBe("food");
+  });
+
+  it("says so when the period has nothing in it", () => {
+    hookMocks.useMoneySpendingReport.mockReturnValue({
+      data: { ...REPORT, categories: [], merchants: [], forecast: null },
+      isError: false,
+    });
+    render(<MoneyReportsPage />);
+    expect(screen.getByText("money.spendingEmpty")).toBeInTheDocument();
+    expect(screen.queryByTestId("spending-forecast")).not.toBeInTheDocument();
   });
 });
