@@ -2,7 +2,7 @@
 # What this server's network lets Orbit reach, in enough detail to tell the usual causes apart:
 # a link smaller than 1500 bytes, IPv4 or IPv6 missing or filtered, DNS answering differently for
 # containers, a provider that cuts long transfers short, a service that refuses the server. Also
-# what fills its disk.
+# what fills its disk, and why a request through Caddy failed.
 #
 #   sudo deploy/orbit doctor          on the server
 #   Actions -> Deploy to your server -> Run workflow, action "doctor"   from GitHub
@@ -97,6 +97,32 @@ elif docker image inspect orbit-backup:local >/dev/null 2>&1; then
 else
   echo "No orbit-backup:local image yet: install first (deploy/orbit install)."
 fi
+
+# A 502 the browser or Claude sees is Caddy failing to reach a service. This says whether the web
+# app restarted or was killed, what memory looks like, and when Caddy failed and why, counted per
+# minute. Paths without their query and Caddy's own message only: this log is public.
+echo
+echo "== Web app and proxy"
+for c in orbit-web orbit-caddy; do
+  echo "$c: $(docker inspect "$c" --format '{{.State.Status}} since {{.State.StartedAt}}, {{.RestartCount}} restart(s), OOM killed {{.State.OOMKilled}}, last exit {{.State.ExitCode}}' 2>/dev/null || echo 'no container')"
+done
+echo "memory:"
+free -m 2>/dev/null | sed 's/^/   /'
+docker stats --no-stream --format '{{.Name}} {{.MemUsage}} cpu {{.CPUPerc}}' 2>/dev/null | sort | sed 's/^/   /'
+echo "kernel OOM kills, last 3 days: $(journalctl -k --since '-72h' 2>/dev/null | grep -c -i 'killed process')"
+echo "Caddy's failed requests, last 3 days (count, minute UTC, path, why):"
+docker logs --since 72h orbit-caddy 2>&1 | grep '"logger":"http.log.error"' |
+  awk '{
+    ts = 0; uri = ""; msg = ""
+    if (match($0, /"ts":[0-9]+/)) ts = substr($0, RSTART + 5, RLENGTH - 5)
+    if (match($0, /"uri":"[^"?]*/)) uri = substr($0, RSTART + 7, RLENGTH - 7)
+    if (match($0, /"msg":"[^"]*/)) msg = substr($0, RSTART + 7, RLENGTH - 7)
+    sub(/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+->/, "", msg)
+    print int(ts / 60) * 60, uri, substr(msg, 1, 80)
+  }' | uniq -c | tail -80 |
+  while read -r n minute rest; do
+    echo "   $n  $(date -u -d "@$minute" '+%F %H:%M')  $rest"
+  done
 
 # The heartbeat (BACKUP_HEALTHCHECK_URL) is pinged after each nightly run; when it goes quiet, this
 # says whether the daemon ran, is stuck in a job, or failed. Only the daemon's own lines are shown:
