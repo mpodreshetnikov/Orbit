@@ -886,9 +886,9 @@ if (chrome.alarms?.onAlarm) {
     if (alarm.name === AUTO_IMPORT_ALARM) {
       void autoImportSweep
         .run("alarm")
-        .then(() =>
-          refreshAttention("alarm", { mayOpenPage: true, onlyIfNotOpenedSinceStart: true }),
-        );
+        // A browser left open for days gets the page when the time to import has come, not
+        // only at its next start (Max, 2026-10-28); still at most once a day.
+        .then(() => refreshAttention("alarm", { mayOpenPage: true }));
       return;
     }
     if (alarm.name.startsWith(VISIT_SWEEP_ALARM_PREFIX)) {
