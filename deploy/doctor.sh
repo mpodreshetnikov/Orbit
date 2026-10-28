@@ -100,7 +100,7 @@ fi
 
 # A 502 the browser or Claude sees is Caddy failing to reach a service. This says whether the web
 # app restarted or was killed, what memory looks like, and when Caddy failed and why, counted per
-# minute. Paths without their query and Caddy's own message only: this log is public.
+# minute. The first three segments of a path and Caddy's own message only: this log is public.
 echo
 echo "== Web app and proxy"
 for c in orbit-web orbit-caddy; do
@@ -116,6 +116,10 @@ docker logs --since 72h orbit-caddy 2>&1 | grep '"logger":"http.log.error"' |
     ts = 0; uri = ""; msg = ""
     if (match($0, /"ts":[0-9]+/)) ts = substr($0, RSTART + 5, RLENGTH - 5)
     if (match($0, /"uri":"[^"?]*/)) uri = substr($0, RSTART + 7, RLENGTH - 7)
+    # The route, not the object: storage paths carry people, records and file names.
+    n = split(uri, part, "/"); uri = ""
+    for (i = 2; i <= n && i <= 4; i++) uri = uri "/" part[i]
+    if (n > 4) uri = uri "/…"
     if (match($0, /"msg":"[^"]*/)) msg = substr($0, RSTART + 7, RLENGTH - 7)
     sub(/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+->/, "", msg)
     print int(ts / 60) * 60, uri, substr(msg, 1, 80)
