@@ -16,6 +16,8 @@ export interface UpdateStatus {
   latest_version: string | null;
   checked_at: string | null;
   error: string | null;
+  /** Firefox: the signed package that installs `latest_version`, asking for any new permission. */
+  install_url?: string | null;
 }
 
 export interface UpdateStatusView {
@@ -24,7 +26,14 @@ export interface UpdateStatusView {
   updateAvailable: boolean;
   /** An update is already under way or waiting; pressing again would change nothing. */
   busy: boolean;
+  /** The button opens this to install the update, instead of asking the background to check. */
+  installUrl: string | null;
+  /** Offer to copy about:addons: Firefox does not let an extension open it. */
+  offerAddonsPage: boolean;
 }
+
+/** The page where Firefox checks for and installs add-on updates. */
+export const FIREFOX_ADDONS_PAGE = "about:addons";
 
 export function describeUpdateStatus(status: UpdateStatus): UpdateStatusView {
   const current = `Installed: ${status.current_version}`;
@@ -34,6 +43,8 @@ export function describeUpdateStatus(status: UpdateStatus): UpdateStatusView {
     buttonLabel: "Check for updates",
     updateAvailable: false,
     busy: false,
+    installUrl: null,
+    offerAddonsPage: false,
   };
   switch (status.phase) {
     case "up_to_date":
@@ -60,13 +71,31 @@ export function describeUpdateStatus(status: UpdateStatus): UpdateStatusView {
         text: `${current}\n${latest} is ready and installs as soon as the import in progress ends.`,
         busy: true,
       };
-    case "browser_will_install":
+    case "browser_will_install": {
+      const addonsSteps =
+        `copy ${FIREFOX_ADDONS_PAGE}, paste it into the address bar, then open the gear menu, ` +
+        "Check for Updates, and Update next to Orbit.";
+      if (status.install_url) {
+        return {
+          ...check,
+          text:
+            `${current}\nAvailable: ${latest}. Firefox waits for your consent when an update ` +
+            `asks for new permissions. Update opens the signed package and Firefox asks you to ` +
+            `confirm it; your settings stay.\nOr ${addonsSteps}`,
+          buttonLabel: `Update to ${latest}`,
+          updateAvailable: true,
+          installUrl: status.install_url,
+          offerAddonsPage: true,
+        };
+      }
       return {
         ...check,
         text:
-          `${current}\nAvailable: ${latest}. The browser installs it by itself within a day. ` +
-          "To get it now, open about:addons, then the gear menu, then Check for Updates.",
+          `${current}\nAvailable: ${latest}. The browser installs it by itself within a day, ` +
+          `unless it asks for new permissions. To get it now, ${addonsSteps}`,
+        offerAddonsPage: true,
       };
+    }
     case "host_missing":
       return {
         ...check,
