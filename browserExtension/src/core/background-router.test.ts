@@ -159,6 +159,7 @@ describe("background-router", () => {
         person_id: "person-1",
         allowed_sources: ["tbank_web"],
         received_at: "2026-09-01T12:00:00.000Z",
+        grant_id: null,
       },
     });
     // The secret has already left the page once. It does not go back.
@@ -226,6 +227,7 @@ describe("background-router", () => {
         person_id: "person-1",
         allowed_sources: ["tbank_web", "alfa_web", "retired_web"],
         received_at: "2026-09-03T05:00:00.000Z",
+        grant_id: null,
       },
       sources: [
         {
@@ -1144,6 +1146,7 @@ describe("background-router", () => {
         person_id: "person-1",
         allowed_sources: ["tbank_web"],
         received_at: new Date(NOW - 3 * DAY).toISOString(),
+        grant_id: null,
       });
       expect(JSON.stringify(reply)).not.toContain("grant-token");
       expect(reply.stale_count).toBe(1);

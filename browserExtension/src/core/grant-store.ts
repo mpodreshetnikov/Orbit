@@ -18,6 +18,8 @@ export interface StoredImportGrant {
   function_url: string;
   app_origin: string;
   received_at: string;
+  /** The key's row id on the server, so the app can tell which of its keys this browser holds. */
+  grant_id?: string | null;
 }
 
 export interface GrantStore {
@@ -101,5 +103,6 @@ export function parseIncomingGrant(
     function_url: functionUrl,
     app_origin: appOrigin,
     received_at: nowIso,
+    grant_id: trimmed(value.grant_id) || null,
   };
 }

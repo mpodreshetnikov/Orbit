@@ -33,7 +33,13 @@ export interface ExtensionAutoStatusSource {
 }
 
 export interface ExtensionAutoStatus {
-  grant: { person_id: string; allowed_sources: string[]; received_at: string } | null;
+  grant: {
+    person_id: string;
+    allowed_sources: string[];
+    received_at: string;
+    /** The key's id, from 0.1.37 on; null from an older extension. */
+    grant_id: string | null;
+  } | null;
   sources: ExtensionAutoStatusSource[];
   /** How often it imports on its own. Null or absent from an extension older than the setting. */
   schedule?: ImportAutoSchedule | null;
@@ -81,6 +87,7 @@ export function readExtensionAutoStatus(data: Record<string, unknown>): Extensio
             (source): source is string => typeof source === "string",
           ),
           received_at: grantRecord.received_at,
+          grant_id: typeof grantRecord.grant_id === "string" ? grantRecord.grant_id : null,
         }
       : null;
   const sources = (Array.isArray(data.sources) ? data.sources : [])
@@ -177,6 +184,8 @@ interface MoneyImportAutoStatusProps {
   onRefresh: () => void;
   /** Hands a new schedule to the extension; resolves with what it kept, or null. */
   onScheduleChange?: (schedule: ImportAutoSchedule) => Promise<ImportAutoSchedule | null>;
+  /** Opens the key form, for a browser whose extension holds no key for this person. */
+  onIssueKey?: () => void;
 }
 
 const SCHEDULE_KINDS: Array<ImportAutoSchedule["kind"]> = ["days", "week", "month"];
@@ -341,6 +350,7 @@ export function MoneyImportAutoStatus({
   sourceLabels,
   onRefresh,
   onScheduleChange,
+  onIssueKey,
   children,
 }: MoneyImportAutoStatusProps & { children?: React.ReactNode }) {
   const grant = status?.grant ?? null;
@@ -363,8 +373,30 @@ export function MoneyImportAutoStatus({
         {state === "unavailable" && (
           <p className="text-muted-foreground">{t("money.importAutoStatusUnavailable")}</p>
         )}
-        {state === "ready" && !grant && (
-          <p className="text-muted-foreground">{t("money.importAutoStatusNoGrant")}</p>
+        {/* People do not read the muted line: a browser that cannot import on its own for
+            this person says so in a box of its own, with the one step that fixes it. */}
+        {state === "ready" && !grantIsForSelectedPerson && (
+          <div
+            className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3"
+            data-testid="money-import-auto-status-no-key"
+          >
+            <p className="font-medium">{t("money.importAutoStatusNoKeyTitle")}</p>
+            <p
+              className="text-muted-foreground"
+              data-testid="money-import-auto-status-other-person"
+            >
+              {grant
+                ? t("money.importAutoStatusGrantOtherPerson", {
+                    date: formatMoment(grant.received_at),
+                  })
+                : t("money.importAutoStatusNoGrant")}
+            </p>
+            {onIssueKey && (
+              <Button type="button" size="sm" onClick={onIssueKey}>
+                {t("money.importAutoStatusIssueKey")}
+              </Button>
+            )}
+          </div>
         )}
         {/* The schedule belongs to the extension, not to a key: it is set here before a key
             arrives too, so the setting is never hidden behind a step people do not see. */}
@@ -381,11 +413,6 @@ export function MoneyImportAutoStatus({
               {t("money.importScheduleNeedsUpdate")}
             </p>
           ))}
-        {state === "ready" && grant && !grantIsForSelectedPerson && (
-          <p className="text-muted-foreground" data-testid="money-import-auto-status-other-person">
-            {t("money.importAutoStatusGrantOtherPerson", { date: formatMoment(grant.received_at) })}
-          </p>
-        )}
         {state === "ready" && grant && grantIsForSelectedPerson && (
           <>
             <p className="text-muted-foreground">
