@@ -13,13 +13,13 @@ function check<T>({ data, error }: { data: T; error: { message: string } | null 
 
 /**
  * The spending report for a period, in `currency`, optionally narrowed to some accounts and to a
- * category's branch. As on the web, the exchange rates from the start of last year are brought up
- * to date first, since the report compares with last year's average.
+ * category's branch. As on the web, the period's exchange rates are brought up to date first; a
+ * period still ahead needs none.
  */
 export async function fetchSpendingReport(query: SpendingReportQuery): Promise<SpendingReport> {
   const today = isoDay(new Date());
   const end = query.period.end < today ? query.period.end : today;
-  const start = `${Number(query.period.start.slice(0, 4)) - 1}-01-01`;
+  const start = query.period.start;
   if (start <= end) {
     check(
       await supabase.functions.invoke("money-fx-sync", {

@@ -120,7 +120,7 @@ describe("use-money-reports", () => {
     expect(result.current.data?.categories[0]?.target?.target_amount).toBe(-600);
   });
 
-  it("syncs rates from last year's start, then asks for the spending report with its filters", async () => {
+  it("syncs the period's rates up to today, then asks for the spending report with its filters", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-10-28T12:00:00Z"));
     const invoke = vi.fn(async () => ({ data: { ok: true }, error: null }));
@@ -144,7 +144,7 @@ describe("use-money-reports", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(invoke).toHaveBeenCalledWith("money-fx-sync", {
       body: {
-        start_date: "2025-01-01",
+        start_date: "2026-10-01",
         end_date: "2026-10-28",
         base_currency: "USD",
         quote_currencies: ["RUB"],
@@ -178,7 +178,7 @@ describe("use-money-reports", () => {
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(result.current.error?.message).toBe("rpc failed");
     expect(invoke).toHaveBeenCalledWith("money-fx-sync", {
-      body: expect.objectContaining({ start_date: "2024-01-01", end_date: "2025-03-31" }),
+      body: expect.objectContaining({ start_date: "2025-03-01", end_date: "2025-03-31" }),
     });
     expect(rpc).toHaveBeenCalledWith(
       "money_get_spending_report",
@@ -191,6 +191,26 @@ describe("use-money-reports", () => {
     );
     await waitFor(() => expect(second.result.current.isError).toBe(true));
     expect(second.result.current.error?.message).toBe("sync failed");
+  });
+
+  it("syncs no rates for a period still ahead", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-28T12:00:00Z"));
+    const invoke = vi.fn();
+    const rpc = vi.fn(async () => ({ data: {}, error: null }));
+    createClientMock.mockReturnValue({ functions: { invoke }, rpc });
+    const { useMoneySpendingReport } = await import("./use-money-reports");
+    const { result } = renderHookWithQueryClient(() =>
+      useMoneySpendingReport({
+        personId: "person-1",
+        period: { start: "2026-11-01", end: "2026-11-30" },
+        currency: "RUB",
+        accountIds: [],
+        categoryId: null,
+      }),
+    );
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(invoke).not.toHaveBeenCalled();
   });
 
   it("waits for a person before asking for the spending report", async () => {

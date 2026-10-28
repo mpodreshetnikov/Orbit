@@ -90,18 +90,21 @@ export interface SpendingReportRequest {
  */
 async function fetchMoneySpendingReport(request: SpendingReportRequest): Promise<SpendingReport> {
   const supabase = createClient() as SupabaseMoneyReportClient;
+  // The period's own rates, as the month report synced them: a period still ahead needs none, and
+  // the comparisons use the rates already stored for those days.
   const today = isoDay(new Date());
-  const lastYearStart = `${Number(request.period.start.slice(0, 4)) - 1}-01-01`;
   const syncEnd = request.period.end < today ? request.period.end : today;
-  const { error: syncError } = await supabase.functions.invoke("money-fx-sync", {
-    body: {
-      start_date: lastYearStart,
-      end_date: syncEnd,
-      base_currency: "USD",
-      quote_currencies: ["RUB"],
-    },
-  });
-  if (syncError) throw new Error(syncError.message);
+  if (request.period.start <= syncEnd) {
+    const { error: syncError } = await supabase.functions.invoke("money-fx-sync", {
+      body: {
+        start_date: request.period.start,
+        end_date: syncEnd,
+        base_currency: "USD",
+        quote_currencies: ["RUB"],
+      },
+    });
+    if (syncError) throw new Error(syncError.message);
+  }
 
   const { data, error } = await supabase.rpc("money_get_spending_report", {
     p_person_id: request.personId,

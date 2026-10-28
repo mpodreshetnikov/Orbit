@@ -63,7 +63,7 @@ async function seedMoneyReportsFlow() {
 
   const { data: foodCategory, error: foodCategoryError } = await admin
     .from("money_categories")
-    .select("id")
+    .select("id, name_en")
     .eq("system_key", "food")
     .limit(1)
     .single();
@@ -76,6 +76,7 @@ async function seedMoneyReportsFlow() {
 
   const personId = selectedPerson.id as string;
   const foodCategoryId = foodCategory.id as string;
+  const foodName = foodCategory.name_en as string;
   const accountId = crypto.randomUUID();
   const childCategoryId = crypto.randomUUID();
   const incomeTransactionId = crypto.randomUUID();
@@ -85,7 +86,6 @@ async function seedMoneyReportsFlow() {
   const transferSelfId = crypto.randomUUID();
   const groceriesLineItemId = crypto.randomUUID();
   const coffeeLineItemId = crypto.randomUUID();
-  const targetId = crypto.randomUUID();
   const childSlug = `e2e-money-report-child-${Date.now()}`;
   const aliasValue = `To Self Draft ${Date.now()}`;
 
@@ -233,23 +233,11 @@ async function seedMoneyReportsFlow() {
     throw new Error(`Failed to seed line items: ${lineItemInsertError.message}`);
   }
 
-  const { error: targetInsertError } = await admin.from("money_budget_targets").insert({
-    id: targetId,
-    person_id: personId,
-    category_id: childCategoryId,
-    month_start: "2026-11-01",
-    target_amount: -1000,
-    currency: "RUB",
-  });
-
-  if (targetInsertError) {
-    throw new Error(`Failed to seed budget target: ${targetInsertError.message}`);
-  }
-
   return {
     admin,
     personId,
     foodCategoryId,
+    foodName,
     childCategoryId,
     childSlug,
     aliasValue,
@@ -263,7 +251,6 @@ async function seedMoneyReportsFlow() {
       transferSelfId,
       groceriesLineItemId,
       coffeeLineItemId,
-      targetId,
     },
   };
 }
@@ -274,7 +261,6 @@ async function cleanupMoneyReportsFlow(seed: Awaited<ReturnType<typeof seedMoney
     .delete()
     .eq("person_id", seed.personId)
     .eq("alias", seed.aliasValue);
-  await seed.admin.from("money_budget_targets").delete().eq("id", seed.ids.targetId);
   await seed.admin
     .from("money_line_items")
     .delete()
@@ -299,13 +285,13 @@ async function cleanupMoneyReportsFlow(seed: Awaited<ReturnType<typeof seedMoney
     .eq("quote_currency", "RUB");
 }
 
-test.describe("money reports budget flow", () => {
+test.describe("money spending report flow", () => {
   test.skip(
     !process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY,
     "Requires NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY",
   );
 
-  test("loads the budget report, edits targets, excludes self transfers, and switches currency", async ({
+  test("loads the month's report, opens and filters a category, and leaves out self transfers once aliased", async ({
     page,
   }) => {
     const seed = await seedMoneyReportsFlow();
@@ -313,41 +299,31 @@ test.describe("money reports budget flow", () => {
     try {
       await devLogin(page);
       await setEnglishUi(page, seed.personId);
-      await page.goto("/money/reports?month=2026-11&currency=RUB");
+      await page.goto("/money/reports?period=month&start=2026-11-01");
 
-      await expect(page.getByRole("heading", { level: 1, name: "Budget report" })).toBeVisible();
-      await expect(page.getByTestId("budget-summary-actual-expenses")).toContainText(
-        "-RUB 1,150.00",
-      );
-      await expect(page.getByTestId(`budget-row-${seed.childCategoryId}`)).toHaveCount(0);
+      await expect(page.getByRole("heading", { level: 1, name: "Report" })).toBeVisible();
+      // 300 + 200 on the child category, a pending transfer to someone else and one to oneself.
+      await expect(page.getByTestId("spending-total-expense")).toContainText("RUB 1,150");
+      await expect(page.getByTestId("spending-total-income")).toContainText("RUB 2,000");
+      await expect(page.getByTestId(`spending-row-${seed.childCategoryId}`)).toHaveCount(0);
 
-      await page
-        .locator(`[data-testid="budget-row-${seed.foodCategoryId}"] button`)
-        .first()
-        .click();
-      await expect(page.getByTestId(`budget-row-${seed.childCategoryId}`)).toBeVisible();
+      const food = page.getByTestId(`spending-row-${seed.foodCategoryId}`);
+      await food.getByRole("button", { name: `Expand “${seed.foodName}”` }).click();
+      const child = page.getByTestId(`spending-row-${seed.childCategoryId}`);
+      await expect(child).toContainText("RUB 500");
 
-      await page
-        .locator(`[data-testid="budget-row-${seed.childCategoryId}"]`)
-        .getByRole("button", { name: "Edit target" })
-        .click();
-      await page.getByPlaceholder("0").fill("1200");
-      await page.getByRole("button", { name: "Save", exact: true }).click();
-      await expect(page.getByTestId("budget-summary-target-expenses")).toContainText(
-        "-RUB 1,200.00",
-      );
+      await child.getByRole("button", { name: "Report for “E2E Budget Food” only" }).click();
+      await expect(page).toHaveURL(new RegExp(`category=${seed.childCategoryId}`));
+      await expect(page.getByText("Category: E2E Budget Food")).toBeVisible();
+      await expect(page.getByTestId("spending-total-expense")).toContainText("RUB 500");
 
-      await page.getByRole("button", { name: "Self-transfer aliases" }).click();
-      await page.getByPlaceholder(`Add alias, for example Podreshetnikov M`).fill(seed.aliasValue);
+      await page.goto("/money/accounts");
+      await page.getByPlaceholder("Add alias, for example Podreshetnikov M").fill(seed.aliasValue);
       await page.getByRole("button", { name: "Add", exact: true }).click();
-      await expect(page.getByTestId("budget-summary-actual-expenses")).toContainText("-RUB 900.00");
-      await page.keyboard.press("Escape");
-      await expect(page.getByRole("dialog", { name: "Self-transfer aliases" })).toHaveCount(0);
+      await expect(page.getByText(seed.aliasValue, { exact: true })).toBeVisible();
 
-      await page.getByTestId("budget-currency-select").click();
-      await page.getByRole("option", { name: "USD", exact: true }).click();
-      await expect(page).toHaveURL(/currency=USD/);
-      await expect(page.getByText("Approximate FX used")).toBeVisible();
+      await page.goto("/money/reports?period=month&start=2026-11-01");
+      await expect(page.getByTestId("spending-total-expense")).toContainText("RUB 900");
     } finally {
       await cleanupMoneyReportsFlow(seed);
     }
