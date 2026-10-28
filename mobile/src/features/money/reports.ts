@@ -1,5 +1,9 @@
-import type { MoneyBudgetReport } from "@orbit-types/money";
-import { normalizeBudgetReport, resolveMoneyFxSyncRange } from "@orbit-types/money-reports";
+import {
+  isoDay,
+  normalizeSpendingReport,
+  type SpendingPeriod,
+  type SpendingReport,
+} from "@orbit-types/money-spending-report";
 import { supabase } from "@/lib/supabase";
 
 function check<T>({ data, error }: { data: T; error: { message: string } | null }): T {
@@ -8,21 +12,20 @@ function check<T>({ data, error }: { data: T; error: { message: string } | null 
 }
 
 /**
- * The month's budget report for the person, in `currency`. As on the web, the month's exchange
- * rates are brought up to date first, so the report converts with today's rates.
+ * The spending report for a period, in `currency`, optionally narrowed to some accounts and to a
+ * category's branch. As on the web, the exchange rates from the start of last year are brought up
+ * to date first, since the report compares with last year's average.
  */
-export async function fetchBudgetReport(
-  personId: string,
-  monthStart: string,
-  currency: string,
-): Promise<MoneyBudgetReport> {
-  const range = resolveMoneyFxSyncRange(monthStart);
-  if (range) {
+export async function fetchSpendingReport(query: SpendingReportQuery): Promise<SpendingReport> {
+  const today = isoDay(new Date());
+  const end = query.period.end < today ? query.period.end : today;
+  const start = `${Number(query.period.start.slice(0, 4)) - 1}-01-01`;
+  if (start <= end) {
     check(
       await supabase.functions.invoke("money-fx-sync", {
         body: {
-          start_date: range.startDate,
-          end_date: range.endDate,
+          start_date: start,
+          end_date: end,
           base_currency: "USD",
           quote_currencies: ["RUB"],
         },
@@ -30,51 +33,24 @@ export async function fetchBudgetReport(
     );
   }
   const data = check(
-    await supabase.rpc("money_get_budget_report", {
-      p_person_id: personId,
-      p_month_start: monthStart,
-      p_report_currency: currency,
-    }),
+    await supabase.rpc("money_get_spending_report", {
+      p_person_id: query.personId,
+      p_start: query.period.start,
+      p_end: query.period.end,
+      p_report_currency: query.currency,
+      p_account_ids: query.accountIds.length ? query.accountIds : null,
+      p_category_id: query.categoryId,
+    } as never),
   ) as unknown;
-  const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | null | undefined;
-  return normalizeBudgetReport(row ?? null);
+  return normalizeSpendingReport(data);
 }
 
-export interface TargetKey {
+export interface SpendingReportQuery {
   personId: string;
-  categoryId: string;
-  monthStart: string;
-}
-
-/** Set a category's target for the month, or remove it when `amount` is null. */
-export async function saveBudgetTarget(
-  key: TargetKey,
-  amount: number | null,
-  currency: string,
-): Promise<void> {
-  const table = supabase.from("money_budget_targets");
-  if (amount === null) {
-    check(
-      await table
-        .delete()
-        .eq("person_id", key.personId)
-        .eq("category_id", key.categoryId)
-        .eq("month_start", key.monthStart),
-    );
-    return;
-  }
-  check(
-    await table.upsert(
-      {
-        person_id: key.personId,
-        category_id: key.categoryId,
-        month_start: key.monthStart,
-        target_amount: amount,
-        currency,
-      },
-      { onConflict: "person_id,category_id,month_start" },
-    ),
-  );
+  period: SpendingPeriod;
+  currency: string;
+  accountIds: string[];
+  categoryId: string | null;
 }
 
 export interface SelfAlias {

@@ -11,7 +11,6 @@ export default function MoneyStack() {
       <Stack.Screen name="accounts/card" options={{ presentation: "modal" }} />
       <Stack.Screen name="categories/form" options={{ presentation: "modal" }} />
       <Stack.Screen name="rules/form" options={{ presentation: "modal" }} />
-      <Stack.Screen name="reports/target" options={{ presentation: "modal" }} />
     </Stack>
   );
 }

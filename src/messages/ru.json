@@ -887,6 +887,7 @@
     "spendingForecastHint": "По вашему темпу трат в эти дни недели за 12 недель.",
     "spendingCategories": "Категории",
     "spendingCategoriesHint": "Клик по блоку раскрывает подкатегории. Кнопка с фильтром показывает отчёт только по категории.",
+    "spendingCategoriesHintTouch": "Нажмите на блок, чтобы раскрыть подкатегории. Кнопка с фильтром показывает отчёт только по категории.",
     "spendingAllCategories": "Все категории",
     "spendingColumnCategory": "Категория",
     "spendingColumnAmount": "Сумма",

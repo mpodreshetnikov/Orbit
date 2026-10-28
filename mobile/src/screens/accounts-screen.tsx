@@ -1,7 +1,7 @@
 import type { MoneyAccount, MoneyCard } from "@orbit-types/money";
 import { cardsByAccount } from "@orbit-types/money-accounts";
 import { Stack, useRouter, type Href } from "expo-router";
-import { CreditCard, Ellipsis, Plus } from "lucide-react-native";
+import { CreditCard, Ellipsis, Plus, UserRoundCheck } from "lucide-react-native";
 import { ActionSheetIOS, Alert, Pressable, RefreshControl, ScrollView, View } from "react-native";
 import { Badge, Button, Card, Icon, Placeholder, Text } from "@/components/ui";
 import { t } from "@/lib/i18n";
@@ -96,14 +96,25 @@ export default function AccountsScreen() {
       options={{
         title: t("money.accounts"),
         headerRight: () => (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={t("money.addAccount")}
-            hitSlop={space.sm}
-            onPress={() => open("form")}
-          >
-            <Icon icon={Plus} size={24} tone="foreground" />
-          </Pressable>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: space.lg }}>
+            {/* The names the person's own transfers go by: they decide what the report counts. */}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t("money.reportSelfAliases")}
+              hitSlop={space.sm}
+              onPress={() => open("aliases")}
+            >
+              <Icon icon={UserRoundCheck} size={22} tone="foreground" />
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t("money.addAccount")}
+              hitSlop={space.sm}
+              onPress={() => open("form")}
+            >
+              <Icon icon={Plus} size={24} tone="foreground" />
+            </Pressable>
+          </View>
         ),
       }}
     />

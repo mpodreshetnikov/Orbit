@@ -1,93 +1,150 @@
-import type { MoneyBudgetCategoryNode, MoneyBudgetChartMode } from "@orbit-types/money";
-import { MONEY_CURRENCIES } from "@orbit-types/money";
-import { formatMoney } from "@orbit-types/money-feed";
 import {
-  actualForMode,
-  currentReportMonth,
-  reportMonthLabel,
-  shiftReportMonth,
-  targetForMode,
-} from "@orbit-types/money-reports";
-import { Stack, useRouter, type Href } from "expo-router";
-import { ChevronDown, ChevronLeft, ChevronRight, UserRoundCheck } from "lucide-react-native";
+  amountOf,
+  changeTone,
+  childCategories,
+  formatChange,
+  formatReportAmount,
+  isoDay,
+  lastYearOf,
+  percentChange,
+  periodContaining,
+  periodLabel,
+  previousOf,
+  shiftPeriod,
+  squarify,
+  topCategories,
+  treemapShade,
+  type SpendingCategory,
+  type SpendingPeriod,
+  type SpendingPeriodKind,
+  type SpendingReport,
+  type SpendingReportMode,
+} from "@orbit-types/money-spending-report";
+import DateTimePicker from "@react-native-community/datetimepicker";
+import { Stack } from "expo-router";
+import { ChevronDown, ChevronLeft, ChevronRight, Filter, X } from "lucide-react-native";
 import { useState } from "react";
-import { Pressable, RefreshControl, ScrollView, View } from "react-native";
-import { LineChart } from "@/components/charts";
-import { Chip, Section } from "@/components/form";
-import { Badge, Card, Icon, Placeholder, Text } from "@/components/ui";
+import {
+  Image,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  useColorScheme,
+  View,
+  type ColorSchemeName,
+} from "react-native";
+import { Chip, Field, Segmented } from "@/components/form";
+import { Button, Card, Icon, Placeholder, Text } from "@/components/ui";
+import { dayOf } from "@/features/measurements/format";
 import { t } from "@/lib/i18n";
-import { useBudgetReport, usePerson } from "@/lib/queries";
+import { useMoneyAccounts, usePerson, useSpendingReport } from "@/lib/queries";
 import { radius, space, usePalette } from "@/theme";
 
-const MODES: MoneyBudgetChartMode[] = ["expenses", "income", "net"];
-
-const modeLabel = (mode: MoneyBudgetChartMode) =>
-  t(`money.reportChartMode${mode.charAt(0).toUpperCase()}${mode.slice(1)}`);
+const LOCALE = "ru-RU";
+const CURRENCY = "RUB";
 
 /**
- * "Отчеты" — the web budget report: a month at a time in a currency, its totals against their
- * targets, the days' spending, the root categories' actual against target, and the category tree,
- * where a category opens its target for the month.
+ * The report's own colours, the web page's Tailwind shades: orange for spending, teal for income,
+ * the same pair for a change that is bad or good news. Light first, then dark.
+ */
+const COLORS = {
+  tone: {
+    good: ["#115e59", "#5eead4"], // teal-800 / teal-300
+    bad: ["#9a3412", "#fdba74"], // orange-800 / orange-300
+  },
+  tile: {
+    expense: {
+      strong: ["#9a3412", "#ffffff"], // orange-800, white
+      medium: ["#ea580c", "#ffffff"], // orange-600
+      light: ["#fed7aa", "#431407"], // orange-200, orange-950
+    },
+    income: {
+      strong: ["#115e59", "#ffffff"], // teal-800
+      medium: ["#0d9488", "#ffffff"], // teal-600
+      light: ["#99f6e4", "#042f2e"], // teal-200, teal-950
+    },
+  },
+  bar: { expense: "#ea580c", income: "#0d9488" },
+} as const;
+
+const toneColor = (tone: "good" | "bad", scheme: ColorSchemeName | null) =>
+  COLORS.tone[tone][scheme === "dark" ? 1 : 0];
+
+const money = (amount: number) => formatReportAmount(amount, CURRENCY, LOCALE);
+
+const categoryName = (category: Pick<SpendingCategory, "name_ru" | "name_en">) =>
+  category.name_ru || category.name_en;
+
+const capitalized = (text: string) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
+
+const PERIOD_KINDS: [SpendingPeriodKind, string][] = [
+  ["week", "money.spendingPeriodWeek"],
+  ["month", "money.spendingPeriodMonth"],
+  ["last30", "money.spendingPeriodLast30"],
+  ["custom", "money.spendingPeriodCustom"],
+];
+
+/** A day picked in the system date picker, as the report's `YYYY-MM-DD`. */
+const fromPicker = (date: Date) => dayOf(date);
+const toPicker = (day: string) => new Date(`${day}T12:00:00`);
+
+/**
+ * "Отчёт" (T-261028-yhm), the web report laid out for the phone: the period, accounts and a
+ * category filter on top, spending, income and net with their changes and a forecast, a treemap
+ * of categories that drills down, the list that opens a category and filters the report by it,
+ * the days and the top merchants.
  */
 export default function MoneyReportsScreen() {
   const palette = usePalette();
-  const router = useRouter();
   const person = usePerson();
-  const [month, setMonth] = useState(currentReportMonth);
-  const [currency, setCurrency] = useState("RUB");
-  const [mode, setMode] = useState<MoneyBudgetChartMode>("expenses");
+  const personId = person.data?.id;
+  const accounts = useMoneyAccounts(personId);
+  const [period, setPeriod] = useState<SpendingPeriod>(() =>
+    periodContaining("month", isoDay(new Date())),
+  );
+  const [accountIds, setAccountIds] = useState<string[]>([]);
+  const [categoryId, setCategoryId] = useState<string | null>(null);
+  const [mode, setMode] = useState<SpendingReportMode>("expense");
+  const [mapParentId, setMapParentId] = useState<string | null>(null);
   const [open, setOpen] = useState<Set<string>>(new Set());
-  const report = useBudgetReport(person.data?.id, `${month}-01`, currency);
-  const money = (value: number) => formatMoney(value, currency, "ru-RU");
+  const report = useSpendingReport({
+    personId,
+    period,
+    currency: CURRENCY,
+    accountIds,
+    categoryId,
+  });
+  const data = report.data;
 
+  const filterBy = (id: string | null) => {
+    setCategoryId(id);
+    setMapParentId(null);
+    setOpen(new Set());
+  };
   const toggle = (id: string) =>
     setOpen((current) => {
       const next = new Set(current);
       if (!next.delete(id)) next.add(id);
       return next;
     });
-  const rows = (nodes: MoneyBudgetCategoryNode[], level = 0): React.ReactNode[] =>
-    nodes.flatMap((node) => [
-      <CategoryRow
-        key={node.id}
-        node={node}
-        level={level}
-        money={money}
-        expanded={open.has(node.id)}
-        onToggle={() => toggle(node.id)}
-        onPress={() =>
-          router.push(
-            `/money/reports/target?category=${node.id}&month=${month}&currency=${currency}` as Href,
-          )
-        }
-      />,
-      ...(open.has(node.id) ? rows(node.children, level + 1) : []),
-    ]);
+  const choosePeriod = (kind: SpendingPeriodKind) =>
+    setPeriod(kind === "custom" ? { ...period, kind } : periodContaining(kind, isoDay(new Date())));
+  const setCustom = (edge: "start" | "end", day: string) =>
+    setPeriod((current) => {
+      const next = { ...current, [edge]: day };
+      // A range turned inside out takes the other end with it, so it is never empty.
+      return next.start <= next.end ? next : { ...next, start: day, end: day };
+    });
 
-  const data = report.data;
-  const roots = (data?.categories ?? [])
-    .map((node) => ({ node, actual: actualForMode(node, mode), target: targetForMode(node, mode) }))
-    .filter(({ actual, target }) => actual !== 0 || target !== 0);
-  const widest = Math.max(1, ...roots.flatMap(({ actual, target }) => [actual, target]));
-  const trend = data?.trend ?? [];
+  const all = data?.categories ?? [];
+  const filter = all.find((one) => one.id === categoryId) ?? null;
+  const listed = data ? topCategories(all, categoryId, mode) : [];
+  const mapParent = all.find((one) => one.id === mapParentId) ?? null;
+  const mapped = mapParent ? childCategories(all, mapParent.id, mode) : listed;
 
   return (
     <>
-      <Stack.Screen
-        options={{
-          title: t("money.reports"),
-          headerRight: () => (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={t("money.reportSelfAliases")}
-              hitSlop={space.sm}
-              onPress={() => router.push("/money/reports/aliases" as Href)}
-            >
-              <Icon icon={UserRoundCheck} size={22} tone="foreground" />
-            </Pressable>
-          ),
-        }}
-      />
+      <Stack.Screen options={{ title: t("money.spendingTitle") }} />
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={{ padding: space.lg, gap: space.lg, paddingBottom: space.xl * 2 }}
@@ -99,166 +156,217 @@ export default function MoneyReportsScreen() {
           />
         }
       >
+        <Segmented
+          options={PERIOD_KINDS.map(([kind, key]) => [kind, t(key)])}
+          value={period.kind}
+          onChange={choosePeriod}
+        />
+        {period.kind === "custom" ? (
+          <View style={{ flexDirection: "row", gap: space.md }}>
+            <Field label={t("money.spendingCustomFrom")}>
+              <DateTimePicker
+                testID="spending-from"
+                value={toPicker(period.start)}
+                mode="date"
+                display="compact"
+                locale="ru"
+                style={{ alignSelf: "flex-start" }}
+                onValueChange={(_event, picked) => setCustom("start", fromPicker(picked))}
+              />
+            </Field>
+            <Field label={t("money.spendingCustomTo")}>
+              <DateTimePicker
+                testID="spending-to"
+                value={toPicker(period.end)}
+                mode="date"
+                display="compact"
+                locale="ru"
+                style={{ alignSelf: "flex-start" }}
+                onValueChange={(_event, picked) => setCustom("end", fromPicker(picked))}
+              />
+            </Field>
+          </View>
+        ) : null}
         <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={t("money.reportPreviousMonth")}
+            accessibilityLabel={t("money.spendingPrevious")}
             hitSlop={space.sm}
-            onPress={() => setMonth((current) => shiftReportMonth(current, -1))}
+            onPress={() => setPeriod((current) => shiftPeriod(current, -1))}
           >
             <Icon icon={ChevronLeft} size={22} tone="foreground" />
           </Pressable>
           <Text weight="semibold" style={{ flex: 1, textAlign: "center" }}>
-            {reportMonthLabel(month, "ru-RU")}
+            {capitalized(periodLabel(period, LOCALE))}
           </Text>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={t("money.reportNextMonth")}
+            accessibilityLabel={t("money.spendingNext")}
             hitSlop={space.sm}
-            onPress={() => setMonth((current) => shiftReportMonth(current, 1))}
+            onPress={() => setPeriod((current) => shiftPeriod(current, 1))}
           >
             <Icon icon={ChevronRight} size={22} tone="foreground" />
           </Pressable>
         </View>
-        <View style={{ flexDirection: "row", gap: space.sm }}>
-          {MONEY_CURRENCIES.map((one) => (
+        {(accounts.data?.length ?? 0) > 1 ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ gap: space.sm }}
+          >
             <Chip
-              key={one}
-              label={one}
-              selected={currency === one}
-              onPress={() => setCurrency(one)}
+              label={t("money.spendingAllAccounts")}
+              selected={accountIds.length === 0}
+              onPress={() => setAccountIds([])}
             />
-          ))}
-        </View>
+            {accounts.data!.map((account) => {
+              const selected = accountIds.includes(account.id);
+              return (
+                <Chip
+                  key={account.id}
+                  label={account.account_label}
+                  selected={selected}
+                  onPress={() =>
+                    setAccountIds((current) =>
+                      selected
+                        ? current.filter((id) => id !== account.id)
+                        : [...current, account.id],
+                    )
+                  }
+                />
+              );
+            })}
+          </ScrollView>
+        ) : null}
+        {filter ? (
+          <View
+            style={{
+              flexDirection: "row",
+              alignSelf: "flex-start",
+              alignItems: "center",
+              gap: space.sm,
+              paddingLeft: space.md,
+              paddingRight: space.xs,
+              paddingVertical: space.xs,
+              borderRadius: 999,
+              backgroundColor: palette.foreground,
+            }}
+          >
+            <Text size="sm" tone="background">
+              {t("money.spendingFilterChip", { name: categoryName(filter) })}
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t("money.spendingClearFilter")}
+              hitSlop={space.sm}
+              onPress={() => filterBy(null)}
+              style={{ padding: 4, borderRadius: 999, backgroundColor: palette.mutedForeground }}
+            >
+              <Icon icon={X} size={12} tone="background" />
+            </Pressable>
+          </View>
+        ) : null}
 
         {!data ? (
           <Placeholder
             busy={person.isPending || report.isPending}
-            message={
-              report.error ? `${t("money.reportLoadFailed")} ${report.error.message}` : undefined
-            }
+            message={report.error ? t("money.spendingLoadFailed") : undefined}
           />
         ) : (
           <>
-            {data.fx_status.mode === "ok" ? null : (
-              <Card style={{ padding: space.lg, gap: space.xs }}>
-                <Text weight="semibold" tone="warningText">
-                  {t(
-                    data.fx_status.mode === "missing"
-                      ? "money.reportFxMissingTitle"
-                      : "money.reportFxApproximateTitle",
-                  )}
-                </Text>
-                <Text size="sm" tone="mutedForeground">
-                  {data.fx_status.message ??
-                    t(
-                      data.fx_status.mode === "missing"
-                        ? "money.reportFxMissingBody"
-                        : "money.reportFxApproximateBody",
-                    )}
+            {data.fx_status.status === "ok" ? null : (
+              <Card style={{ padding: space.lg }}>
+                <Text size="sm" tone="warningText">
+                  {data.fx_status.status === "error"
+                    ? t("money.spendingFxMissing", { pairs: data.fx_status.missing.join(", ") })
+                    : t("money.spendingFxApproximate")}
                 </Text>
               </Card>
             )}
-            {/* Without the rates it needs the report has no figures: its nulls are not zeroes. */}
-            {data.fx_status.is_blocking ? null : (
-              <>
-                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}>
-                  {(
-                    [
-                      ["money.reportActualIncome", data.summary.actual_income],
-                      ["money.reportActualExpenses", data.summary.actual_expenses],
-                      ["money.reportNet", data.summary.actual_net],
-                      ["money.reportTargetIncome", data.summary.target_income],
-                      ["money.reportTargetExpenses", data.summary.target_expenses],
-                      ["money.reportTargetNet", data.summary.target_net],
-                      ["money.reportVarianceNet", data.summary.variance_net],
-                    ] as const
-                  ).map(([label, value]) => (
-                    <Card
-                      key={label}
-                      style={{ padding: space.md, gap: 2, flexBasis: "47%", flexGrow: 1 }}
-                    >
-                      <Text size="xs" tone="mutedForeground">
-                        {t(label)}
-                      </Text>
-                      <Text weight="semibold">{money(value)}</Text>
-                    </Card>
-                  ))}
+            <Totals report={data} />
+            <Forecast report={data} />
+
+            <View style={{ gap: space.sm }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: space.md }}>
+                <Text weight="semibold" style={{ flex: 1 }}>
+                  {t("money.spendingCategories")}
+                </Text>
+                <View style={{ width: 180 }}>
+                  <Segmented
+                    options={[
+                      ["expense", t("money.spendingExpense")],
+                      ["income", t("money.spendingIncome")],
+                    ]}
+                    value={mode}
+                    onChange={(next) => {
+                      setMode(next);
+                      setMapParentId(null);
+                    }}
+                  />
                 </View>
-
-                {trend.length > 1 ? (
-                  <Section title={t("money.reportTrendTitle")}>
-                    <LineChart
-                      values={trend.map((point) => Math.abs(point.expenses))}
-                      labels={[trend[0]!.date, trend.at(-1)!.date]}
-                      format={money}
-                    />
-                  </Section>
-                ) : null}
-
-                <Section title={t("money.reportRootComparisonTitle")}>
-                  <View style={{ flexDirection: "row", gap: space.sm }}>
-                    {MODES.map((one) => (
-                      <Chip
-                        key={one}
-                        label={modeLabel(one)}
-                        selected={mode === one}
-                        onPress={() => setMode(one)}
-                      />
-                    ))}
-                  </View>
-                  {roots.length ? (
-                    roots.map(({ node, actual, target }) => (
-                      <View key={node.id} style={{ gap: 4 }}>
-                        <View style={{ flexDirection: "row", gap: space.sm }}>
-                          <Text size="sm" style={{ flex: 1 }}>
-                            {node.name_en}
-                          </Text>
-                          <Text size="sm" tone="mutedForeground">
-                            {target ? `${money(actual)} / ${money(target)}` : money(actual)}
-                          </Text>
-                        </View>
-                        <View
-                          style={{
-                            height: 8,
-                            borderRadius: radius.sm,
-                            backgroundColor: palette.muted,
-                          }}
-                        >
-                          <View
-                            style={{
-                              width: `${(actual / widest) * 100}%`,
-                              height: 8,
-                              borderRadius: radius.sm,
-                              backgroundColor:
-                                target && actual > target ? palette.destructive : palette.primary,
-                            }}
-                          />
-                          {target ? (
-                            <View
-                              style={{
-                                position: "absolute",
-                                left: `${(target / widest) * 100}%`,
-                                top: -2,
-                                width: 2,
-                                height: 12,
-                                backgroundColor: palette.warning,
-                              }}
-                            />
-                          ) : null}
-                        </View>
-                      </View>
-                    ))
-                  ) : (
-                    <Text size="sm" tone="mutedForeground">
-                      {t("money.reportChartEmpty")}
+              </View>
+              {mapParent ? (
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() =>
+                    setMapParentId(
+                      mapParent.parent_id && mapParent.parent_id !== categoryId
+                        ? mapParent.parent_id
+                        : null,
+                    )
+                  }
+                >
+                  <Text size="sm">
+                    <Text size="sm" style={{ textDecorationLine: "underline" }}>
+                      {filter ? categoryName(filter) : t("money.spendingAllCategories")}
                     </Text>
-                  )}
-                </Section>
+                    {` › ${categoryName(mapParent)}`}
+                  </Text>
+                </Pressable>
+              ) : null}
+              <Text size="xs" tone="mutedForeground">
+                {t("money.spendingCategoriesHintTouch")}
+              </Text>
+              {mapped.length ? (
+                <CategoryMap
+                  categories={mapped}
+                  mode={mode}
+                  onOpen={(category) =>
+                    category.has_children && childCategories(all, category.id, mode).length
+                      ? setMapParentId(category.id)
+                      : filterBy(category.id)
+                  }
+                />
+              ) : (
+                <Text size="sm" tone="mutedForeground" style={{ paddingVertical: space.xl }}>
+                  {t("money.spendingEmpty")}
+                </Text>
+              )}
+            </View>
 
-                <Section title={t("money.reportCategoriesTitle")}>{rows(data.categories)}</Section>
-              </>
-            )}
+            {listed.length ? (
+              <Card style={{ paddingVertical: space.xs }}>
+                {listed.map((category, index) => (
+                  <CategoryRow
+                    key={category.id}
+                    report={data}
+                    category={category}
+                    subcategories={
+                      category.has_children ? childCategories(all, category.id, mode) : []
+                    }
+                    total={listed.reduce((sum, one) => sum + amountOf(one, mode), 0)}
+                    mode={mode}
+                    first={index === 0}
+                    open={open.has(category.id)}
+                    onToggle={() => toggle(category.id)}
+                    onFilter={() => filterBy(category.id)}
+                  />
+                ))}
+              </Card>
+            ) : null}
+
+            <Days report={data} mode={mode} />
+            <Merchants report={data} />
           </>
         )}
       </ScrollView>
@@ -266,83 +374,391 @@ export default function MoneyReportsScreen() {
   );
 }
 
-/** A category with its month: what came in and went out, its target, and how far off it is. */
-function CategoryRow({
-  node,
-  level,
-  money,
-  expanded,
-  onToggle,
-  onPress,
+/** "▲ 8% к пред.": a change, coloured by whether it is good news, or a dash without a base. */
+function Change({
+  value,
+  base,
+  mode,
+  label,
 }: {
-  node: MoneyBudgetCategoryNode;
-  level: number;
-  money: (value: number) => string;
-  expanded: boolean;
-  onToggle: () => void;
-  onPress: () => void;
+  value: number;
+  base: number;
+  mode: SpendingReportMode | "net";
+  label: string;
+}) {
+  const scheme = useColorScheme();
+  const change = percentChange(value, base);
+  const tone = changeTone(change, mode);
+  return (
+    <Text
+      size="xs"
+      tone="mutedForeground"
+      style={tone === "neutral" ? undefined : { color: toneColor(tone, scheme) }}
+    >
+      {`${formatChange(change) ?? "—"} ${label}`}
+    </Text>
+  );
+}
+
+/** Spending, income and net side by side, each against the period before and last year. */
+function Totals({ report }: { report: SpendingReport }) {
+  const scheme = useColorScheme();
+  const { totals } = report;
+  const year = String(report.period.last_year);
+  const cards = [
+    [
+      "expense",
+      "money.spendingExpense",
+      totals.expense,
+      totals.previous_expense,
+      totals.last_year_expense,
+    ],
+    [
+      "income",
+      "money.spendingIncome",
+      totals.income,
+      totals.previous_income,
+      totals.last_year_income,
+    ],
+    ["net", "money.spendingNet", totals.net, totals.previous_net, totals.last_year_net],
+  ] as const;
+  return (
+    <View style={{ flexDirection: "row", gap: space.sm }}>
+      {cards.map(([key, title, value, previous, lastYear]) => (
+        <Card key={key} style={{ flex: 1, padding: space.md, gap: 2 }}>
+          <Text size="xs" tone="mutedForeground">
+            {t(title)}
+          </Text>
+          <Text
+            weight="bold"
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            testID={`spending-total-${key}`}
+            style={key === "net" && value > 0 ? { color: toneColor("good", scheme) } : undefined}
+          >
+            {`${key === "net" && value > 0 ? "+" : ""}${money(value)}`}
+          </Text>
+          <Change
+            value={value}
+            base={previous}
+            mode={key}
+            label={t("money.spendingVsPreviousShort")}
+          />
+          <Change
+            value={value}
+            base={lastYear}
+            mode={key}
+            label={t("money.spendingVsLastYear", { year })}
+          />
+        </Card>
+      ))}
+    </View>
+  );
+}
+
+/** Where spending is heading by the period's end, while the period runs. */
+function Forecast({ report }: { report: SpendingReport }) {
+  const palette = usePalette();
+  const { forecast, totals, period } = report;
+  if (!forecast) return null;
+  const end = new Intl.DateTimeFormat(LOCALE, {
+    day: "numeric",
+    month: "long",
+    timeZone: "UTC",
+  }).format(new Date(`${period.end}T00:00:00Z`));
+  const done = forecast.expense > 0 ? Math.min(100, (totals.expense / forecast.expense) * 100) : 0;
+  return (
+    <Card style={{ padding: space.lg, gap: space.xs }}>
+      <View style={{ flexDirection: "row", gap: space.sm }}>
+        <Text size="sm" tone="mutedForeground" style={{ flex: 1 }}>
+          {t("money.spendingForecast", { date: end })}
+        </Text>
+        <Text size="sm" weight="semibold" testID="spending-forecast">
+          {`≈ ${money(forecast.expense)}`}
+        </Text>
+      </View>
+      <View style={{ height: 8, borderRadius: radius.sm, backgroundColor: palette.muted }}>
+        <View
+          style={{
+            width: `${done}%`,
+            height: 8,
+            borderRadius: radius.sm,
+            backgroundColor: COLORS.bar.expense,
+          }}
+        />
+      </View>
+      <Text size="xs" tone="mutedForeground">
+        {`${t("money.spendingForecastDaysLeft", { days: forecast.days_left })} · ${t("money.spendingForecastHint")}`}
+      </Text>
+    </Card>
+  );
+}
+
+/**
+ * The categories as a square treemap, each tile in proportion to its amount and shaded by rank. A
+ * tile with subcategories opens them; one without filters the report by it.
+ */
+function CategoryMap({
+  categories,
+  mode,
+  onOpen,
+}: {
+  categories: SpendingCategory[];
+  mode: SpendingReportMode;
+  onOpen: (category: SpendingCategory) => void;
 }) {
   const palette = usePalette();
-  const name = node.name_en || node.name_ru;
+  const total = categories.reduce((sum, category) => sum + amountOf(category, mode), 0);
+  const tiles = squarify(categories, (category) => amountOf(category, mode), 1);
   return (
-    <View
-      style={{
-        flexDirection: "row",
-        alignItems: "flex-start",
-        gap: space.xs,
-        paddingLeft: level * space.lg,
-      }}
-    >
-      {node.children.length ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`${t(expanded ? "common.collapse" : "common.expand")}: ${name}`}
-          hitSlop={space.sm}
-          onPress={onToggle}
-          style={{ paddingTop: 2 }}
-        >
-          <Icon icon={expanded ? ChevronDown : ChevronRight} size={18} />
-        </Pressable>
-      ) : (
-        <View style={{ width: 18 }} />
-      )}
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`${t("money.reportEditTarget")}: ${name}`}
-        onPress={onPress}
-        style={({ pressed }) => ({ flex: 1, gap: 2, opacity: pressed ? 0.6 : 1 })}
-      >
-        <View
-          style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: space.xs }}
-        >
-          <Text weight="medium">{name}</Text>
-          {node.is_uncategorized ? <Badge label={t("money.reportUncategorizedBadge")} /> : null}
-          {node.target ? <Badge label={t("money.reportTargetBadge")} /> : null}
-        </View>
-        {node.name_ru && node.name_ru !== name ? (
-          <Text size="xs" tone="mutedForeground">
-            {node.name_ru}
-          </Text>
-        ) : null}
-        <Text size="xs" tone="mutedForeground">
-          {`+${money(node.actual_income)} · ${money(node.actual_expenses)} · ${t("money.reportNet")} ${money(node.actual_net)}`}
-        </Text>
-        {node.target_amount ? (
-          <Text
-            size="xs"
+    <View testID="spending-treemap" style={{ width: "100%", aspectRatio: 1 }}>
+      {tiles.map((tile, rank) => {
+        const category = tile.item;
+        const amount = amountOf(category, mode);
+        const share = total > 0 ? Math.round((amount / total) * 100) : 0;
+        const [background, foreground] = COLORS.tile[mode][treemapShade(rank, tiles.length)];
+        const roomy = tile.width > 0.22 && tile.height > 0.16;
+        const tiny = tile.width < 0.14 || tile.height < 0.08;
+        const name = categoryName(category);
+        return (
+          <Pressable
+            key={category.id}
+            accessibilityRole="button"
+            accessibilityLabel={`${name}, ${money(amount)}, ${share}%`}
+            onPress={() => onOpen(category)}
             style={{
-              color:
-                node.variance_amount > 0
-                  ? palette.success
-                  : node.variance_amount < 0
-                    ? palette.destructive
-                    : palette.mutedForeground,
+              position: "absolute",
+              left: `${tile.x * 100}%`,
+              top: `${tile.y * 100}%`,
+              width: `${tile.width * 100}%`,
+              height: `${tile.height * 100}%`,
+              padding: 6,
+              overflow: "hidden",
+              borderRadius: radius.lg,
+              borderWidth: 2,
+              borderColor: palette.background,
+              borderStyle: category.system_key === "uncategorized" ? "dashed" : "solid",
+              backgroundColor: background,
             }}
           >
-            {`${t("money.reportTarget")} ${money(node.target_amount)} · ${t("money.reportVariance")} ${money(node.variance_amount)}`}
-          </Text>
-        ) : null}
-      </Pressable>
+            {tiny ? null : (
+              <Text size="xs" weight="semibold" style={{ color: foreground }}>
+                {name}
+              </Text>
+            )}
+            {roomy ? (
+              <Text size="xs" style={{ color: foreground }}>
+                {`${money(amount)} · ${share}%`}
+              </Text>
+            ) : null}
+          </Pressable>
+        );
+      })}
     </View>
+  );
+}
+
+/**
+ * A category in the list: its amount and share, its changes under the name. A tap opens its
+ * subcategories and the button that narrows the whole report to it.
+ */
+function CategoryRow({
+  report,
+  category,
+  subcategories,
+  total,
+  mode,
+  first,
+  open,
+  onToggle,
+  onFilter,
+}: {
+  report: SpendingReport;
+  category: SpendingCategory;
+  subcategories: SpendingCategory[];
+  total: number;
+  mode: SpendingReportMode;
+  first: boolean;
+  open: boolean;
+  onToggle: () => void;
+  onFilter: () => void;
+}) {
+  const palette = usePalette();
+  const amount = amountOf(category, mode);
+  const name = categoryName(category);
+  const year = String(report.period.last_year);
+  return (
+    <View
+      testID={`spending-row-${category.id}`}
+      style={{ borderTopWidth: first ? 0 : 1, borderColor: palette.border }}
+    >
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={t(open ? "money.spendingCollapse" : "money.spendingExpand", { name })}
+        onPress={onToggle}
+        style={({ pressed }) => ({
+          flexDirection: "row",
+          alignItems: "center",
+          gap: space.md,
+          paddingHorizontal: space.lg,
+          paddingVertical: space.md,
+          opacity: pressed ? 0.6 : 1,
+        })}
+      >
+        <View style={{ flex: 1, gap: 2 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: space.xs }}>
+            <Icon icon={open ? ChevronDown : ChevronRight} size={16} />
+            <Text weight="medium" numberOfLines={1} style={{ flex: 1 }}>
+              {name}
+            </Text>
+          </View>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", columnGap: space.sm }}>
+            <Change
+              value={amount}
+              base={previousOf(category, mode)}
+              mode={mode}
+              label={t("money.spendingVsPreviousShort")}
+            />
+            <Change
+              value={amount}
+              base={lastYearOf(category, mode)}
+              mode={mode}
+              label={t("money.spendingVsLastYear", { year })}
+            />
+          </View>
+        </View>
+        <View style={{ alignItems: "flex-end" }}>
+          <Text weight="semibold">{money(amount)}</Text>
+          <Text size="xs" tone="mutedForeground">
+            {total > 0 ? `${Math.round((amount / total) * 100)}%` : ""}
+          </Text>
+        </View>
+      </Pressable>
+      {open ? (
+        <View style={{ gap: space.sm, paddingHorizontal: space.lg, paddingBottom: space.md }}>
+          {subcategories.map((child) => (
+            <View key={child.id} style={{ flexDirection: "row", paddingLeft: space.lg }}>
+              <Text size="sm" tone="mutedForeground" style={{ flex: 1 }}>
+                {categoryName(child)}
+              </Text>
+              <Text size="sm" tone="mutedForeground">
+                {money(amountOf(child, mode))}
+              </Text>
+            </View>
+          ))}
+          <Button
+            label={t("money.spendingFilterByCategory", { name })}
+            icon={Filter}
+            onPress={onFilter}
+          />
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+/** One bar a day; the days still ahead are drawn empty. */
+function Days({ report, mode }: { report: SpendingReport; mode: SpendingReportMode }) {
+  const palette = usePalette();
+  const today = isoDay(new Date());
+  const values = report.days.map((day) => (mode === "income" ? day.income : day.expense));
+  const max = Math.max(...values, 0);
+  const label = (day: string) =>
+    new Intl.DateTimeFormat(LOCALE, { day: "numeric", month: "short", timeZone: "UTC" }).format(
+      new Date(`${day}T00:00:00Z`),
+    );
+  if (!report.days.length) return null;
+  return (
+    <Card style={{ padding: space.lg, gap: space.sm }}>
+      <Text weight="semibold">{t("money.spendingDays")}</Text>
+      <View
+        testID="spending-days"
+        style={{
+          height: 120,
+          flexDirection: "row",
+          alignItems: "flex-end",
+          gap: 2,
+          borderBottomWidth: 1,
+          borderColor: palette.border,
+        }}
+      >
+        {report.days.map((day, index) => (
+          <View
+            key={day.date}
+            style={{
+              flex: 1,
+              height: `${max > 0 ? ((values[index] ?? 0) / max) * 100 : 0}%`,
+              borderTopLeftRadius: 2,
+              borderTopRightRadius: 2,
+              backgroundColor: day.date > today ? palette.muted : COLORS.bar[mode],
+              opacity: day.date === today ? 0.7 : 1,
+            }}
+          />
+        ))}
+      </View>
+      <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+        <Text size="xs" tone="mutedForeground">
+          {label(report.days[0]!.date)}
+        </Text>
+        <Text size="xs" tone="mutedForeground">
+          {label(report.days.at(-1)!.date)}
+        </Text>
+      </View>
+    </Card>
+  );
+}
+
+/** The top merchants by spending, each with its logo or its colour and initial. */
+function Merchants({ report }: { report: SpendingReport }) {
+  const palette = usePalette();
+  if (!report.merchants.length) return null;
+  return (
+    <Card style={{ padding: space.lg, gap: space.md }}>
+      <Text weight="semibold">{t("money.spendingMerchants")}</Text>
+      {report.merchants.slice(0, 6).map((merchant) => (
+        <View
+          key={`${merchant.brand_id ?? ""}:${merchant.name}`}
+          style={{ flexDirection: "row", alignItems: "center", gap: space.md }}
+        >
+          {merchant.logo_url ? (
+            <Image
+              source={{ uri: merchant.logo_url }}
+              alt=""
+              style={{ width: 36, height: 36, borderRadius: radius.lg }}
+            />
+          ) : (
+            <View
+              style={{
+                width: 36,
+                height: 36,
+                alignItems: "center",
+                justifyContent: "center",
+                borderRadius: radius.lg,
+                backgroundColor: merchant.base_color ?? palette.muted,
+              }}
+            >
+              <Text
+                weight="semibold"
+                style={merchant.base_color ? { color: "#ffffff" } : undefined}
+              >
+                {merchant.name.charAt(0).toUpperCase()}
+              </Text>
+            </View>
+          )}
+          <View style={{ flex: 1 }}>
+            <Text size="sm" weight="medium" numberOfLines={1}>
+              {merchant.name}
+            </Text>
+            <Text size="xs" tone="mutedForeground">
+              {t("money.spendingMerchantCount", { count: merchant.transaction_count })}
+            </Text>
+          </View>
+          <Text size="sm" weight="semibold">
+            {money(merchant.expense)}
+          </Text>
+        </View>
+      ))}
+    </Card>
   );
 }

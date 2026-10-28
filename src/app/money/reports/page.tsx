@@ -1042,7 +1042,9 @@ export default function MoneyReportsPage() {
                   ))}
                 </div>
               </div>
-              <p className="text-sm text-muted-foreground">{t("money.spendingCategoriesHint")}</p>
+              <p className="text-sm text-muted-foreground">
+                {t(isMobile ? "money.spendingCategoriesHintTouch" : "money.spendingCategoriesHint")}
+              </p>
             </CardHeader>
             <CardContent>
               {mapCategories.length === 0 ? (

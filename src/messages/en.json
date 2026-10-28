@@ -887,6 +887,7 @@
     "spendingForecastHint": "From your spending on these weekdays over 12 weeks.",
     "spendingCategories": "Categories",
     "spendingCategoriesHint": "Click a tile to open its subcategories. The filter button shows the report for that category only.",
+    "spendingCategoriesHintTouch": "Tap a block to open its subcategories. The filter button shows the report for that category only.",
     "spendingAllCategories": "All categories",
     "spendingColumnCategory": "Category",
     "spendingColumnAmount": "Amount",

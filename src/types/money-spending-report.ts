@@ -275,7 +275,10 @@ export function periodLabel(period: SpendingPeriod, locale: string): string {
     year: "numeric",
     timeZone: "UTC",
   });
-  return format.formatRange(start, end);
+  // Hermes on the phone may lack formatRange; the two ends side by side read the same.
+  return typeof format.formatRange === "function"
+    ? format.formatRange(start, end)
+    : `${format.format(start)} – ${format.format(end)}`;
 }
 
 // ---------------------------------------------------------------------------------------------
