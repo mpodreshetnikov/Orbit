@@ -387,6 +387,9 @@ const selfUpdater: Promise<SelfUpdater> = (async () => {
   return createSelfUpdater({
     supported: selfUpdateUsesHost || browserManaged,
     browserManaged,
+    // Firefox installs a signed .xpi opened from a link, which is how an update asking for new
+    // permissions gets the person's consent; it does not let an extension open about:addons.
+    installsFromLink: browserManaged && chrome.runtime.getURL("").startsWith("moz-extension:"),
     pendingStore: {
       get: async () => {
         const stored = (await chrome.storage.local.get(SELF_UPDATE_PENDING_KEY))[

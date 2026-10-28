@@ -16,6 +16,7 @@ const RELEASE: ReleaseInfo = {
   sha256: "a".repeat(64),
   download_url: "https://privateorbit.space/storage/v1/object/public/x.zip",
   extension_id: "orbit-id",
+  firefox_download_url: null,
 };
 
 function setup(overrides: Partial<SelfUpdaterDeps> & { busy?: boolean[] } = {}) {
@@ -59,6 +60,17 @@ describe("compareExtensionVersions", () => {
 describe("parseReleaseInfo", () => {
   it("accepts what the release endpoint returns", () => {
     expect(parseReleaseInfo({ ...RELEASE, sha256: "A".repeat(64), extra: 1 })).toEqual(RELEASE);
+  });
+
+  it("takes the signed Firefox package's link when the release has one", () => {
+    const xpi = "https://privateorbit.space/storage/v1/object/public/x.xpi";
+    expect(
+      parseReleaseInfo({ ...RELEASE, firefox: { download_url: xpi } })?.firefox_download_url,
+    ).toBe(xpi);
+    expect(
+      parseReleaseInfo({ ...RELEASE, firefox: { download_url: "http://x/y.xpi" } })
+        ?.firefox_download_url,
+    ).toBeNull();
   });
 
   it("keeps the id only when the endpoint gives one", () => {
@@ -447,6 +459,23 @@ describe("createSelfUpdater, where the browser installs updates", () => {
     expect((await updater.check("manual")).phase).toBe("browser_will_install");
     expect(reload).not.toHaveBeenCalled();
     expect(sendNative).not.toHaveBeenCalled();
+  });
+
+  it("offers the signed package where the browser installs from a link", async () => {
+    // Firefox holds back an update that asks for new permissions until the person agrees.
+    const xpi = "https://privateorbit.space/storage/v1/object/public/x.xpi";
+    const fetchLatest = async () => ({ ...RELEASE, firefox_download_url: xpi });
+    const firefox = browserSetup({ installsFromLink: true, fetchLatest });
+    expect((await firefox.updater.check("manual")).install_url).toBe(xpi);
+
+    const other = browserSetup({ fetchLatest });
+    expect((await other.updater.check("manual")).install_url).toBeNull();
+
+    const current = browserSetup({
+      installsFromLink: true,
+      fetchLatest: async () => ({ ...RELEASE, version: "0.1.23", firefox_download_url: xpi }),
+    });
+    expect((await current.updater.check("manual")).install_url).toBeNull();
   });
 
   it("does not call a failed check up to date", async () => {
