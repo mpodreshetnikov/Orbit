@@ -50,10 +50,34 @@ describe("describeUpdateStatus", () => {
   });
 
   it("says how to fetch now when the browser installs the update", () => {
-    expect(
-      describeUpdateStatus({ ...base, phase: "browser_will_install", latest_version: "0.1.26" })
-        .text,
-    ).toContain("about:addons");
+    const view = describeUpdateStatus({
+      ...base,
+      phase: "browser_will_install",
+      latest_version: "0.1.26",
+    });
+    expect(view.text).toContain("about:addons");
+    expect(view.offerAddonsPage).toBe(true);
+    expect(view.installUrl).toBeNull();
+    expect(view.buttonLabel).toBe("Check for updates");
+  });
+
+  it("installs from the signed package when Firefox gives one", () => {
+    const xpi = "https://privateorbit.space/storage/v1/object/public/x.xpi";
+    const view = describeUpdateStatus({
+      ...base,
+      phase: "browser_will_install",
+      latest_version: "0.1.32",
+      install_url: xpi,
+    });
+    expect(view.installUrl).toBe(xpi);
+    expect(view.buttonLabel).toBe("Update to 0.1.32");
+    expect(view.updateAvailable).toBe(true);
+    expect(view.offerAddonsPage).toBe(true);
+    expect(view.text).toContain("new permissions");
+  });
+
+  it("offers about:addons only where the browser installs the update", () => {
+    expect(describeUpdateStatus({ ...base, phase: "available" }).offerAddonsPage).toBe(false);
   });
 
   it("shows the error and the state of an up-to-date install", () => {
