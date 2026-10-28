@@ -261,7 +261,7 @@ Deno.test("getImportContextAction returns auto mode for recent source history", 
   assertEquals(payload.requires_history_prompt, false);
   assertEquals(payload.stale_threshold_days, 365);
   assertEquals(payload.recommended_mode, "auto");
-  assertEquals(payload.window_from, "2026-02-20T12:00:00.000Z");
+  assertEquals(payload.window_from, "2026-02-17T12:00:00.000Z");
   assertEquals(payload.window_to, "2026-03-08T00:00:00.000Z");
 });
 
