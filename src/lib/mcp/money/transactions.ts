@@ -124,6 +124,9 @@ export interface MoneyFeedQuery {
   amountSign?: "all" | "income" | "expense";
   fromUtc?: string;
   toUtc?: string;
+  /** Bounds on the amount's size, whatever its sign; `amountSign` picks the side. */
+  amountMin?: number;
+  amountMax?: number;
   offset: number;
   limit: number;
 }
@@ -259,6 +262,8 @@ export async function listMoneyTransactions(
     p_amount_sign: query.amountSign ?? "all",
     p_from: query.fromUtc,
     p_to: query.toUtc,
+    p_amount_min: query.amountMin,
+    p_amount_max: query.amountMax,
     p_offset: query.offset,
     p_limit: Math.min(query.limit, MONEY_FEED_MAX_LIMIT),
   });

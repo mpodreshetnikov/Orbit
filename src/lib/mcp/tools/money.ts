@@ -53,7 +53,7 @@ export function registerMoneyTools(server: McpToolServer): void {
     {
       title: "List money transactions",
       description:
-        "List a person's bank and manual money transactions, newest first, with the same filters and search as the web ledger. Each transaction carries the bank and account it came from, the counterparty (who the money came from or went to, the channel, and their bank when the bank reports it), the bank's own category and MCC, the comment, and its composition: every line item (receipt line) with amount and Orbit category, including the canonical category key. Use list_money_categories and list_money_accounts to find the names and ids the filters accept.",
+        "List a person's bank and manual money transactions, newest first, with the same filters and search as the web ledger, plus bounds on the amount. Each transaction carries the bank and account it came from, the counterparty (who the money came from or went to, the channel, and their bank when the bank reports it), the bank's own category and MCC, the comment, and its composition: every line item (receipt line) with amount and Orbit category, including the canonical category key. Use list_money_categories and list_money_accounts to find the names and ids the filters accept.",
       inputSchema: z.object({
         ...personSelectorSchema,
         ...dateRangeSchema,
@@ -76,6 +76,18 @@ export function registerMoneyTools(server: McpToolServer): void {
           .enum(["all", "income", "expense"])
           .default("all")
           .describe("income = money in (amount > 0), expense = money out (amount < 0)."),
+        amount_min: z
+          .number()
+          .min(0)
+          .optional()
+          .describe(
+            "Smallest amount to include, by size whatever the sign: 1000 keeps a -1500 purchase and a +1500 income. Combine with direction for one side.",
+          ),
+        amount_max: z
+          .number()
+          .min(0)
+          .optional()
+          .describe("Largest amount to include, by size whatever the sign; inclusive."),
         transfers: z
           .enum(["all", "only", "exclude"])
           .default("all")
@@ -104,6 +116,15 @@ export function registerMoneyTools(server: McpToolServer): void {
           `"${args.timezone}" is not a timezone this server recognises. Pass an IANA name like "Europe/Moscow".`,
         );
       }
+      if (
+        args.amount_min !== undefined &&
+        args.amount_max !== undefined &&
+        args.amount_min > args.amount_max
+      ) {
+        return fail(
+          `amount_min (${args.amount_min}) is above amount_max (${args.amount_max}); nothing could match.`,
+        );
+      }
       const timeZone =
         requestedZone ?? (await readTimezonePreference(supabase, auth.authUserId)) ?? "UTC";
 
@@ -130,6 +151,8 @@ export function registerMoneyTools(server: McpToolServer): void {
         amountSign: args.direction,
         fromUtc: args.from ? localDayStartUtc(args.from, timeZone) : undefined,
         toUtc: args.to ? localDayEndUtc(args.to, timeZone) : undefined,
+        amountMin: args.amount_min,
+        amountMax: args.amount_max,
       };
 
       const page = await listMoneyTransactions(

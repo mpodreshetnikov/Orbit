@@ -1,9 +1,9 @@
 BEGIN;
-SELECT plan(25);
+SELECT plan(27);
 
 SELECT ok(
   to_regprocedure(
-    'public.money_list_transactions_feed(uuid,text,uuid[],public.money_transaction_type[],public.money_transaction_status[],uuid[],text,text,timestamp with time zone,timestamp with time zone,integer,integer)'
+    'public.money_list_transactions_feed(uuid,text,uuid[],public.money_transaction_type[],public.money_transaction_status[],uuid[],text,text,timestamp with time zone,timestamp with time zone,integer,integer,numeric,numeric)'
   ) IS NOT NULL,
   'money_list_transactions_feed exists'
 );
@@ -558,6 +558,32 @@ SELECT is(
   ),
   '73000000-0000-0000-0000-000000000403',
   'feed amount sign filter supports income'
+);
+
+SELECT is(
+  (
+    SELECT string_agg(id::text, ',' ORDER BY posted_at DESC, created_at DESC)
+    FROM public.money_list_transactions_feed(
+      p_payer_person_id => '73000000-0000-0000-0000-000000000010'::uuid,
+      p_amount_min => 400,
+      p_amount_max => 1500
+    )
+  ),
+  '73000000-0000-0000-0000-000000000402,73000000-0000-0000-0000-000000000404',
+  'feed amount bounds are inclusive and apply to the amount''s size, not its sign'
+);
+
+SELECT is(
+  (
+    SELECT string_agg(id::text, ',')
+    FROM public.money_list_transactions_feed(
+      p_payer_person_id => '73000000-0000-0000-0000-000000000010'::uuid,
+      p_amount_sign => 'income',
+      p_amount_min => 1000
+    )
+  ),
+  '73000000-0000-0000-0000-000000000403',
+  'feed amount bounds combine with the amount sign filter'
 );
 
 SELECT is(
