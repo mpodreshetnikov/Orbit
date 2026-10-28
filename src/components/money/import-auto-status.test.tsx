@@ -295,6 +295,22 @@ describe("MoneyImportAutoStatus schedule", () => {
     );
   }
 
+  it("offers the schedule before the extension holds a key", () => {
+    render(
+      <MoneyImportAutoStatus
+        t={t}
+        state="ready"
+        status={{ grant: null, sources: [], schedule: { kind: "days", every: 1 } }}
+        selectedPersonId="person-1"
+        sourceLabels={labels}
+        onRefresh={() => {}}
+        onScheduleChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("money.importAutoStatusNoGrant")).toBeInTheDocument();
+    expect(screen.getByTestId("money-import-auto-schedule")).toBeInTheDocument();
+  });
+
   it("asks for an extension update when it reports no schedule", () => {
     renderWith(null, vi.fn());
     expect(screen.getByTestId("money-import-auto-schedule-update")).toHaveTextContent(

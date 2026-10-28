@@ -75,24 +75,6 @@ export interface AttentionRefresher {
 
 export interface RefreshOptions {
   mayOpenPage: boolean;
-  /**
-   * For the alarm: open only if nothing has been opened since the browser last started. The
-   * start itself is the moment a page opening by itself reads as a reminder; the alarm after
-   * it stands in when the start found nothing stale yet, and never a third time during the
-   * day's work.
-   */
-  onlyIfNotOpenedSinceStart?: boolean;
-}
-
-/** Whether the page has opened by itself since the browser last started. */
-function openedSinceStart(attention: {
-  lastOpenedAtMs: number | null;
-  lastStartedAtMs: number | null;
-}): boolean {
-  if (attention.lastOpenedAtMs === null) return false;
-  // No start on record: the opening counts as this browser session's.
-  if (attention.lastStartedAtMs === null) return true;
-  return attention.lastOpenedAtMs >= attention.lastStartedAtMs;
 }
 
 export function createAttentionRefresher(deps: AttentionRefresherDeps): AttentionRefresher {
@@ -124,7 +106,6 @@ export function createAttentionRefresher(deps: AttentionRefresherDeps): Attentio
       ) {
         return;
       }
-      if (options.onlyIfNotOpenedSinceStart && openedSinceStart(attention)) return;
       if (!isAppOriginAllowed(grant.app_origin, deps.allowedAppOrigins())) {
         deps.onWarning("money_import_attention_origin_refused", { reason });
         return;
