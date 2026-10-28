@@ -12,7 +12,14 @@ const incomingTransfer = {
     cardNumber: "220070******1778",
     subgroup: { name: "Пополнение по номеру телефона" },
     categoryInfo: { bankCategory: { name: "Переводы" } },
-    payment: { fieldsValues: { bankMemberName: "Сбербанк", pointer: "+79991234567" } },
+    payment: {
+      fieldsValues: {
+        bankMemberName: "Сбербанк",
+        pointer: "+79991234567",
+        // An internal transfer names its destination contract here (T-Bank snapshot shape).
+        bankContract: "5140123456",
+      },
+    },
   },
 };
 
@@ -85,6 +92,7 @@ describe("sanitizeBankOperation", () => {
 
     expect(JSON.stringify(cleaned)).not.toContain("220070");
     expect(JSON.stringify(cleaned)).not.toContain("+7999");
+    expect(JSON.stringify(cleaned)).not.toContain("5140123456");
     expect(cleaned).not.toHaveProperty("icon");
     expect(cleaned).toMatchObject({
       description: "Максим П.",

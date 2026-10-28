@@ -48,7 +48,7 @@ describe("POST /api/oauth/register", () => {
     expect(response.status).toBe(201);
     expect(body.client_id).toBe("mcp_generated");
     expect(body.token_endpoint_auth_method).toBe("none");
-    expect(body.scope).toBe("health:read health:write");
+    expect(body.scope).toBe("health:read health:write money:read");
     expect(typeof body.client_id_issued_at).toBe("number");
   });
 

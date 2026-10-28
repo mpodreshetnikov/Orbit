@@ -13,12 +13,13 @@ import { dateRangeSchema, personSelectorSchema, uuidSchema } from "../schemas/co
 import { withPerson, withUserClient } from "../tool-context";
 import { fail, ok, summarizeList, summarizePage } from "../tool-result";
 import { zonedDate } from "../zoned-time";
+import { MONEY_READ_SCOPE } from "./scopes";
 import type { McpToolServer } from "./types";
 
 /**
  * Read-only money tools (T-261028-w8i): the ledger, its accounts and its
  * categories. Nothing here writes; every tool is annotated read-only and needs
- * only the read scope.
+ * the `money:read` grant, which a health-only connection does not have.
  *
  * Transactions belong to a payer person, so the ledger tool resolves a person
  * the way the health tools do. Card and account numbers are never returned:
@@ -167,7 +168,7 @@ export function registerMoneyTools(server: McpToolServer): void {
           transactions: page.transactions,
         },
       );
-    }),
+    }, MONEY_READ_SCOPE),
   );
 
   server.registerTool(
@@ -195,7 +196,7 @@ export function registerMoneyTools(server: McpToolServer): void {
         ),
         { person, accounts },
       );
-    }),
+    }, MONEY_READ_SCOPE),
   );
 
   server.registerTool(
@@ -237,6 +238,6 @@ export function registerMoneyTools(server: McpToolServer): void {
           })),
         },
       );
-    }),
+    }, MONEY_READ_SCOPE),
   );
 }

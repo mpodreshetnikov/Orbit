@@ -27,19 +27,23 @@ type Handler = (
   structuredContent?: Record<string, unknown>;
 }>;
 
-/** A read-only grant: none of these tools may need more. */
-const ctx = {
-  http: {
-    authInfo: {
-      scopes: ["health:read"],
-      extra: {
-        grantId: "g-1",
-        authUserId: "11111111-1111-1111-1111-111111111111",
-        userEmail: "u@example.com",
+/** The money grant alone: none of these tools may need more. */
+const ctx = contextWith(["money:read"]);
+
+function contextWith(scopes: string[]) {
+  return {
+    http: {
+      authInfo: {
+        scopes,
+        extra: {
+          grantId: "g-1",
+          authUserId: "11111111-1111-1111-1111-111111111111",
+          userEmail: "u@example.com",
+        },
       },
     },
-  },
-};
+  };
+}
 
 const PERSON = { id: "p-1", name: "Max", kind: "human" };
 const DEFAULTS = {
@@ -301,5 +305,25 @@ describe("edges of the money tools", () => {
     expect(
       (await map.get("list_money_categories")!({ include_archived: true }, ctx)).content[0].text,
     ).toContain("Старое / Old id old");
+  });
+});
+
+describe("the money grant", () => {
+  it("is required: a health-only connection reads no money", async () => {
+    const map = await handlers();
+    const healthOnly = contextWith(["health:read", "health:write"]);
+
+    for (const name of [
+      "list_money_transactions",
+      "list_money_accounts",
+      "list_money_categories",
+    ]) {
+      const result = await map.get(name)!({ ...DEFAULTS, include_archived: false }, healthOnly);
+      expect(result.isError, name).toBe(true);
+      expect(result.content[0].text).toContain('"money:read"');
+    }
+    expect(money.listMoneyTransactions).not.toHaveBeenCalled();
+    expect(money.listMoneyAccounts).not.toHaveBeenCalled();
+    expect(money.listMoneyCategories).not.toHaveBeenCalled();
   });
 });

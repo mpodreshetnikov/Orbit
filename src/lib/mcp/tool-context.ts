@@ -67,7 +67,7 @@ export function withUserClient<Args>(handler: ToolHandler<Args>, options: ToolOp
       const scopes = getScopesFromContext(ctx);
       if (!scopes.includes(options.requiredScope)) {
         return fail(
-          `This connection was granted [${scopes.join(", ") || "no scopes"}] and does not include "${options.requiredScope}", which this tool requires. Ask the user to reconnect and approve write access.`,
+          `This connection was granted [${scopes.join(", ") || "no scopes"}] and does not include "${options.requiredScope}", which this tool requires. Ask the user to reconnect and approve it.`,
         );
       }
     }

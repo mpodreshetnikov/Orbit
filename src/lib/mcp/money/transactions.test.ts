@@ -59,6 +59,24 @@ describe("resolveCategoryFilter", () => {
     expect(resolved.ids.sort()).toEqual(["cafes", "coffee", "transport"].sort());
     expect(resolved.unknown).toEqual(["nope"]);
   });
+  it("hangs a custom category saved without a parent off its canonical root", () => {
+    // categoryColumns saves a first-level custom category with only canonical_category_id.
+    const parentless = [
+      categories[0],
+      category({ id: "lunch", canonical_category_id: "food", category_kind: "custom" }),
+      category({
+        id: "soup",
+        parent_id: "lunch",
+        canonical_category_id: "food",
+        category_kind: "custom",
+      }),
+    ];
+    expect(resolveCategoryFilter(parentless, ["food"]).ids.sort()).toEqual([
+      "food",
+      "lunch",
+      "soup",
+    ]);
+  });
 });
 
 const feedRow = {

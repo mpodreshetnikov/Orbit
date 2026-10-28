@@ -12,8 +12,17 @@ import { getRequestOrigin } from "@/lib/request-origin";
 /** Scopes this server understands. Reads and writes are separable so a future client can ask for less. */
 export const MCP_SCOPE_READ = "health:read";
 export const MCP_SCOPE_WRITE = "health:write";
-export const MCP_DEFAULT_SCOPE = `${MCP_SCOPE_READ} ${MCP_SCOPE_WRITE}`;
-export const MCP_SUPPORTED_SCOPES = [MCP_SCOPE_READ, MCP_SCOPE_WRITE] as const;
+/**
+ * The money ledger is a separate grant (T-261028-w8i): a connection approved for health data alone
+ * must not start reading bank transactions because the server gained the tools to.
+ */
+export const MCP_SCOPE_MONEY_READ = "money:read";
+export const MCP_DEFAULT_SCOPE = `${MCP_SCOPE_READ} ${MCP_SCOPE_WRITE} ${MCP_SCOPE_MONEY_READ}`;
+export const MCP_SUPPORTED_SCOPES = [
+  MCP_SCOPE_READ,
+  MCP_SCOPE_WRITE,
+  MCP_SCOPE_MONEY_READ,
+] as const;
 
 /** Authorization codes are exchanged within seconds; a short window limits interception value. */
 export const AUTHORIZATION_CODE_TTL_SECONDS = 60;

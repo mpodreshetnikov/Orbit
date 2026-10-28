@@ -26,8 +26,12 @@ export interface Counterparty {
   bank: string | null;
 }
 
-/** Keys that hold card, account or contract numbers, or a phone: never handed to a client. */
-const SENSITIVE_KEY = /card|account|agreement|ucid|pan$|token|phone|pointer|passport|inn$|bik$/i;
+/**
+ * Keys that hold card, account or contract numbers, identity documents or a phone: never handed to
+ * a client. T-Bank names the destination of an internal transfer `payment.fieldsValues.bankContract`.
+ */
+const SENSITIVE_KEY =
+  /card|account|agreement|contract|ucid|pan$|iban|bik$|bic$|swift|token|phone|pointer|passport|snils|inn$/i;
 /** Keys that are presentation only and would just spend the client's context. */
 const NOISE_KEY = /icon|logo|link|color|image|picture|url$/i;
 const MAX_DEPTH = 4;

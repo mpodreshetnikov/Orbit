@@ -81,11 +81,14 @@ export function resolveCategoryFilter(
   const unknown: string[] = [];
   const childrenOf = new Map<string, string[]>();
   for (const category of categories) {
-    if (!category.parent_id) continue;
-    childrenOf.set(category.parent_id, [
-      ...(childrenOf.get(category.parent_id) ?? []),
-      category.id,
-    ]);
+    // A custom category saved straight under a canonical one carries only `canonical_category_id`
+    // (`categoryColumns` in src/types/money-categories.ts); the web tree hangs it off that root,
+    // and so does this.
+    const parentId =
+      category.parent_id ??
+      (category.canonical_category_id !== category.id ? category.canonical_category_id : null);
+    if (!parentId) continue;
+    childrenOf.set(parentId, [...(childrenOf.get(parentId) ?? []), category.id]);
   }
 
   const addWithDescendants = (id: string) => {
