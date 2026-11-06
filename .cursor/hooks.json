@@ -1,6 +1,44 @@
 {
   "version": 1,
   "hooks": {
+    "sessionStart": [
+      {
+        "command": "node ./scripts/just/cursor-hooks-bridge.cjs"
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": "node ./scripts/just/cursor-hooks-bridge.cjs"
+      }
+    ],
+    "afterShellExecution": [
+      {
+        "command": "node ./scripts/just/cursor-hooks-bridge.cjs"
+      }
+    ],
+    "afterFileEdit": [
+      {
+        "command": "node ./scripts/just/cursor-hooks-bridge.cjs"
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": "node ./scripts/just/cursor-hooks-bridge.cjs",
+        "matcher": "Shell"
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "node ./scripts/just/cursor-hooks-bridge.cjs",
+        "matcher": "Shell|Write|Edit|StrReplace|NotebookEdit|EditNotebook|MultiEdit"
+      }
+    ],
+    "postToolUseFailure": [
+      {
+        "command": "node ./scripts/just/cursor-hooks-bridge.cjs",
+        "matcher": "Shell"
+      }
+    ],
     "afterAgentResponse": [
       {
         "command": "node ./scripts/agent-telegram-notify.mjs cursor afterAgentResponse"
