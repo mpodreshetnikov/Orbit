@@ -6,13 +6,18 @@
  * Cursor Cloud loads `.cursor/hooks.json`, not the Claude multi-repo bridge in
  * `~/.claude/settings.json` (T-261106-kp8). Desktop Cursor can also import `.claude/settings.json`
  * as third-party hooks, but Cloud Agents only guarantee project hooks — and Claude matchers / tool
- * names are not 1:1 with Cursor's (`Bash` vs `Shell`, `SessionStart` vs `sessionStart`,
- * `afterFileEdit` instead of `PostToolUse` for edits).
+ * names are not 1:1 with Cursor's (`Bash` vs `Shell`, `SessionStart` vs `sessionStart`).
  *
  * This adapter maps Cursor stdin JSON into the Claude-shaped input `project-hooks-bridge.cjs`
  * expects, forces the bridge to run (Cursor already sets `CLAUDE_PROJECT_DIR` to the project root,
  * which would otherwise make the bridge no-op), and rewrites Claude's `additionalContext` into
  * Cursor's `additional_context`. Failures are silent and exit 0, like the hooks it runs.
+ *
+ * Stateful advisories (task-claim, PR-size) persist "already reported" when they run. Cursor only
+ * injects `additional_context` on a subset of events (`postToolUse`, `postToolUseFailure`,
+ * `sessionStart`, …). Mapping those advisories through `afterFileEdit` / `afterShellExecution`
+ * would mark them reported with nowhere to deliver the text, and the later context-capable hook
+ * would stay silent — so those events are deliberately not adapted to PostToolUse.
  *
  * Managed Cloud does not fire `sessionStart` / `sessionEnd` (Cursor docs): those entries stay
  * wired for desktop / self-hosted pools and are documented as unavailable on managed Cloud.
@@ -26,6 +31,22 @@ const REPO_ROOT = process.env.CURSOR_HOOKS_BRIDGE_REPO_ROOT
   ? path.resolve(process.env.CURSOR_HOOKS_BRIDGE_REPO_ROOT)
   : path.resolve(__dirname, "..", "..");
 
+/**
+ * Cursor events that can deliver hook context to the agent. Stateful advisories must only run on
+ * these (or on PreToolUse snapshot hooks that report nothing).
+ */
+const CONTEXT_CAPABLE_EVENTS = new Set([
+  "sessionStart",
+  "preToolUse",
+  "postToolUse",
+  "postToolUseFailure",
+  "beforeSubmitPrompt",
+  "preCompact",
+  "stop",
+  "subagentStop",
+  "subagentStart",
+]);
+
 /** Cursor event name → Claude Code hook_event_name. */
 const EVENT_MAP = {
   sessionStart: "SessionStart",
@@ -33,19 +54,19 @@ const EVENT_MAP = {
   preToolUse: "PreToolUse",
   postToolUse: "PostToolUse",
   postToolUseFailure: "PostToolUseFailure",
+  // Snapshot only: task-claim --pre writes state, does not emit additionalContext.
   beforeShellExecution: "PreToolUse",
-  afterShellExecution: "PostToolUse",
-  afterFileEdit: "PostToolUse",
   beforeSubmitPrompt: "UserPromptSubmit",
   preCompact: "PreCompact",
   stop: "Stop",
   subagentStop: "SubagentStop",
   subagentStart: "SubagentStart",
+  // Intentionally omitted: afterFileEdit, afterShellExecution — see header.
 };
 
 /**
  * Cursor tool names → Claude Code tool names the matchers in `.claude/settings.json` expect.
- * `afterFileEdit` / shell-specific events synthesize a tool name when Cursor does not send one.
+ * Shell-specific events synthesize a tool name when Cursor does not send one.
  */
 const TOOL_MAP = {
   Shell: "Bash",
@@ -86,17 +107,11 @@ function adapt(cursorInput) {
     if (typeof input.source !== "string") input.source = "startup";
   }
 
-  if (cursorEvent === "beforeShellExecution" || cursorEvent === "afterShellExecution") {
+  if (cursorEvent === "beforeShellExecution") {
     input.tool_name = "Bash";
     input.tool_input = {
       ...(typeof input.tool_input === "object" && input.tool_input ? input.tool_input : {}),
       command: cursorInput.command ?? input.tool_input?.command ?? "",
-    };
-  } else if (cursorEvent === "afterFileEdit") {
-    input.tool_name = "Write";
-    input.tool_input = {
-      ...(typeof input.tool_input === "object" && input.tool_input ? input.tool_input : {}),
-      file_path: cursorInput.file_path ?? input.tool_input?.file_path ?? "",
     };
   } else if (typeof input.tool_name === "string") {
     input.tool_name = mapToolName(input.tool_name);
@@ -186,4 +201,12 @@ if (require.main === module) {
   process.exit(code);
 }
 
-module.exports = { EVENT_MAP, TOOL_MAP, adapt, mapToolName, runAdapted, toCursorOutput };
+module.exports = {
+  CONTEXT_CAPABLE_EVENTS,
+  EVENT_MAP,
+  TOOL_MAP,
+  adapt,
+  mapToolName,
+  runAdapted,
+  toCursorOutput,
+};

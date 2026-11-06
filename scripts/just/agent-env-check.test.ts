@@ -64,9 +64,8 @@ function cursorRepoWithGitHooks() {
     JSON.stringify({
       version: 1,
       hooks: {
-        afterFileEdit: [{ command: "node ./scripts/just/cursor-hooks-bridge.cjs" }],
         beforeShellExecution: [{ command: "node ./scripts/just/cursor-hooks-bridge.cjs" }],
-        afterShellExecution: [{ command: "node ./scripts/just/cursor-hooks-bridge.cjs" }],
+        postToolUse: [{ command: "node ./scripts/just/cursor-hooks-bridge.cjs" }],
         postToolUseFailure: [{ command: "node ./scripts/just/cursor-hooks-bridge.cjs" }],
       },
     }),
@@ -115,11 +114,10 @@ describe("which events are covered", () => {
 });
 
 describe("Cursor hooks.json coverage", () => {
-  it("requires the Cursor adapter on the safety events", () => {
+  it("requires the Cursor adapter on the context-capable safety events", () => {
     expect(missingCursorEvents({ hooks: {} }, ORBIT_ROOT, () => true)).toEqual([
-      "afterFileEdit",
       "beforeShellExecution",
-      "afterShellExecution",
+      "postToolUse",
       "postToolUseFailure",
     ]);
     const wired = JSON.parse(

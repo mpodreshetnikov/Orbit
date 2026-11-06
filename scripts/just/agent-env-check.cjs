@@ -28,13 +28,13 @@ const BRIDGE = "project-hooks-bridge.cjs";
 const CURSOR_BRIDGE = "cursor-hooks-bridge.cjs";
 const DOC = "docs/AGENT_ENVIRONMENT.md";
 
-/** Cursor events that must reach the Claude-shaped bridge for the gates this repository ships. */
-const CURSOR_REQUIRED_EVENTS = [
-  "afterFileEdit",
-  "beforeShellExecution",
-  "afterShellExecution",
-  "postToolUseFailure",
-];
+/**
+ * Cursor events that must reach the Claude-shaped bridge for the gates this repository ships.
+ * Advisories only run on context-capable events (`postToolUse` / `postToolUseFailure`);
+ * `beforeShellExecution` / `preToolUse` take the PreToolUse snapshot. Do not require
+ * `afterFileEdit` / `afterShellExecution` — those cannot deliver `additional_context`.
+ */
+const CURSOR_REQUIRED_EVENTS = ["beforeShellExecution", "postToolUse", "postToolUseFailure"];
 
 function readJson(file) {
   try {

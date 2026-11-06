@@ -66,9 +66,13 @@ clone Orbit. This Claude path is unchanged by the Cursor work.
 ## Cursor Cloud setup
 
 Cursor loads [`.cursor/hooks.json`](../.cursor/hooks.json) from this repository. That file routes
-`afterFileEdit`, shell / tool events, and (where available) `sessionStart` through
+context-capable tool events (`postToolUse`, `postToolUseFailure`, shell `beforeShellExecution` /
+`preToolUse` for the PreToolUse snapshot, and `sessionStart` where available) through
 [`cursor-hooks-bridge.cjs`](../scripts/just/cursor-hooks-bridge.cjs), which reuses the Claude hook
-scripts via `project-hooks-bridge.cjs`. Telegram notify on `afterAgentResponse` / `stop` stays.
+scripts via `project-hooks-bridge.cjs`. Stateful advisories are **not** wired on `afterFileEdit` or
+`afterShellExecution`: those events cannot deliver `additional_context`, and running the hooks
+there would mark warnings reported with nowhere to show them. Telegram notify on
+`afterAgentResponse` / `stop` stays.
 
 Cursor Cloud also owns each checkout's `core.hooksPath`. After Cursor has created
 `~/.cursor/agent-hooks/<id>/`, the environment **start** (or install) script must run:
@@ -100,11 +104,12 @@ bash /agent/repos/Orbit/scripts/cloud/configure-cursor-agent-hooks.sh
 
 ### Cursor event gaps
 
-| Event                                                                                                                | Managed Cursor Cloud    | Notes                                                                                                                                                                                                                 |
-| -------------------------------------------------------------------------------------------------------------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `afterFileEdit`, `beforeShellExecution` / `afterShellExecution`, `preToolUse` / `postToolUse` / `postToolUseFailure` | Yes                     | Task-claim + PR-size via the adapter                                                                                                                                                                                  |
-| `sessionStart` / caveman                                                                                             | **No** on managed Cloud | Cursor defers it while early turns can be read-only; wired in `.cursor/hooks.json` for desktop / self-hosted pools. Documented gap: caveman does not auto-enable on managed Cloud the way Claude `SessionStart` does. |
-| `sessionEnd`, MCP before/after, Tab hooks, `workspaceOpen`                                                           | No                      | Not required for the safety gates                                                                                                                                                                                     |
+| Event                                                                      | Managed Cursor Cloud                 | Notes                                                                                                                                                                                                                 |
+| -------------------------------------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `postToolUse`, `postToolUseFailure`, `beforeShellExecution` / `preToolUse` | Yes                                  | Task-claim + PR-size via the adapter on context-capable events only                                                                                                                                                   |
+| `afterFileEdit`, `afterShellExecution`                                     | Yes, but **not used** for advisories | Cannot deliver `additional_context`; left unwired so they do not consume reporting state                                                                                                                              |
+| `sessionStart` / caveman                                                   | **No** on managed Cloud              | Cursor defers it while early turns can be read-only; wired in `.cursor/hooks.json` for desktop / self-hosted pools. Documented gap: caveman does not auto-enable on managed Cloud the way Claude `SessionStart` does. |
+| `sessionEnd`, MCP before/after, Tab hooks, `workspaceOpen`                 | No                                   | Not required for the safety gates                                                                                                                                                                                     |
 
 ## The check
 

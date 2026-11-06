@@ -41,7 +41,11 @@ describe("Cursor → Claude adaptation", () => {
       }),
     });
     expect(
-      adapt({ hook_event_name: "afterFileEdit", file_path: "/agent/repos/Orbit/src/x.ts" }),
+      adapt({
+        hook_event_name: "postToolUse",
+        tool_name: "Write",
+        tool_input: { file_path: "/agent/repos/Orbit/src/x.ts" },
+      }),
     ).toEqual({
       event: "PostToolUse",
       input: expect.objectContaining({
@@ -54,6 +58,15 @@ describe("Cursor → Claude adaptation", () => {
       "startup",
     );
     expect(adapt({ hook_event_name: "afterAgentResponse" })).toBeNull();
+  });
+
+  it("does not adapt afterFileEdit or afterShellExecution to PostToolUse advisories", () => {
+    // Those events cannot deliver additional_context; running the stateful hooks there would
+    // mark warnings reported and silence the later postToolUse that can deliver them.
+    expect(
+      adapt({ hook_event_name: "afterFileEdit", file_path: "/agent/repos/Orbit/src/x.ts" }),
+    ).toBeNull();
+    expect(adapt({ hook_event_name: "afterShellExecution", command: "git status" })).toBeNull();
   });
 
   it("rewrites Claude additionalContext into Cursor additional_context", () => {
@@ -106,8 +119,9 @@ describe("forced bridge run", () => {
 
     const result = runAdapted(
       {
-        hook_event_name: "afterFileEdit",
-        file_path: path.join(root, "src/a.ts"),
+        hook_event_name: "postToolUse",
+        tool_name: "Write",
+        tool_input: { file_path: path.join(root, "src/a.ts") },
       },
       root,
       { ...process.env, CLAUDE_PROJECT_DIR: root },
@@ -115,6 +129,47 @@ describe("forced bridge run", () => {
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("from-bridge");
     expect(result.stdout).toContain("additional_context");
+  });
+
+  it("does not run PostToolUse advisories on afterFileEdit", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "cursor-hooks-bridge-skip-"));
+    temporaries.push(root);
+    fs.mkdirSync(path.join(root, ".claude"));
+    fs.writeFileSync(
+      path.join(root, ".claude", "settings.json"),
+      JSON.stringify({
+        hooks: {
+          PostToolUse: [
+            {
+              matcher: "Write",
+              hooks: [
+                {
+                  type: "command",
+                  command: `echo '${JSON.stringify({
+                    hookSpecificOutput: {
+                      hookEventName: "PostToolUse",
+                      additionalContext: "should-not-run",
+                    },
+                  })}'`,
+                  timeout: 5,
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+
+    const result = runAdapted(
+      {
+        hook_event_name: "afterFileEdit",
+        file_path: path.join(root, "src/a.ts"),
+      },
+      root,
+      { ...process.env, CLAUDE_PROJECT_DIR: root },
+    );
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBeUndefined();
   });
 
   it("exits 0 on unknown Cursor events", () => {

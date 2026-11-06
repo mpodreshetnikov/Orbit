@@ -11,16 +11,6 @@
         "command": "node ./scripts/just/cursor-hooks-bridge.cjs"
       }
     ],
-    "afterShellExecution": [
-      {
-        "command": "node ./scripts/just/cursor-hooks-bridge.cjs"
-      }
-    ],
-    "afterFileEdit": [
-      {
-        "command": "node ./scripts/just/cursor-hooks-bridge.cjs"
-      }
-    ],
     "preToolUse": [
       {
         "command": "node ./scripts/just/cursor-hooks-bridge.cjs",
