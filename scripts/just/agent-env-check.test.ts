@@ -6,21 +6,28 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as envCheck from "./agent-env-check.cjs";
 import { agentHooksDir, install as installCursorGitHooks } from "./cursor-agent-git-hooks.cjs";
 
-const { check, missingCursorEvents, missingEvents, unbridgeableHooks } = envCheck as unknown as {
-  check: (options: {
-    env: Record<string, string>;
-    home: string;
-    repoRoot?: string;
-    exists?: (file: string) => boolean;
-  }) => { ok: boolean; message: string };
-  missingCursorEvents: (
-    settings: unknown,
-    repoRoot?: string,
-    exists?: (file: string) => boolean,
-  ) => string[];
-  missingEvents: (project: unknown, user: unknown, exists?: (file: string) => boolean) => string[];
-  unbridgeableHooks: (project: unknown) => string[];
-};
+const { bridgePathIn, check, escapeRegExp, missingCursorEvents, missingEvents, unbridgeableHooks } =
+  envCheck as unknown as {
+    bridgePathIn: (command: string, bridgeName?: string, repoRoot?: string) => string | null;
+    check: (options: {
+      env: Record<string, string>;
+      home: string;
+      repoRoot?: string;
+      exists?: (file: string) => boolean;
+    }) => { ok: boolean; message: string };
+    escapeRegExp: (value: string) => string;
+    missingCursorEvents: (
+      settings: unknown,
+      repoRoot?: string,
+      exists?: (file: string) => boolean,
+    ) => string[];
+    missingEvents: (
+      project: unknown,
+      user: unknown,
+      exists?: (file: string) => boolean,
+    ) => string[];
+    unbridgeableHooks: (project: unknown) => string[];
+  };
 
 const ORBIT_ROOT = path.resolve(__dirname, "..", "..");
 const BRIDGE = path.join(ORBIT_ROOT, "scripts", "just", "project-hooks-bridge.cjs");
@@ -77,6 +84,17 @@ afterEach(() => {
   while (temporaries.length > 0) {
     fs.rmSync(temporaries.pop() as string, { recursive: true, force: true });
   }
+});
+
+describe("bridgePathIn escaping", () => {
+  it("treats bridge filenames as literals, including backslashes and other metacharacters", () => {
+    expect(escapeRegExp("a.b+c")).toBe("a\\.b\\+c");
+    expect(escapeRegExp("x\\y")).toBe("x\\\\y");
+    // Escaping only `.` would leave `+` as "one or more", matching `projectthooks-bridge.cjs`.
+    const plusName = "project+hooks-bridge.cjs";
+    expect(bridgePathIn(`node /opt/${plusName}`, plusName, "/repo")).toBe(`/opt/${plusName}`);
+    expect(bridgePathIn("node /opt/projectthooks-bridge.cjs", plusName, "/repo")).toBeNull();
+  });
 });
 
 describe("which events are covered", () => {

@@ -44,13 +44,18 @@ function readJson(file) {
   }
 }
 
+/** Escape every RegExp metacharacter so a bridge filename interpolates as a literal. */
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 /**
  * The bridge file a hook command names, when it names one.
  * Relative `./scripts/...` forms must not be mistaken for absolute `/scripts/...`.
  */
 function bridgePathIn(command, bridgeName = BRIDGE, repoRoot = REPO_ROOT) {
   if (typeof command !== "string" || !command.includes(bridgeName)) return null;
-  const escaped = bridgeName.replace(/\./g, "\\.");
+  const escaped = escapeRegExp(bridgeName);
   // Absolute UNIX path not preceded by a dot (avoids matching `./scripts/...`).
   const abs = new RegExp(`(?:^|[^.\\w])(/[^\\s"']*${escaped})`).exec(command);
   if (abs) return abs[1];
@@ -213,6 +218,7 @@ module.exports = {
   CURSOR_REQUIRED_EVENTS,
   bridgePathIn,
   check,
+  escapeRegExp,
   isClaudeCloud,
   isCursorCloud,
   missingCursorEvents,
