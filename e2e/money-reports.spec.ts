@@ -3,6 +3,30 @@ import { createClient } from "@supabase/supabase-js";
 
 const DEV_EMAIL = process.env.E2E_DEV_EMAIL_MONEY_REPORTS ?? "e2e-money-reports@example.com";
 
+/**
+ * Budget report loads call money-fx-sync for the selected month when it overlaps
+ * "today". Exact synced rates make fx_status.mode === "ok", so the Approximate FX
+ * banner never appears. Keep this fixture in a future month so sync is skipped and
+ * only the seeded nearest-previous rate applies.
+ */
+function approximateFxFixtureMonth(now: Date = new Date()) {
+  const future = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 2, 1));
+  const year = future.getUTCFullYear();
+  const month = String(future.getUTCMonth() + 1).padStart(2, "0");
+  const day = (value: number) => `${year}-${month}-${String(value).padStart(2, "0")}T09:00:00.000Z`;
+
+  return {
+    reportMonth: `${year}-${month}`,
+    monthStart: `${year}-${month}-01`,
+    rateDate: `${year}-${month}-01`,
+    incomeAt: day(3),
+    groceriesAt: day(5),
+    coffeeAt: day(6),
+    transferOtherAt: day(7),
+    transferSelfAt: day(8),
+  };
+}
+
 function requiredEnv(name: string): string {
   const value = process.env[name];
   if (!value) {
@@ -47,6 +71,7 @@ async function setEnglishUi(page: Page, personId: string) {
 
 async function seedMoneyReportsFlow() {
   const admin = createAdminClient();
+  const month = approximateFxFixtureMonth();
 
   const { data: selectedPerson, error: selectedPersonError } = await admin
     .from("persons")
@@ -118,7 +143,7 @@ async function seedMoneyReportsFlow() {
   }
 
   const { error: fxRateInsertError } = await admin.from("money_fx_rates").insert({
-    rate_date: "2026-11-01",
+    rate_date: month.rateDate,
     base_currency: "USD",
     quote_currency: "RUB",
     rate: 100,
@@ -134,8 +159,8 @@ async function seedMoneyReportsFlow() {
       payer_person_id: personId,
       account_id: accountId,
       source: "manual",
-      posted_at: "2026-11-03T09:00:00.000Z",
-      created_at: "2026-11-03T09:00:00.000Z",
+      posted_at: month.incomeAt,
+      created_at: month.incomeAt,
       amount: 2000,
       currency: "RUB",
       transaction_type: "income",
@@ -149,8 +174,8 @@ async function seedMoneyReportsFlow() {
       payer_person_id: personId,
       account_id: accountId,
       source: "manual",
-      posted_at: "2026-11-05T09:00:00.000Z",
-      created_at: "2026-11-05T09:00:00.000Z",
+      posted_at: month.groceriesAt,
+      created_at: month.groceriesAt,
       amount: -300,
       currency: "RUB",
       transaction_type: "expense",
@@ -164,8 +189,8 @@ async function seedMoneyReportsFlow() {
       payer_person_id: personId,
       account_id: accountId,
       source: "manual",
-      posted_at: "2026-11-06T09:00:00.000Z",
-      created_at: "2026-11-06T09:00:00.000Z",
+      posted_at: month.coffeeAt,
+      created_at: month.coffeeAt,
       amount: -200,
       currency: "RUB",
       transaction_type: "expense",
@@ -179,8 +204,8 @@ async function seedMoneyReportsFlow() {
       payer_person_id: personId,
       account_id: accountId,
       source: "manual",
-      posted_at: "2026-11-07T09:00:00.000Z",
-      created_at: "2026-11-07T09:00:00.000Z",
+      posted_at: month.transferOtherAt,
+      created_at: month.transferOtherAt,
       amount: -400,
       currency: "RUB",
       transaction_type: "transfer",
@@ -195,8 +220,8 @@ async function seedMoneyReportsFlow() {
       payer_person_id: personId,
       account_id: accountId,
       source: "manual",
-      posted_at: "2026-11-08T09:00:00.000Z",
-      created_at: "2026-11-08T09:00:00.000Z",
+      posted_at: month.transferSelfAt,
+      created_at: month.transferSelfAt,
       amount: -250,
       currency: "RUB",
       transaction_type: "transfer",
@@ -237,7 +262,7 @@ async function seedMoneyReportsFlow() {
     id: targetId,
     person_id: personId,
     category_id: childCategoryId,
-    month_start: "2026-11-01",
+    month_start: month.monthStart,
     target_amount: -1000,
     currency: "RUB",
   });
@@ -253,6 +278,8 @@ async function seedMoneyReportsFlow() {
     childCategoryId,
     childSlug,
     aliasValue,
+    reportMonth: month.reportMonth,
+    rateDate: month.rateDate,
     ids: {
       accountId,
       childCategoryId,
@@ -294,7 +321,7 @@ async function cleanupMoneyReportsFlow(seed: Awaited<ReturnType<typeof seedMoney
   await seed.admin
     .from("money_fx_rates")
     .delete()
-    .eq("rate_date", "2026-11-01")
+    .eq("rate_date", seed.rateDate)
     .eq("base_currency", "USD")
     .eq("quote_currency", "RUB");
 }
@@ -313,7 +340,7 @@ test.describe("money reports budget flow", () => {
     try {
       await devLogin(page);
       await setEnglishUi(page, seed.personId);
-      await page.goto("/money/reports?month=2026-11&currency=RUB");
+      await page.goto(`/money/reports?month=${seed.reportMonth}&currency=RUB`);
 
       await expect(page.getByRole("heading", { level: 1, name: "Budget report" })).toBeVisible();
       await expect(page.getByTestId("budget-summary-actual-expenses")).toContainText(
