@@ -39,7 +39,12 @@ vi.mock("../supabase-user-client", () => ({
 }));
 
 import { RECORD_DRAFT_HTML } from "./record-draft-page";
-import { RECORD_DRAFT_RESOURCE_URI, buildDraftView, registerRecordDraftApp } from "./record-draft";
+import {
+  RECORD_DRAFT_RESOURCE_URI,
+  buildDraftView,
+  formatDraftViewMarkdown,
+  registerRecordDraftApp,
+} from "./record-draft";
 
 type Handler = (
   args: unknown,
@@ -297,6 +302,80 @@ describe("buildDraftView", () => {
   });
 });
 
+describe("formatDraftViewMarkdown", () => {
+  const view = buildDraftView({
+    record: RECORD,
+    personName: "Максим",
+    observations: OBSERVATIONS,
+    findings: FINDINGS,
+    conditions: CONDITIONS,
+    completions: [{ title: "Витамин D", done_at: "2026-10-20", reason: "в бланке" }],
+    pages: [{ name: "scan-1.jpg", mime_type: "image/jpeg", url: "https://example.test/p" }],
+    reviewUrl: "https://orbit.test/health/records/r",
+  });
+
+  it("renders every draft section as readable Markdown lists without tables", () => {
+    const md = formatDraftViewMarkdown(view);
+
+    expect(md).toContain("# Общий анализ крови");
+    expect(md).toContain("Анализы");
+    expect(md).toContain("2026-10-20");
+    expect(md).toContain("Максим");
+    expect(md).toMatch(/## Краткое резюме/);
+    expect(md).toContain("Ферритин снижен.");
+    expect(md).toMatch(/## Диагнозы/);
+    expect(md).toContain("Железодефицит");
+    expect(md).toContain("D50");
+    expect(md).toMatch(/## Показатели/);
+    expect(md).toContain("Гемоглобин");
+    expect(md).toContain("135 г/л");
+    expect(md).toContain("120–160");
+    expect(md).toContain("Ферритин");
+    expect(md).toContain("8 нг/мл");
+    expect(md).toContain("Странный показатель");
+    expect(md).toMatch(/## Находки/);
+    expect(md).toContain("Невус");
+    expect(md).toContain("Спина");
+    expect(md).toContain("Пограничный невус");
+    expect(md).toMatch(/## Закрытия диагнозов/);
+    expect(md).toContain("Дефицит B12");
+    expect(md).toMatch(/## Завершения чекапов/);
+    expect(md).toContain("Витамин D");
+    expect(md).toMatch(/## Страницы документа/);
+    expect(md).toContain("scan-1.jpg");
+    expect(md).not.toMatch(/\|[-:]+\|/);
+    expect(md).not.toMatch(/^\|.+\|$/m);
+  });
+
+  it("keeps the summary apart from structured entities and does not hide empty sections", () => {
+    const empty = formatDraftViewMarkdown(
+      buildDraftView({
+        record: { ...RECORD, llm_summary: null, notes: null, title: "Пустой черновик" },
+        personName: null,
+        observations: [],
+        findings: [],
+        conditions: [],
+        reviewUrl: null,
+      }),
+    );
+
+    expect(empty).toMatch(/## Краткое резюме[\s\S]*нет/i);
+    expect(empty).toMatch(/## Диагнозы[\s\S]*нет/i);
+    expect(empty).toMatch(/## Показатели[\s\S]*нет/i);
+    expect(empty).toMatch(/## Находки[\s\S]*нет/i);
+    expect(empty).toMatch(/## Закрытия диагнозов[\s\S]*нет/i);
+    expect(empty).toMatch(/## Завершения чекапов[\s\S]*нет/i);
+    expect(empty).not.toContain("Ферритин снижен.");
+  });
+
+  it("marks incomplete observation and finding details instead of omitting them", () => {
+    const md = formatDraftViewMarkdown(view);
+    expect(md).toMatch(/Странный показатель[\s\S]*не в каталоге|не распознан/i);
+    expect(md).toMatch(/пятно[\s\S]*не распознан|без кода/i);
+    expect(md).toMatch(/Ферритин[\s\S]*ниже|↓|low/i);
+  });
+});
+
 describe("registerRecordDraftApp", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -343,6 +422,9 @@ describe("registerRecordDraftApp", () => {
 
     expect(result.content[0].text).toContain("1 checkup completion(s) awaiting confirmation");
     expect(result.content[0].text).toContain("Nothing has changed on the chart until they confirm");
+    expect(result.content[0].text).toContain("confirm_record_proposals");
+    expect(result.content[0].text).toContain("dismiss_record_proposals");
+    expect(result.content[0].text).toContain("Витамин D");
     expect(result.structuredContent?.draft).toMatchObject({
       has_proposals: true,
       completions: [{ title: "Витамин D", done_at: "2026-10-20", reason: "в бланке" }],
@@ -389,6 +471,49 @@ describe("registerRecordDraftApp", () => {
       person_name: "Максим",
       review_url: `https://orbit.test/health/records/${RECORD_ID}`,
     });
+  });
+
+  it("puts the full draft Markdown and a text-fallback note in agent-facing content", async () => {
+    const result = await register()
+      .tools.get("show_record_draft")!
+      .handler({ record_id: RECORD_ID }, ctx);
+    const text = result.content[0].text;
+
+    expect(text).toContain("# Общий анализ крови");
+    expect(text).toContain("Гемоглобин");
+    expect(text).toContain("Железодефицит");
+    expect(text).toContain("Невус");
+    expect(text).toContain("Дефицит B12");
+    expect(text).toMatch(
+      /If (this chat|the host) cannot show|MCP (App|UI)|interactive (view|card)/i,
+    );
+    expect(text).toMatch(/present|show|render/i);
+    expect(text).toMatch(/Approve|Confirm|Decline|confirm|decline/i);
+    expect(text).toMatch(
+      /does not (confirm|approve|delete)|confirms nothing|nothing is confirmed/i,
+    );
+    expect(text).toContain("activate_medical_record");
+    expect(text).toContain("decline_record_draft");
+    // UI hosts still get the same structured draft; text is additive, not a second DTO.
+    expect(result.structuredContent?.draft).toMatchObject({
+      record_id: RECORD_ID,
+      observations: expect.any(Array),
+      findings: expect.any(Array),
+      conditions: expect.any(Array),
+    });
+  });
+
+  it("does not treat showing the preview as approval and keeps UI resource wiring", async () => {
+    const { tools } = register();
+    const result = await tools.get("show_record_draft")!.handler({ record_id: RECORD_ID }, ctx);
+
+    expect(result.isError).toBeUndefined();
+    expect(documents.removeRecordDraft).not.toHaveBeenCalled();
+    expect(tools.get("show_record_draft")!.config._meta).toEqual({
+      ui: { resourceUri: RECORD_DRAFT_RESOURCE_URI },
+      "ui/resourceUri": RECORD_DRAFT_RESOURCE_URI,
+    });
+    expect(result.content[0].text).not.toMatch(/already approved|approved the record/i);
   });
 
   it("hands the card the document's pages, and lets the host load them from storage", async () => {
