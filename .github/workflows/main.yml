@@ -100,15 +100,16 @@ jobs:
             /opt/hostedtoolcache/CodeQL || true
           echo "After:"
           df -h /
-      # Install Deno from dl.deno.land, not denoland/setup-deno@v2. That action downloads the
-      # binary via github.com/denoland/deno/releases, which returned HTTP 504 on #245 (heads
-      # 9af31ec / 25033e1) while dl.deno.land served the same v2.9.8 zip with 200. Keep the Deno
-      # 2.x channel via release-latest.txt (same version green #244 resolved).
+      # Install Deno from dl.deno.land, not denoland/setup-deno@v2. That action downloads via
+      # github.com/denoland/deno/releases, which returned HTTP 504 on #245 while dl.deno.land
+      # served the zip with 200. Pin explicit v2.9.8 (version green #244 / failed #245 resolved
+      # for deno-version: v2.x) — not release-latest / absolute latest. Verify with the official
+      # per-asset .sha256sum from the same CDN (not a hash invented from the zip itself).
       - name: Install Deno
         shell: bash
         run: |
           set -euo pipefail
-          DENO_VERSION="$(curl -fsSL https://dl.deno.land/release-latest.txt | tr -d '[:space:]')"
+          DENO_VERSION=v2.9.8
           case "$(uname -m)" in
             x86_64|amd64) DENO_ARCH=x86_64 ;;
             aarch64|arm64) DENO_ARCH=aarch64 ;;
@@ -116,9 +117,10 @@ jobs:
           esac
           DEST="${RUNNER_TEMP}/deno-${DENO_VERSION}"
           mkdir -p "$DEST"
-          URL="https://dl.deno.land/release/${DENO_VERSION}/deno-${DENO_ARCH}-unknown-linux-gnu.zip"
+          BASE="https://dl.deno.land/release/${DENO_VERSION}/deno-${DENO_ARCH}-unknown-linux-gnu.zip"
           for attempt in 1 2 3; do
-            if curl -fsSL --retry 2 --retry-delay 2 "$URL" -o "$DEST/deno.zip"; then
+            if curl -fsSL --retry 2 --retry-delay 2 "$BASE" -o "$DEST/deno-${DENO_ARCH}-unknown-linux-gnu.zip" \
+              && curl -fsSL --retry 2 --retry-delay 2 "${BASE}.sha256sum" -o "$DEST/deno.sha256sum"; then
               break
             fi
             if [[ "$attempt" -eq 3 ]]; then
@@ -127,10 +129,12 @@ jobs:
             fi
             sleep $((attempt * 2))
           done
-          unzip -qo "$DEST/deno.zip" -d "$DEST"
+          (cd "$DEST" && sha256sum -c deno.sha256sum)
+          unzip -qo "$DEST/deno-${DENO_ARCH}-unknown-linux-gnu.zip" -d "$DEST"
           chmod +x "$DEST/deno"
           echo "$DEST" >> "$GITHUB_PATH"
           "$DEST/deno" --version
+          "$DEST/deno" --version | grep -F "${DENO_VERSION#v}"
       # No supabase/setup-cli here, on purpose. Every `supabase` invocation in this job goes
       # through `npx supabase`, which runs the package `npm ci` installs from package-lock.json;
       # the action's binary on PATH was never the one that ran. The action also resolved
