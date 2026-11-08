@@ -37,7 +37,9 @@ jobs:
 
   quality-gates:
     name: Quality Gates
-    runs-on: ubuntu-latest
+    # Pin 24.04: Playwright 1.58.2 cannot install chromium deps on ubuntu26.04
+    # (what ubuntu-latest resolved to on 2026-11-08). See PR #245 Quality Gates failure.
+    runs-on: ubuntu-24.04
     outputs:
       extension_impact: ${{ steps.impact.outputs.extensionImpact }}
       mobile_impact: ${{ steps.impact.outputs.mobileImpact }}
