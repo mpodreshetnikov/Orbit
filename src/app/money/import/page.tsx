@@ -771,6 +771,7 @@ export default function MoneyImportPage() {
       token: string;
       personId: string;
       allowedSources: string[];
+      grantId: string | null;
     }): Promise<boolean> => {
       // Resolves on the extension's ack, never on the post. The panel reports delivery from
       // this, because the key it is delivering exists in exactly one place and closing the
@@ -800,6 +801,8 @@ export default function MoneyImportPage() {
               token: grant.token,
               person_id: grant.personId,
               allowed_sources: grant.allowedSources,
+              // Lets the page mark which of the keys this browser holds (0.1.37 keeps it).
+              grant_id: grant.grantId,
               app_origin: window.location.origin,
               // Without this the extension stores a credential with no endpoint to call. The
               // extension checks it against its own host permissions before keeping it.
@@ -815,13 +818,30 @@ export default function MoneyImportPage() {
 
   // A key the extension just took changes what the status card should say.
   const sendGrantToExtensionAndRefresh = useCallback(
-    async (grant: { token: string; personId: string; allowedSources: string[] }) => {
+    async (grant: {
+      token: string;
+      personId: string;
+      allowedSources: string[];
+      grantId: string | null;
+    }) => {
       const delivered = await sendGrantToExtension(grant);
       if (delivered) void refreshExtensionAutoStatus();
       return delivered;
     },
     [refreshExtensionAutoStatus, sendGrantToExtension],
   );
+
+  // "Issue a key to this browser": the form lives folded under Devices and keys, so the button
+  // unfolds it and puts the cursor in the name field, the one thing left to fill in.
+  const [keysOpen, setKeysOpen] = useState(false);
+  const openKeyForm = useCallback(() => {
+    setKeysOpen(true);
+    window.requestAnimationFrame(() => {
+      const input = document.getElementById("money-import-grant-label");
+      input?.scrollIntoView({ block: "center", behavior: "smooth" });
+      input?.focus({ preventScroll: true });
+    });
+  }, []);
 
   const extensionSourceLabels = useMemo(
     () =>
@@ -1402,8 +1422,13 @@ export default function MoneyImportPage() {
                 sourceLabels={extensionSourceLabels}
                 onRefresh={() => void refreshExtensionAutoStatus()}
                 onScheduleChange={changeAutoSchedule}
+                onIssueKey={openKeyForm}
               >
-                <details className="group text-sm">
+                <details
+                  className="group text-sm"
+                  open={keysOpen}
+                  onToggle={(event) => setKeysOpen(event.currentTarget.open)}
+                >
                   <summary className="flex cursor-pointer list-none items-center justify-between gap-2 font-medium">
                     {t("money.importGrantsCollapsed")}
                     <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
@@ -1414,6 +1439,7 @@ export default function MoneyImportPage() {
                       personId={selectedPersonId}
                       availableSources={extensionConnectorOptions}
                       onSendToExtension={sendGrantToExtensionAndRefresh}
+                      browserGrant={extensionAutoStatus.status?.grant ?? null}
                     />
                   </div>
                 </details>

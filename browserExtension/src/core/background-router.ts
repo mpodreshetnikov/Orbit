@@ -6,7 +6,7 @@ import {
 } from "./import-runner.js";
 import type { ImportDebugStore } from "./import-debug.js";
 import type { SessionStore } from "./session-store.js";
-import { parseIncomingGrant, type GrantStore } from "./grant-store.js";
+import { parseIncomingGrant, type GrantStore, type StoredImportGrant } from "./grant-store.js";
 import type { AutoRunStore } from "./auto-run-store.js";
 import {
   describeAutoRunEligibility,
@@ -319,6 +319,21 @@ async function recordManualFailure(
   }
 }
 
+/**
+ * What the app may learn about the key this browser holds: never the token -- the app issued
+ * it, and a reply carrying it would put the secret back on a page that has already let it go.
+ */
+function describeGrant(grant: StoredImportGrant | null) {
+  return grant
+    ? {
+        person_id: grant.person_id,
+        allowed_sources: grant.allowed_sources,
+        received_at: grant.received_at,
+        grant_id: grant.grant_id ?? null,
+      }
+    : null;
+}
+
 export async function routeBackgroundMessage(
   message: BackgroundMessage,
   deps: BackgroundRouterDeps,
@@ -363,13 +378,7 @@ export async function routeBackgroundMessage(
     // a reply carrying it would put the secret back on a page it has already left.
     return {
       ok: true,
-      grant: grant
-        ? {
-            person_id: grant.person_id,
-            allowed_sources: grant.allowed_sources,
-            received_at: grant.received_at,
-          }
-        : null,
+      grant: describeGrant(grant),
     };
   }
 
@@ -422,13 +431,7 @@ export async function routeBackgroundMessage(
     // The token stays here, as with MONEY_IMPORT_GET_GRANT.
     return {
       ok: true,
-      grant: grant
-        ? {
-            person_id: grant.person_id,
-            allowed_sources: grant.allowed_sources,
-            received_at: grant.received_at,
-          }
-        : null,
+      grant: describeGrant(grant),
       sources,
       schedule,
     };
@@ -450,13 +453,7 @@ export async function routeBackgroundMessage(
     // The token stays here, as with MONEY_IMPORT_GET_GRANT.
     return {
       ok: true,
-      grant: grant
-        ? {
-            person_id: grant.person_id,
-            allowed_sources: grant.allowed_sources,
-            received_at: grant.received_at,
-          }
-        : null,
+      grant: describeGrant(grant),
       ...status,
     };
   }

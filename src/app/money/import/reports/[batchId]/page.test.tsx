@@ -624,14 +624,21 @@ describe("MoneyImportReportPage", () => {
 
   it("says why a failed run failed", async () => {
     batchResult = {
-      data: makeBatch({ status: "failed", meta: { failure_message: "Bank answered 403" } }),
+      data: makeBatch({
+        status: "failed",
+        meta: { failure_message: 'Bank answered 403. diagnostics={"tab_status":"complete"}' },
+      }),
       error: null,
     };
     rowsResult = { data: [], error: null };
 
     renderPage();
 
-    expect(await screen.findByText(/money\.importReportFailureReason/)).toBeInTheDocument();
+    // The reason, without the connector's diagnostics after it.
+    expect(
+      await screen.findByText(/money\.importReportFailureReason.*Bank answered 403\.$/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/diagnostics=/)).toBeNull();
   });
 
   it("shows pending preview actions, applies batch, and keeps card mapping available", async () => {

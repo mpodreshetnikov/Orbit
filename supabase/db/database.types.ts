@@ -3044,6 +3044,8 @@ export type Database = {
       money_list_transactions_feed: {
         Args: {
           p_account_ids?: string[]
+          p_amount_max?: number
+          p_amount_min?: number
           p_amount_sign?: string
           p_category_ids?: string[]
           p_from?: string

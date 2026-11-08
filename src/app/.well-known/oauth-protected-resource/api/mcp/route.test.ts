@@ -23,7 +23,7 @@ describe("GET /.well-known/oauth-protected-resource/api/mcp", () => {
     expect(body.resource).toBe("https://app.test/api/mcp");
     expect(body.authorization_servers).toEqual(["https://app.test"]);
     expect(body.bearer_methods_supported).toEqual(["header"]);
-    expect(body.scopes_supported).toEqual(["health:read", "health:write"]);
+    expect(body.scopes_supported).toEqual(["health:read", "health:write", "money:read"]);
   });
 
   it("derives the public origin from proxy headers, not the internal URL", async () => {

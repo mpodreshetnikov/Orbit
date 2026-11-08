@@ -17,6 +17,23 @@ DROP FUNCTION IF EXISTS public.money_list_transactions_feed(
   integer
 );
 
+DROP FUNCTION IF EXISTS public.money_list_transactions_feed(
+  uuid,
+  text,
+  uuid[],
+  public.money_transaction_type[],
+  public.money_transaction_status[],
+  uuid[],
+  text,
+  text,
+  timestamptz,
+  timestamptz,
+  integer,
+  integer,
+  numeric,
+  numeric
+);
+
 CREATE OR REPLACE FUNCTION public.money_list_transactions_feed(
   p_payer_person_id uuid,
   p_search text DEFAULT NULL,
@@ -29,7 +46,11 @@ CREATE OR REPLACE FUNCTION public.money_list_transactions_feed(
   p_from timestamptz DEFAULT NULL,
   p_to timestamptz DEFAULT NULL,
   p_offset integer DEFAULT 0,
-  p_limit integer DEFAULT 50
+  p_limit integer DEFAULT 50,
+  -- Bounds on the amount's size, whatever its sign: 1000..5000 matches a 3000 purchase and a
+  -- 3000 refund alike; p_amount_sign picks the side.
+  p_amount_min numeric DEFAULT NULL,
+  p_amount_max numeric DEFAULT NULL
 )
 RETURNS TABLE (
   id uuid,
@@ -165,6 +186,8 @@ BEGIN
       )
       AND (p_from IS NULL OR t.posted_at >= p_from)
       AND (p_to IS NULL OR t.posted_at <= p_to)
+      AND (p_amount_min IS NULL OR abs(t.amount) >= p_amount_min)
+      AND (p_amount_max IS NULL OR abs(t.amount) <= p_amount_max)
   ),
   counted_transactions AS (
     SELECT
@@ -253,6 +276,8 @@ COMMENT ON FUNCTION public.money_list_transactions_feed(
   timestamptz,
   timestamptz,
   integer,
-  integer
+  integer,
+  numeric,
+  numeric
 ) IS
-  'Returns a paged money transaction feed with server-side search, filters, stable ordering, and aggregated line items.';
+  'Returns a paged money transaction feed with server-side search, filters (amount bounds included), stable ordering, and aggregated line items.';

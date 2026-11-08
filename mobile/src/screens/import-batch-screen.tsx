@@ -1,3 +1,4 @@
+import { readableImportFailure } from "@orbit-types/money-import-failure";
 import type { MoneyImportBatch, MoneyImportBatchRow } from "@orbit-types/import";
 import { formatMoney } from "@orbit-types/money-feed";
 import { importOutcome } from "@orbit-types/money-import-review";
@@ -44,7 +45,7 @@ export default function ImportBatchScreen() {
   const { batch, rows } = report.data;
   const failureMessage =
     batch.status === "failed" && typeof batch.meta?.failure_message === "string"
-      ? batch.meta.failure_message.trim() || null
+      ? readableImportFailure(batch.meta.failure_message)
       : null;
   const operations = rows.filter((row) => row.row_kind === "transaction");
   const run = (apply: boolean) =>

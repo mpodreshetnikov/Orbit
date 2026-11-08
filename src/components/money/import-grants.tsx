@@ -31,7 +31,47 @@ interface MoneyImportGrantsProps {
     token: string;
     personId: string;
     allowedSources: string[];
+    grantId: string | null;
   }) => Promise<boolean>;
+  /** The key the extension in this browser reports holding, if it answered. */
+  browserGrant?: BrowserGrant | null;
+}
+
+export interface BrowserGrant {
+  grant_id: string | null;
+  person_id: string;
+  received_at: string;
+}
+
+/** A key reaches the extension seconds after it is issued; a minute either way covers a slow ack. */
+const BROWSER_GRANT_MATCH_MS = 60_000;
+
+/**
+ * Which of the keys is the one this browser holds. The extension names it since 0.1.37; a key
+ * it took before that is recognised by its person and by arriving within a minute of being
+ * issued -- the page hands a key over the moment it exists -- but only when no other key of
+ * that person was issued in the same minute.
+ */
+export function findBrowserGrantId(
+  grants: MoneyImportGrant[],
+  browserGrant: BrowserGrant | null | undefined,
+): string | null {
+  if (!browserGrant) return null;
+  if (browserGrant.grant_id) {
+    return grants.some((grant) => grant.id === browserGrant.grant_id)
+      ? browserGrant.grant_id
+      : null;
+  }
+  const receivedAtMs = new Date(browserGrant.received_at).getTime();
+  if (!Number.isFinite(receivedAtMs)) return null;
+  const candidates = grants.filter(
+    (grant) =>
+      grant.person_id === browserGrant.person_id &&
+      Math.abs(receivedAtMs - new Date(grant.created_at).getTime()) <= BROWSER_GRANT_MATCH_MS,
+  );
+  // Two keys issued for the person within the same minute cannot be told apart by time, and a
+  // wrong "this browser" could get the other device's key revoked: then nothing is marked.
+  return candidates.length === 1 ? candidates[0].id : null;
 }
 
 type GrantState = "active" | "expired" | "revoked";
@@ -93,6 +133,7 @@ export function MoneyImportGrants({
   personId,
   availableSources,
   onSendToExtension,
+  browserGrant,
 }: MoneyImportGrantsProps) {
   const { data: grants, isLoading, isError, refetch } = useMoneyImportGrants();
   const createGrant = useCreateMoneyImportGrant();
@@ -103,6 +144,7 @@ export function MoneyImportGrants({
     availableSources.map((source) => source.sourceId),
   );
   const [issuedToken, setIssuedToken] = useState<string | null>(null);
+  const [issuedGrantId, setIssuedGrantId] = useState<string | null>(null);
   // The token authorises imports for the person it was issued for. Leaving it on screen after
   // the page's selected person changes would present it in the new person's context -- the list
   // and the form beneath it have already switched -- which is how a credential ends up saved
@@ -134,8 +176,15 @@ export function MoneyImportGrants({
         : [],
     [grants, personId, nowMs],
   );
-  // Revoked keys only pile up; they wait folded under one line so the list stays short.
-  const liveGrants = visibleGrants.filter((grant) => !grant.revoked_at);
+  const browserGrantId = useMemo(
+    () => findBrowserGrantId(grants ?? [], browserGrant),
+    [grants, browserGrant],
+  );
+  // Revoked keys only pile up; they wait folded under one line so the list stays short. The
+  // key this browser holds leads the rest: it is the one a person here asks about.
+  const liveGrants = visibleGrants
+    .filter((grant) => !grant.revoked_at)
+    .sort((a, b) => Number(b.id === browserGrantId) - Number(a.id === browserGrantId));
   const revokedGrants = visibleGrants.filter((grant) => grant.revoked_at);
   const [showRevoked, setShowRevoked] = useState(false);
   const sourceLabels = useMemo(
@@ -198,6 +247,7 @@ export function MoneyImportGrants({
           token: created.token,
           personId: issuedForPersonId,
           allowedSources: created.grant.allowed_sources ?? issuedSources,
+          grantId: created.grant.id ?? null,
         });
       } finally {
         setDelivering(false);
@@ -221,6 +271,7 @@ export function MoneyImportGrants({
         return;
       }
       setIssuedToken(created.token);
+      setIssuedGrantId(created.grant.id ?? null);
       toast.message(t("money.importGrantShownToCopy"));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t("money.importGrantCreateFailed"));
@@ -239,6 +290,7 @@ export function MoneyImportGrants({
         token: issuedToken,
         personId,
         allowedSources: selectedSources,
+        grantId: issuedGrantId,
       });
       if (delivered) {
         toast.success(t("money.importGrantSentToExtension"));
@@ -289,7 +341,17 @@ export function MoneyImportGrants({
         className={`flex items-center gap-3 px-3 py-2 ${state === "active" ? "" : "text-muted-foreground"}`}
       >
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium">{grant.label}</div>
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+            <span className="min-w-0 break-words text-sm font-medium">{grant.label}</span>
+            {grant.id === browserGrantId && (
+              <span
+                className="shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400"
+                data-testid="money-import-grant-this-browser"
+              >
+                {t("money.importGrantThisBrowser")}
+              </span>
+            )}
+          </div>
           <div className="text-xs text-muted-foreground">
             {state === "revoked"
               ? t("money.importGrantRevoked")

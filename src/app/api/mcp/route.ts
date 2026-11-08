@@ -37,6 +37,7 @@ const handler = createMcpHandler(
       "Call list_persons first when you do not know which person a request refers to, and ask the user rather than guessing.",
       "Two different things are called measurements here: `measurements` are manually recorded body metrics (weight, height, circumferences), while observations are lab values extracted from uploaded medical documents. Pick the right one for the question.",
       "To bring in a medical document you have read yourself: create_medical_record, upload its pages (get_upload_links for fresh links when an upload fails; never a second record for the same document), get_ingest_candidates, ingest_medical_document with its reconciliation decided in the same call, then show_record_draft so the user approves or declines the draft on its card (activate_medical_record only when they agree in words instead). When an approved record turns out to close a condition or complete a checkup, propose_reconciliation, then show_record_draft so the user confirms it on the card. To schedule a follow-up a document asks for, propose_checkup; the user adds it from its card.",
+      "Money is read-only here: list_money_transactions lists a person's ledger with the web app's filters and search, each transaction with its bank, counterparty and line items; list_money_categories and list_money_accounts name what the filters accept.",
     ].join(" "),
   },
 );

@@ -8,6 +8,7 @@ import {
 function sweepSession(meta: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     id: "session-1",
+    batch_id: "batch-1",
     status: "running",
     source: "tbank_web",
     created_by_auth_user_id: "user-1",
@@ -70,14 +71,25 @@ Deno.test("shouldNotifyFailedRun stays quiet where nobody needs telling", () => 
   }
 });
 
-Deno.test("buildFailedRunNotification addresses the grant holder and opens the import", () => {
-  const row = buildFailedRunNotification(sweepSession(), "2026-10-26T06:00:00.000Z");
-  assertEquals(row.auth_user_id, "user-1");
-  assertEquals(row.person_id, null);
-  assertEquals(row.type, MONEY_IMPORT_FAILED_NOTIFICATION_TYPE);
-  assertEquals(row.scheduled_at, "2026-10-26T06:00:00.000Z");
-  const payload = row.payload_json as Record<string, unknown>;
-  assertEquals(payload.url, "/money/import");
-  assertEquals(payload.source, "tbank_web");
-  assertEquals(String(payload.body).startsWith("T-Bank:"), true);
+Deno.test(
+  "buildFailedRunNotification addresses the grant holder and opens the run's report",
+  () => {
+    const row = buildFailedRunNotification(sweepSession(), "2026-10-26T06:00:00.000Z");
+    assertEquals(row.auth_user_id, "user-1");
+    assertEquals(row.person_id, null);
+    assertEquals(row.type, MONEY_IMPORT_FAILED_NOTIFICATION_TYPE);
+    assertEquals(row.scheduled_at, "2026-10-26T06:00:00.000Z");
+    const payload = row.payload_json as Record<string, unknown>;
+    assertEquals(payload.url, "/money/import/reports/batch-1");
+    assertEquals(payload.source, "tbank_web");
+    assertEquals(String(payload.body).startsWith("T-Bank:"), true);
+  },
+);
+
+Deno.test("buildFailedRunNotification opens the history when the session has no batch", () => {
+  const row = buildFailedRunNotification(
+    { ...sweepSession(), batch_id: null },
+    "2026-10-26T06:00:00.000Z",
+  );
+  assertEquals((row.payload_json as Record<string, unknown>).url, "/money/import/history");
 });

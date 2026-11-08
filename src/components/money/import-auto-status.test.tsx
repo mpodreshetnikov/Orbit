@@ -12,6 +12,7 @@ const grant = {
   person_id: "person-1",
   allowed_sources: ["tbank_web", "alfa_web"],
   received_at: "2026-09-03T05:00:00.000Z",
+  grant_id: null as string | null,
 };
 
 describe("readExtensionAutoStatus", () => {
@@ -114,7 +115,8 @@ describe("MoneyImportAutoStatus", () => {
               last_run_at: "2026-09-03T05:02:00.000Z",
               last_result: "error",
               consecutive_failures: 1,
-              last_error: "T-Bank did not stay on the operations page",
+              last_error:
+                'T-Bank did not stay on the operations page. diagnostics={"tab_status":"complete"}',
               last_run_origin: null,
               next_run: { kind: "after", at: "2026-09-04T01:02:00.000Z" },
               scheduled_at: null,
@@ -143,11 +145,13 @@ describe("MoneyImportAutoStatus", () => {
 
     const tbank = screen.getByTestId("money-import-auto-status-tbank_web");
     expect(tbank).toHaveAttribute("data-tone", "error");
+    // The reason, without the connector's diagnostics after it.
     expect(
       within(tbank).getByText(
-        /^money\.importAutoStatusLastFailed .* T-Bank did not stay on the operations page$/,
+        /^money\.importAutoStatusLastFailed .* T-Bank did not stay on the operations page\.$/,
       ),
     ).toBeInTheDocument();
+    expect(within(tbank).queryByText(/diagnostics=/)).toBeNull();
     expect(within(tbank).getByText(/^money\.importAutoStatusNextAfter /)).toBeInTheDocument();
 
     const alfa = screen.getByTestId("money-import-auto-status-alfa_web");
@@ -376,5 +380,41 @@ describe("MoneyImportAutoStatus schedule", () => {
     fireEvent.blur(input);
     expect(await screen.findByText("money.importScheduleFailed")).toBeInTheDocument();
     expect(input).toHaveValue(1);
+  });
+});
+
+describe("MoneyImportAutoStatus without a key here", () => {
+  it("says so in a box of its own, with the button that opens the key form", () => {
+    const onIssueKey = vi.fn();
+    render(
+      <MoneyImportAutoStatus
+        t={t}
+        state="ready"
+        status={{ grant: null, sources: [] }}
+        selectedPersonId="person-1"
+        sourceLabels={labels}
+        onRefresh={() => {}}
+        onIssueKey={onIssueKey}
+      />,
+    );
+    const box = within(screen.getByTestId("money-import-auto-status-no-key"));
+    expect(box.getByText("money.importAutoStatusNoKeyTitle")).toBeInTheDocument();
+    fireEvent.click(box.getByRole("button", { name: "money.importAutoStatusIssueKey" }));
+    expect(onIssueKey).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows no such box when this browser holds this person's key", () => {
+    render(
+      <MoneyImportAutoStatus
+        t={t}
+        state="ready"
+        status={{ grant, sources: [] }}
+        selectedPersonId="person-1"
+        sourceLabels={labels}
+        onRefresh={() => {}}
+        onIssueKey={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId("money-import-auto-status-no-key")).toBeNull();
   });
 });

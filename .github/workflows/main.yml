@@ -37,7 +37,9 @@ jobs:
 
   quality-gates:
     name: Quality Gates
-    runs-on: ubuntu-latest
+    # Pin 24.04: Playwright 1.58.2 cannot install chromium deps on ubuntu26.04
+    # (what ubuntu-latest resolved to on 2026-11-08). See PR #245 Quality Gates failure.
+    runs-on: ubuntu-24.04
     outputs:
       extension_impact: ${{ steps.impact.outputs.extensionImpact }}
       mobile_impact: ${{ steps.impact.outputs.mobileImpact }}
@@ -98,9 +100,41 @@ jobs:
             /opt/hostedtoolcache/CodeQL || true
           echo "After:"
           df -h /
-      - uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
+      # Install Deno from dl.deno.land, not denoland/setup-deno@v2. That action downloads via
+      # github.com/denoland/deno/releases, which returned HTTP 504 on #245 while dl.deno.land
+      # served the zip with 200. Pin explicit v2.9.8 (version green #244 / failed #245 resolved
+      # for deno-version: v2.x) — not release-latest / absolute latest. Verify with the official
+      # per-asset .sha256sum from the same CDN (not a hash invented from the zip itself).
+      - name: Install Deno
+        shell: bash
+        run: |
+          set -euo pipefail
+          DENO_VERSION=v2.9.8
+          case "$(uname -m)" in
+            x86_64|amd64) DENO_ARCH=x86_64 ;;
+            aarch64|arm64) DENO_ARCH=aarch64 ;;
+            *) echo "Unsupported arch: $(uname -m)"; exit 1 ;;
+          esac
+          DEST="${RUNNER_TEMP}/deno-${DENO_VERSION}"
+          mkdir -p "$DEST"
+          BASE="https://dl.deno.land/release/${DENO_VERSION}/deno-${DENO_ARCH}-unknown-linux-gnu.zip"
+          for attempt in 1 2 3; do
+            if curl -fsSL --retry 2 --retry-delay 2 "$BASE" -o "$DEST/deno-${DENO_ARCH}-unknown-linux-gnu.zip" \
+              && curl -fsSL --retry 2 --retry-delay 2 "${BASE}.sha256sum" -o "$DEST/deno.sha256sum"; then
+              break
+            fi
+            if [[ "$attempt" -eq 3 ]]; then
+              echo "Failed to download Deno ${DENO_VERSION} from dl.deno.land"
+              exit 1
+            fi
+            sleep $((attempt * 2))
+          done
+          (cd "$DEST" && sha256sum -c deno.sha256sum)
+          unzip -qo "$DEST/deno-${DENO_ARCH}-unknown-linux-gnu.zip" -d "$DEST"
+          chmod +x "$DEST/deno"
+          echo "$DEST" >> "$GITHUB_PATH"
+          "$DEST/deno" --version
+          "$DEST/deno" --version | grep -F "${DENO_VERSION#v}"
       # No supabase/setup-cli here, on purpose. Every `supabase` invocation in this job goes
       # through `npx supabase`, which runs the package `npm ci` installs from package-lock.json;
       # the action's binary on PATH was never the one that ran. The action also resolved

@@ -70,6 +70,12 @@ export function buildFailedRunNotification(
 ): Record<string, unknown> {
   const source = normalizeText(session.source) ?? "";
   const label = SOURCE_LABELS[source] ?? source;
+  // The report of the run that failed, where its reason is: the import page itself said
+  // nothing about this run (2026-10-28). History is the fallback for a session without a batch.
+  const batchId = normalizeText(session.batch_id);
+  const url = batchId
+    ? `/money/import/reports/${encodeURIComponent(batchId)}`
+    : "/money/import/history";
   return {
     auth_user_id: normalizeText(session.created_by_auth_user_id),
     // Addressed to whoever set up automatic import, not routed by person: routing decides whose
@@ -83,7 +89,7 @@ export function buildFailedRunNotification(
       body: label
         ? `${label}: the import did not go through. You may need to sign in to the bank.`
         : "The import did not go through. You may need to sign in to the bank.",
-      url: "/money/import",
+      url,
       // Also what the service worker groups by, so a second failure replaces the first.
       source,
     },

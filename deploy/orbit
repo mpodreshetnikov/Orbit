@@ -327,11 +327,23 @@ start_migrated() {
   cmd_migrate
   step "Starting the stack"
   compose up -d --remove-orphans
+  refresh_caddy
   wait_healthy 600
   # Where releases before the functions image kept their code, mounted into the container `up` has
   # just replaced; the image carries it now.
   rm -rf "$ORBIT_DATA_DIR/functions" "$ORBIT_DATA_DIR/functions-db"
   warm_functions
+}
+
+# Caddy's container outlives a deploy, and deploy/Caddyfile reaches it as a single-file mount: a
+# checkout replaces the file, so the container keeps reading the old one. Recreate it when the two
+# differ, which takes Caddy away for a second or two, and only on a deploy that changed its config.
+refresh_caddy() {
+  if compose exec -T caddy cat /etc/caddy/Caddyfile 2>/dev/null | cmp -s - "$DEPLOY_DIR/Caddyfile"; then
+    return
+  fi
+  step "Restarting Caddy on its new Caddyfile"
+  compose up -d --no-deps --force-recreate caddy
 }
 
 # A function's first request after a restart builds its module graph, which takes seconds; the

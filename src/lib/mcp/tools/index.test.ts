@@ -61,6 +61,9 @@ describe("registerHealthTools", () => {
         "list_measurements",
         "list_medication_doses",
         "list_medications",
+        "list_money_accounts",
+        "list_money_categories",
+        "list_money_transactions",
         "list_pending_records",
         "list_persons",
         "log_dose",
@@ -200,6 +203,8 @@ describe("registerHealthTools", () => {
       "search_findings",
       "list_checkups",
       "list_medications",
+      "list_money_transactions",
+      "list_money_accounts",
     ];
 
     for (const name of personScoped) {
