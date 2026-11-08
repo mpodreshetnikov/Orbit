@@ -291,6 +291,9 @@ jobs:
       - name: Run the flows
         run: |
           mkdir -p recordings
+          # Install ffmpeg before open: brew can take minutes on a cold runner, and a long idle
+          # gap after a successful open lets a quick tunnel go cold before the first recorded flow.
+          command -v ffmpeg >/dev/null || brew install --quiet ffmpeg || echo "::warning::No ffmpeg; the videos stay uncut."
           # Load the app and get past the first-launch screens before any camera rolls.
           ( cd recordings && maestro test ../mobile/e2e/setup/open.yaml ) || exit 1
           flows="${{ inputs.flows }}"
@@ -298,7 +301,6 @@ jobs:
           # `maestro test` spends half a minute starting up before its first step, with the camera
           # already rolling, so each video is cut to the flow's own steps afterwards: Maestro logs
           # when each one ran, and the recording started at a known moment.
-          command -v ffmpeg >/dev/null || brew install --quiet ffmpeg || echo "::warning::No ffmpeg; the videos stay uncut."
           status=0
           for flow in $flows; do
             name="${flow%.yaml}"
