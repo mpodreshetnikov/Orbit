@@ -388,7 +388,7 @@ describe("registerRecordDraftApp", () => {
     documents.signRecordPageLinks.mockResolvedValue([]);
   });
 
-  it("links show_record_draft to the card and keeps decline away from the model", () => {
+  it("links show_record_draft to the card and exposes decision tools to the model", () => {
     const { tools, resources } = register();
 
     expect(resources.get("orbit-record-draft")).toMatchObject({
@@ -402,13 +402,35 @@ describe("registerRecordDraftApp", () => {
     expect(tools.get("show_record_draft")!.config.annotations).toMatchObject({
       readOnlyHint: true,
     });
+    // Model-callable after an explicit owner decision on hosts without MCP Apps; the card still
+    // calls the same tools by name. App-only visibility would leave Decline/proposals unreachable.
     for (const name of [
       "decline_record_draft",
       "confirm_record_proposals",
       "dismiss_record_proposals",
     ]) {
-      expect(tools.get(name)!.config._meta).toEqual({ ui: { visibility: ["app"] } });
+      const meta = tools.get(name)!.config._meta as { ui?: { visibility?: string[] } } | undefined;
+      expect(meta?.ui?.visibility ?? []).not.toContain("app");
+      expect(meta?.ui?.visibility ?? []).not.toEqual(["app"]);
     }
+  });
+
+  it("requires a shown preview and explicit owner decision in decision-tool descriptions", () => {
+    const { tools } = register();
+    const decline = String(tools.get("decline_record_draft")!.config.description);
+    const confirm = String(tools.get("confirm_record_proposals")!.config.description);
+    const dismiss = String(tools.get("dismiss_record_proposals")!.config.description);
+
+    for (const text of [decline, confirm, dismiss]) {
+      expect(text).toMatch(/explicit|agreed|confirmed|declined/i);
+      expect(text).toMatch(/show_record_draft|shown|preview|card/i);
+      expect(text).toMatch(/record_id|this record/i);
+      expect(text).toMatch(/document text|from the document|on your own/i);
+    }
+    expect(decline).toMatch(/set aside|sets aside|Remove/i);
+    expect(decline).toMatch(/restor/i);
+    expect(decline).not.toMatch(/cancel (the )?dialog|postpone/i);
+    expect(dismiss).toMatch(/stays approved|record itself stays/i);
   });
 
   it("asks the owner to confirm what was proposed for an approved record", async () => {
@@ -494,6 +516,9 @@ describe("registerRecordDraftApp", () => {
     );
     expect(text).toContain("activate_medical_record");
     expect(text).toContain("decline_record_draft");
+    expect(text).toMatch(/setting this draft aside|set aside|sets aside/i);
+    expect(text).toMatch(/not deciding|postponing|cancelling the prompt|not merely/i);
+    expect(text).toMatch(/does not verify|enforces auth|not a technical guarantee/i);
     // UI hosts still get the same structured draft; text is additive, not a second DTO.
     expect(result.structuredContent?.draft).toMatchObject({
       record_id: RECORD_ID,
