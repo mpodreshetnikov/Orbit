@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
 import { fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { Alert } from "react-native";
-import MoneyReportsScreen from "@/screens/money-reports-screen";
+import AccountsScreen from "@/screens/accounts-screen";
 import SelfAliasesScreen from "@/screens/self-aliases-screen";
 import TodayScreen from "@/screens/today-screen";
 import TransactionFormScreen from "@/screens/transaction-form-screen";
-import { db, fail, fakeSession, rpcHandlers, seed, setSession } from "../../test/fake-supabase";
+import { db, fail, fakeSession, seed, setSession } from "../../test/fake-supabase";
 import { household, NOW, PERSON, USER_ID } from "../../test/fixtures";
 import { renderScreens } from "../../test/render";
 
@@ -14,8 +14,8 @@ jest.mock("@/lib/supabase", () => jest.requireActual("../../test/fake-supabase")
 const routes = {
   "today/index": TodayScreen,
   "today/spend": TransactionFormScreen,
-  "money/reports/index": MoneyReportsScreen,
-  "money/reports/aliases": SelfAliasesScreen,
+  "money/accounts/index": AccountsScreen,
+  "money/accounts/aliases": SelfAliasesScreen,
 };
 
 beforeEach(() => {
@@ -27,6 +27,7 @@ beforeEach(() => {
         id: "acc-card",
         owner_person_id: PERSON.id,
         account_label: "Тинькофф",
+        account_kind: "debit",
         currency: "RUB",
         is_active: true,
       },
@@ -39,7 +40,6 @@ beforeEach(() => {
       { id: "a2", person_id: "someone-else", alias: "Чужой", normalized_alias: "чужой" },
     ],
   });
-  rpcHandlers.money_get_budget_report = () => [];
   setSession(fakeSession(USER_ID));
 });
 
@@ -63,8 +63,8 @@ describe("a quick spend", () => {
 });
 
 describe("the self-transfer aliases", () => {
-  it("are reached from the report, added and deleted", async () => {
-    await renderScreens(routes, "/money/reports");
+  it("are reached from the accounts, added and deleted", async () => {
+    await renderScreens(routes, "/money/accounts");
     await fireEvent.press(await screen.findByLabelText("Псевдонимы для переводов себе"));
     expect(await screen.findByText("Макс П.")).toBeOnTheScreen();
     expect(screen.getByText("макс п")).toBeOnTheScreen();
@@ -91,7 +91,7 @@ describe("the self-transfer aliases", () => {
 
   it("say when there are none, and when a change fails", async () => {
     db.tables.money_transfer_self_aliases = [];
-    await renderScreens(routes, "/money/reports/aliases");
+    await renderScreens(routes, "/money/accounts/aliases");
     expect(await screen.findByText("Псевдонимов для переводов себе пока нет.")).toBeOnTheScreen();
     fail("money_transfer_self_aliases");
     const alert = jest.spyOn(Alert, "alert");
