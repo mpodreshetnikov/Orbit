@@ -473,6 +473,61 @@ describe("markCheckupDone", () => {
       markCheckupDone(stub.client, { checkupId: "c-1", doneAt: "2026-05-01" }),
     ).rejects.toThrow(/before the latest completion/);
   });
+
+  it("clears planned_on before inserting the completion", async () => {
+    const stub = createSupabaseStub({
+      checkup_items: [
+        { data: checkup({ planned_on: "2026-06-10", next_due_at: "2026-06-20" }) },
+        { data: null }, // clear planned_on
+        {
+          data: checkup({
+            planned_on: null,
+            next_due_at: "2026-12-15",
+          }),
+        },
+      ],
+      checkup_completions: [
+        { data: null },
+        {
+          data: {
+            id: "done-1",
+            done_at: "2026-06-15",
+            note: null,
+            evidence_record_id: null,
+          },
+        },
+      ],
+    });
+
+    await markCheckupDone(stub.client, { checkupId: "c-1", doneAt: "2026-06-15" });
+
+    expect(stub.argsFor("checkup_items", "update")[0][0]).toEqual({ planned_on: null });
+    expect(stub.argsFor("checkup_completions", "insert")).toHaveLength(1);
+  });
+
+  it("restores planned_on when the completion insert fails", async () => {
+    const stub = createSupabaseStub({
+      checkup_items: [
+        { data: checkup({ planned_on: "2026-06-10" }) },
+        { data: null }, // clear
+        { data: null }, // restore
+      ],
+      checkup_completions: [
+        { data: null },
+        { data: null, error: { message: "insert failed" } },
+      ],
+    });
+
+    await expect(
+      markCheckupDone(stub.client, { checkupId: "c-1", doneAt: "2026-06-15" }),
+    ).rejects.toThrow(/insert failed/);
+
+    expect(stub.argsFor("checkup_items", "update")).toEqual([
+      [{ planned_on: null }],
+      [{ planned_on: "2026-06-10" }],
+    ]);
+    expect(stub.argsFor("checkup_completions", "insert")).toHaveLength(1);
+  });
 });
 
 describe("updateCheckupSchedule", () => {
@@ -564,5 +619,33 @@ describe("updateCheckupSchedule", () => {
         schedule: { type: "one_off", due_at: "2026-12-01" },
       }),
     ).rejects.toThrow(/archived/);
+  });
+
+  it("reactivates a completed one-off when converting it to an interval", async () => {
+    const before = checkup({
+      status: "completed",
+      schedule: { type: "one_off", due_at: "2026-01-15" },
+      next_due_at: null,
+    });
+    const after = {
+      ...before,
+      status: "active",
+      schedule: { type: "interval", every: 1, unit: "year", anchor_date: "2026-01-15" },
+      next_due_at: "2027-01-15",
+    };
+    const stub = createSupabaseStub({
+      checkup_items: [{ data: before }, { data: null }, { data: after }],
+    });
+
+    const result = await updateCheckupSchedule(stub.client, {
+      checkupId: "c-1",
+      schedule: { type: "interval", every: 1, unit: "year" },
+    });
+
+    expect(stub.argsFor("checkup_items", "update")[0][0]).toMatchObject({
+      status: "active",
+      schedule: { type: "interval", every: 1, unit: "year" },
+    });
+    expect(result.after.status).toBe("active");
   });
 });

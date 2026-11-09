@@ -14,7 +14,8 @@ import { isoDateSchema, personSelectorSchema, uuidSchema } from "../schemas/comm
 import { withPerson, withUserClient } from "../tool-context";
 import { fail, ok, summarizeList } from "../tool-result";
 import { readTimezonePreference } from "@/lib/medications/regenerate-dose-events";
-import { isValidTimeZone, zonedDate } from "../zoned-time";
+import { isValidTimeZone } from "../local-day";
+import { zonedDate } from "../zoned-time";
 import { WRITE_SCOPE } from "./scopes";
 import type { McpToolServer } from "./types";
 
@@ -288,17 +289,22 @@ export function registerCheckupTools(server: McpToolServer): void {
       const proposedReminders =
         normalizedReminders === undefined ? checkup.reminder_days_before : normalizedReminders;
 
+      const willReactivate =
+        args.schedule.type === "interval" && checkup.status === "completed";
+
       if (args.confirm !== true) {
         return ok(
           `Preview only — nothing written. "${checkup.title}" schedule: ${describeSchedule(checkup.schedule)} → ${describeSchedule(proposedSchedule)}. ` +
-            `Reminders: ${JSON.stringify(checkup.reminder_days_before)} → ${JSON.stringify(proposedReminders)}. ` +
-            `Ask the owner to confirm, then call again with the same arguments and confirm=true.`,
+            `Reminders: ${JSON.stringify(checkup.reminder_days_before)} → ${JSON.stringify(proposedReminders)}.` +
+            (willReactivate ? ` Status: completed → active.` : "") +
+            ` Ask the owner to confirm, then call again with the same arguments and confirm=true.`,
           {
             needs_confirm: true,
             checkup,
             proposed: {
               schedule: proposedSchedule,
               reminder_days_before: proposedReminders,
+              ...(willReactivate ? { status: "active" as const } : {}),
             },
           },
         );
@@ -312,7 +318,7 @@ export function registerCheckupTools(server: McpToolServer): void {
 
       return ok(
         `Updated schedule for "${result.after.title}": ${describeSchedule(result.after.schedule)}. ` +
-          `Next due: ${result.after.next_due_at ?? "none"}.`,
+          `Next due: ${result.after.next_due_at ?? "none"} (${result.after.status}).`,
         { before: result.before, after: result.after },
       );
     }, WRITE_SCOPE),

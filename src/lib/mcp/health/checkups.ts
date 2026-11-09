@@ -354,6 +354,7 @@ export interface CheckupItemSnapshot {
   status: string;
   schedule: unknown;
   next_due_at: string | null;
+  planned_on: string | null;
   reminder_days_before: number[] | null;
 }
 
@@ -441,11 +442,27 @@ export async function loadCheckupItem(
 ): Promise<CheckupItemSnapshot | null> {
   const { data, error } = await supabase
     .from("checkup_items")
-    .select("id, person_id, title, category, status, schedule, next_due_at, reminder_days_before")
+    .select(
+      "id, person_id, title, category, status, schedule, next_due_at, planned_on, reminder_days_before",
+    )
     .eq("id", checkupId)
     .maybeSingle();
   if (error) throw new Error(`Failed to load checkup: ${error.message}`);
   return (data as CheckupItemSnapshot | null) ?? null;
+}
+
+async function setCheckupPlannedOn(
+  supabase: SupabaseClient<Database>,
+  checkupId: string,
+  plannedOn: string | null,
+): Promise<void> {
+  const { error } = await supabase
+    .from("checkup_items")
+    .update({ planned_on: plannedOn })
+    .eq("id", checkupId);
+  if (error) {
+    throw new Error(`Failed to update planned_on: ${error.message}`);
+  }
 }
 
 /**
@@ -504,6 +521,14 @@ export async function markCheckupDone(
     );
   }
 
+  // Same order as mobile completeCheckup: clear the plan first, then insert. If the insert
+  // fails, restore the plan — never leave a landed completion behind a retryable failure
+  // (a second insert would advance a target-based due date another interval).
+  const priorPlannedOn = checkup.planned_on;
+  if (priorPlannedOn) {
+    await setCheckupPlannedOn(supabase, checkup.id, null);
+  }
+
   const { data: completion, error } = await supabase
     .from("checkup_completions")
     .insert({
@@ -515,6 +540,9 @@ export async function markCheckupDone(
     .select("id, done_at, note, evidence_record_id")
     .single();
   if (error || !completion) {
+    if (priorPlannedOn) {
+      await setCheckupPlannedOn(supabase, checkup.id, priorPlannedOn).catch(() => undefined);
+    }
     throw new Error(`Failed to mark checkup done: ${error?.message ?? "no row returned"}`);
   }
 
@@ -569,6 +597,11 @@ export async function updateCheckupSchedule(
   const reminders = normalizeReminderDays(params.reminderDaysBefore);
   if (reminders !== undefined) {
     payload.reminder_days_before = reminders;
+  }
+  // Interval recompute only writes next_due_at — a completed one-off would stay completed
+  // and stop getting reminders / advancing on later completions. Reactivate on conversion.
+  if (params.schedule.type === "interval" && before.status === "completed") {
+    payload.status = "active";
   }
 
   const { error } = await supabase
