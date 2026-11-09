@@ -328,18 +328,21 @@ openssl rand -hex 32   # → ORBIT_MASTER_KEY; save in a password manager
 ssh-keyscan <server-ip>   # optional → ORBIT_SSH_KNOWN_HOSTS
 ```
 
-**Required in Environment `production-cacos` (names only):**
+**Required in Environment `production-cacos` (names only — set them on the Environment, not as
+repository-level Actions variables, or a repository `ORBIT_SERVER_HOST` for production would be
+inherited and this job could deploy the wrong server):**
 
-| Where    | Name                    | Notes                                         |
-| -------- | ----------------------- | --------------------------------------------- |
-| Variable | `ORBIT_SERVER_HOST`     | Server IP; empty → auto-deploy quietly skips  |
-| Variable | `ORBIT_DOMAIN`          | Hostname only, e.g. sslip.io                  |
-| Variable | `ORBIT_ADMIN_EMAIL`     | Let's Encrypt contact                         |
-| Variable | `ORBIT_ALLOWED_EMAILS`  | Comma-separated Google allowlist              |
-| Variable | `GOOGLE_CLIENT_ID`      | Own OAuth client or extra redirect URI        |
-| Secret   | `ORBIT_SSH_PRIVATE_KEY` | Whole private key file (`orbit-deploy-cacos`) |
-| Secret   | `ORBIT_MASTER_KEY`      | From `openssl rand -hex 32` above             |
-| Secret   | `GOOGLE_CLIENT_SECRET`  | Matching the client id                        |
+| Where    | Name                       | Notes                                                              |
+| -------- | -------------------------- | ------------------------------------------------------------------ |
+| Variable | `ORBIT_SELF_HOST_INSTANCE` | Must be exactly `production-cacos` — the opt-in; without it → skip |
+| Variable | `ORBIT_SERVER_HOST`        | This instance's server IP                                          |
+| Variable | `ORBIT_DOMAIN`             | Hostname only, e.g. sslip.io                                       |
+| Variable | `ORBIT_ADMIN_EMAIL`        | Let's Encrypt contact                                              |
+| Variable | `ORBIT_ALLOWED_EMAILS`     | Comma-separated Google allowlist                                   |
+| Variable | `GOOGLE_CLIENT_ID`         | Own OAuth client or extra redirect URI                             |
+| Secret   | `ORBIT_SSH_PRIVATE_KEY`    | Whole private key file (`orbit-deploy-cacos`)                      |
+| Secret   | `ORBIT_MASTER_KEY`         | From `openssl rand -hex 32` above                                  |
+| Secret   | `GOOGLE_CLIENT_SECRET`     | Matching the client id                                             |
 
 **Optional (same names as `deploy/.env.example`; secrets for the secret ones):**
 `ORBIT_SERVER_USER`, `ORBIT_SSH_KNOWN_HOSTS`, `ORBIT_HTTP_ONLY`, `MCP_SERVER_ENABLED`,
@@ -350,8 +353,10 @@ when moving from a hosted project — `JWT_SECRET`, `ANON_KEY`, `SERVICE_ROLE_KE
 
 **How deploy behaves after merge (no further agent work):**
 
-1. Until `ORBIT_SERVER_HOST` is set in `production-cacos`, the `Deploy production-cacos` job on
-   every push to `main` quietly skips and does not fail the pipeline.
+1. Until `ORBIT_SELF_HOST_INSTANCE=production-cacos` (and `ORBIT_SERVER_HOST`) are set **in**
+   Environment `production-cacos`, the `Deploy production-cacos` job on every push to `main`
+   quietly skips and does not fail the pipeline. The opt-in exists so a repository-level
+   `ORBIT_SERVER_HOST` for production cannot be inherited into an empty second environment.
 2. Once the required names above are filled and the public SSH key is on the server, the **next**
    push to `main` whose production self-host job (`Deploy to your server`) succeeds also deploys
    this instance. If production self-host fails, `production-cacos` is skipped (fail-closed).

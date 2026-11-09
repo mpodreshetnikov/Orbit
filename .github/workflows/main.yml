@@ -738,10 +738,12 @@ jobs:
   deploy-production-cacos:
     # Second independent self-host instance (docs/SELF_HOSTING.md, "Second instance
     # (production-cacos)"). Runs only after Maxim's production self-host deploy succeeds; if that
-    # job fails, this one is skipped (fail-closed). Inside the reusable workflow, a missing
-    # ORBIT_SERVER_HOST in Environment `production-cacos` quietly skips without failing the
-    # pipeline. No extension publish for this instance. Concurrency is per-environment inside
-    # self-hosted.yml, so this does not share a group with production.
+    # job fails, this one is skipped (fail-closed). Inside the reusable workflow it quietly skips
+    # unless Environment `production-cacos` sets ORBIT_SELF_HOST_INSTANCE=production-cacos (and
+    # ORBIT_SERVER_HOST) — so a repository-level ORBIT_SERVER_HOST for production cannot be
+    # inherited into an empty second environment. No extension publish for this instance.
+    # Concurrency is per-environment inside self-hosted.yml, so this does not share a group with
+    # production.
     needs: [deploy-self-hosted]
     if: >-
       github.event_name == 'push' && github.ref == 'refs/heads/main' &&

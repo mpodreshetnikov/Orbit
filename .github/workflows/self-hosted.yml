@@ -68,9 +68,24 @@ jobs:
         id: server
         env:
           HOST: ${{ vars.ORBIT_SERVER_HOST }}
+          # Second instances must opt in with this name equal to the Environment. A bare
+          # ORBIT_SERVER_HOST is not enough: GitHub also exposes repository-level variables to an
+          # environment job, so an empty production-cacos would otherwise inherit production's host
+          # and deploy there again (docs/SELF_HOSTING.md, Second instance).
+          INSTANCE: ${{ vars.ORBIT_SELF_HOST_INSTANCE }}
           EVENT: ${{ github.event_name }}
           ENVIRONMENT: ${{ inputs.environment }}
         run: |
+          if [[ "$ENVIRONMENT" != production ]]; then
+            if [[ -z "$INSTANCE" || "$INSTANCE" != "$ENVIRONMENT" ]]; then
+              if [[ "$EVENT" == workflow_dispatch ]]; then
+                echo "::error::For environment ${ENVIRONMENT}, set the variable ORBIT_SELF_HOST_INSTANCE=${ENVIRONMENT} in that Environment (not at repository level), together with ORBIT_SERVER_HOST (docs/SELF_HOSTING.md, Second instance)."
+                exit 1
+              fi
+              echo "::notice::No deploy for environment ${ENVIRONMENT}: set ORBIT_SELF_HOST_INSTANCE=${ENVIRONMENT} in that Environment to opt in (avoids inheriting a repository ORBIT_SERVER_HOST)."
+              exit 0
+            fi
+          fi
           if [[ -n "$HOST" ]]; then
             echo "set=true" >>"$GITHUB_OUTPUT"
           elif [[ "$EVENT" == workflow_dispatch ]]; then

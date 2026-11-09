@@ -14,10 +14,11 @@ Notes:
 - GitHub Actions hosted/self-host jobs for Maxim run in environment `production`.
 - A second self-host instance uses environment `production-cacos`: job `Deploy production-cacos` in
   `.github/workflows/main.yml` runs only after successful `Deploy to your server`, quietly skips
-  when `ORBIT_SERVER_HOST` is unset there, and shares no concurrency group with production. Manual
-  check: _Actions → Deploy to your server_ with Environment `production-cacos`. Secret/variable
-  names and first-boot steps: `docs/SELF_HOSTING.md`, "Second instance (`production-cacos`)". No
-  extension publish on that path.
+  unless that Environment sets `ORBIT_SELF_HOST_INSTANCE=production-cacos` (plus
+  `ORBIT_SERVER_HOST`), and shares no concurrency group with production. Manual check: _Actions →
+  Deploy to your server_ with Environment `production-cacos`. Secret/variable names and first-boot
+  steps: `docs/SELF_HOSTING.md`, "Second instance (`production-cacos`)". No extension publish on
+  that path.
 - Deploy jobs are gated by `secrets-scan` and `quality-gates`.
 - Configure GitHub Actions Vercel values:
   - Secrets: `VERCEL_TOKEN`
