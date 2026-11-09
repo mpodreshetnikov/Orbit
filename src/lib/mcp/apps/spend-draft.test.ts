@@ -159,28 +159,30 @@ describe("registerSpendDraftApp", () => {
 });
 
 describe("confirmSpendDraftInputSchema", () => {
+  const editBase = {
+    person_id: "11111111-1111-4111-8111-111111111111",
+    mode: "edit" as const,
+    draft: {
+      transaction_id: "22222222-2222-4222-8222-222222222222",
+      account_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      posted_at: "2026-11-09T10:00:00.000Z",
+      amount: -200,
+      currency: "RUB",
+      transaction_type: "expense" as const,
+      merchant_name: "Кофе",
+      line_items: [
+        {
+          id: "33333333-3333-4333-8333-333333333333",
+          title: "Латте",
+          amount: -200,
+          assignment_method: "rule" as const,
+        },
+      ],
+    },
+  };
+
   it("keeps transaction_id on edit drafts instead of stripping via create schema", () => {
-    const parsed = confirmSpendDraftInputSchema.parse({
-      person_id: "11111111-1111-4111-8111-111111111111",
-      mode: "edit",
-      draft: {
-        transaction_id: "22222222-2222-4222-8222-222222222222",
-        account_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-        posted_at: "2026-11-09T10:00:00.000Z",
-        amount: -200,
-        currency: "RUB",
-        transaction_type: "expense",
-        merchant_name: "Кофе",
-        line_items: [
-          {
-            id: "33333333-3333-4333-8333-333333333333",
-            title: "Латте",
-            amount: -200,
-            assignment_method: "rule",
-          },
-        ],
-      },
-    });
+    const parsed = confirmSpendDraftInputSchema.parse(editBase);
     expect(parsed.mode).toBe("edit");
     expect(parsed.draft).toMatchObject({
       transaction_id: "22222222-2222-4222-8222-222222222222",
@@ -189,6 +191,19 @@ describe("confirmSpendDraftInputSchema", () => {
       id: "33333333-3333-4333-8333-333333333333",
       assignment_method: "rule",
     });
+  });
+
+  it("accepts an edit confirm that preserves more than the propose line cap", () => {
+    const many = Array.from({ length: 41 }, (_, i) => ({
+      id: `44444444-4444-4444-8444-${String(i).padStart(12, "0")}`,
+      title: `line-${i}`,
+      amount: -1,
+    }));
+    const parsed = confirmSpendDraftInputSchema.parse({
+      ...editBase,
+      draft: { ...editBase.draft, line_items: many },
+    });
+    expect(parsed.draft.line_items).toHaveLength(41);
   });
 });
 
@@ -199,5 +214,10 @@ describe("the spend card", () => {
     expect(SPEND_DRAFT_HTML).toContain("Подтвердить");
     expect(SPEND_DRAFT_HTML).toContain('protocolVersion: "2026-01-26"');
     expect(SPEND_DRAFT_HTML).toContain("ui/notifications/initialized");
+  });
+
+  it("keeps confirm in-flight after a client timeout so a late commit cannot be duplicated", () => {
+    expect(SPEND_DRAFT_HTML).toContain('kind: "waiting"');
+    expect(SPEND_DRAFT_HTML).not.toContain("busy = null;\n      decision = { kind: \"error\"");
   });
 });

@@ -124,6 +124,13 @@ function russianDateTime(iso: string): string {
   });
 }
 
+/** Same lock the web form's manualCategoryChange uses: rules must not overwrite a confirmed pick. */
+export function effectiveCategoryLock(item: SpendLineInput): boolean {
+  if (item.category_locked_by_user !== undefined) return item.category_locked_by_user;
+  const method = item.assignment_method ?? "manual";
+  return Boolean(item.category_id && method === "manual");
+}
+
 function toLineInputs(
   items: SpendLineInput[] | undefined,
   merchantName: string | null | undefined,
@@ -142,9 +149,7 @@ function toLineInputs(
     assignment_method: item.assignment_method ?? "manual",
     assignment_rule_id: item.assignment_rule_id ?? null,
     assignment_confidence: item.assignment_confidence ?? null,
-    category_locked_by_user:
-      item.category_locked_by_user ??
-      Boolean(item.category_id && item.assignment_method === "manual"),
+    category_locked_by_user: effectiveCategoryLock(item),
     last_category_rule_id: item.last_category_rule_id ?? null,
     last_category_rule_run_id: item.last_category_rule_run_id ?? null,
     category_assigned_at: item.category_assigned_at ?? null,
@@ -166,7 +171,7 @@ function serializeLines(items: SpendLineInput[]): SpendLineInput[] {
     assignment_method: item.assignment_method ?? "manual",
     assignment_rule_id: item.assignment_rule_id ?? null,
     assignment_confidence: item.assignment_confidence ?? null,
-    category_locked_by_user: item.category_locked_by_user ?? false,
+    category_locked_by_user: effectiveCategoryLock(item),
     last_category_rule_id: item.last_category_rule_id ?? null,
     last_category_rule_run_id: item.last_category_rule_run_id ?? null,
     category_assigned_at: item.category_assigned_at ?? null,

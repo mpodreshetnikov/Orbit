@@ -121,7 +121,7 @@ export const SPEND_DRAFT_HTML = `<!doctype html>
   }
   function takeResult(result) {
     var view = result && result.structuredContent && result.structuredContent.spend_draft;
-    if (view) { draft = view; decision = null; }
+    if (view) { draft = view; if (busy !== "confirm") decision = null; }
     else if (result && result.isError) {
       decision = { kind: "error", message: resultText(result) };
     }
@@ -144,6 +144,12 @@ export const SPEND_DRAFT_HTML = `<!doctype html>
     }
     if (decision && decision.kind === "declined") {
       card.appendChild(resultBox("bad", "Отклонено", "Ничего не записано."));
+      return;
+    }
+    if (decision && decision.kind === "waiting") {
+      // Confirm stays disabled (busy) so a late commit cannot be duplicated by a second click.
+      card.appendChild(resultBox("", "Ещё сохраняем…", decision.message || "Ждём ответ сервера. Не нажимайте ещё раз."));
+      if (draft) card.appendChild(draftBody(draft));
       return;
     }
     if (decision && decision.kind === "error") {
@@ -207,22 +213,29 @@ export const SPEND_DRAFT_HTML = `<!doctype html>
   function runConfirm() {
     if (!draft || busy) return;
     busy = "confirm";
+    decision = null;
     render();
     request("tools/call", {
       name: "confirm_spend_draft",
       arguments: { person_id: draft.person_id, mode: draft.mode, draft: draft.input }
     }, 60000, function (late) {
-      if (late && late.result && !late.result.isError) finishConfirm(late.result);
+      // A late answer after the UI timed out: still reconcile once, never re-enable Confirm earlier.
+      if (late && late.result) finishConfirm(late.result);
     }).then(function (result) {
       finishConfirm(result);
     }).catch(function (err) {
-      busy = null;
-      decision = { kind: "error", message: err.message || String(err) };
+      // Keep busy=confirm (indeterminate): the first request may still commit. Re-enabling Confirm
+      // would let the owner create a duplicate spend with no idempotency key.
+      decision = {
+        kind: "waiting",
+        message: (err.message || String(err)) + " Ждём, не нажимайте Подтвердить снова."
+      };
       render();
     });
   }
 
   function finishConfirm(result) {
+    if (decision && decision.kind === "confirmed") return;
     busy = null;
     if (result && result.isError) {
       decision = { kind: "error", message: resultText(result) || "Не удалось сохранить." };

@@ -18,6 +18,7 @@ import {
   applySpendDraft,
   buildCreateSpendDraft,
   buildEditSpendDraft,
+  effectiveCategoryLock,
   formatMoneyAmount,
   spendDraftSummaryText,
 } from "./spend-draft";
@@ -130,8 +131,30 @@ describe("buildCreateSpendDraft", () => {
     expect(built.draft.account_label).toBe("Наличные");
     expect(built.draft.amount_label).toBe("-350.00 RUB");
     expect(built.draft.lines[0]?.category_label).toBe("Еда");
+    // Manual category pick without an explicit lock flag must still serialize locked.
+    expect(built.draft.input.line_items?.[0]?.category_locked_by_user).toBe(true);
     expect(spendDraftSummaryText(built.draft)).toContain("Кофейня");
     expect(spendDraftSummaryText(built.draft)).not.toMatch(/-350|350\.00/);
+  });
+
+  it("derives the same manual lock for apply and for draft serialization", () => {
+    expect(effectiveCategoryLock({ title: "x", amount: -1, category_id: "c-1" })).toBe(true);
+    expect(
+      effectiveCategoryLock({
+        title: "x",
+        amount: -1,
+        category_id: "c-1",
+        assignment_method: "rule",
+      }),
+    ).toBe(false);
+    expect(
+      effectiveCategoryLock({
+        title: "x",
+        amount: -1,
+        category_id: "c-1",
+        category_locked_by_user: false,
+      }),
+    ).toBe(false);
   });
 
   it("refuses an unknown account", async () => {

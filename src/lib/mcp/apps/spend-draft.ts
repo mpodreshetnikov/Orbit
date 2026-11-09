@@ -49,6 +49,10 @@ const lineItemSchema = z.object({
   category_assigned_at: z.string().nullable().optional(),
 });
 
+/** Agent-proposed lines stay bounded; confirm of an edit may carry every preserved existing line. */
+const PROPOSE_LINE_MAX = 40;
+const CONFIRM_PRESERVED_LINE_MAX = 500;
+
 const createDraftSchema = z.object({
   account_id: uuidSchema.describe("Account from list_money_accounts."),
   posted_at: z.string().min(1).describe("When it happened, ISO datetime."),
@@ -61,10 +65,10 @@ const createDraftSchema = z.object({
   transaction_type: z.enum(TRANSACTION_TYPES).default("expense"),
   merchant_name: z.string().nullable().optional(),
   comment: z.string().nullable().optional(),
-  line_items: z.array(lineItemSchema).max(40).optional(),
+  line_items: z.array(lineItemSchema).max(PROPOSE_LINE_MAX).optional(),
 });
 
-const editDraftSchema = z.object({
+const editDraftProposeSchema = z.object({
   transaction_id: uuidSchema,
   account_id: uuidSchema.optional(),
   posted_at: z.string().min(1).optional(),
@@ -73,7 +77,12 @@ const editDraftSchema = z.object({
   transaction_type: z.enum(TRANSACTION_TYPES).optional(),
   merchant_name: z.string().nullable().optional(),
   comment: z.string().nullable().optional(),
-  line_items: z.array(lineItemSchema).max(40).optional(),
+  line_items: z.array(lineItemSchema).max(PROPOSE_LINE_MAX).optional(),
+});
+
+/** Confirm may round-trip every existing line a header-only edit preserved (can exceed propose max). */
+const editDraftConfirmSchema = editDraftProposeSchema.extend({
+  line_items: z.array(lineItemSchema).max(CONFIRM_PRESERVED_LINE_MAX).optional(),
 });
 
 /** Confirm input: mode picks the draft schema so edit keeps `transaction_id`. */
@@ -86,7 +95,7 @@ export const confirmSpendDraftInputSchema = z.discriminatedUnion("mode", [
   z.object({
     ...personSelectorSchema,
     mode: z.literal("edit"),
-    draft: editDraftSchema,
+    draft: editDraftConfirmSchema,
   }),
 ]);
 
@@ -148,7 +157,7 @@ export function registerSpendDraftApp(
         "Propose editing an existing money transaction, shown as a card the owner confirms from. Pass only the fields that change; omitted fields keep their current values. Nothing is saved until Confirm on the card. There is no direct update-money tool.",
       inputSchema: z.object({
         ...personSelectorSchema,
-        ...editDraftSchema.shape,
+        ...editDraftProposeSchema.shape,
       }),
       annotations: { readOnlyHint: true, openWorldHint: false },
       _meta: cardMeta,
