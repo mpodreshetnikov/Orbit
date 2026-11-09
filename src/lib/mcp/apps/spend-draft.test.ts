@@ -216,8 +216,10 @@ describe("the spend card", () => {
     expect(SPEND_DRAFT_HTML).toContain("ui/notifications/initialized");
   });
 
-  it("keeps confirm in-flight after a client timeout so a late commit cannot be duplicated", () => {
+  it("keeps confirm in-flight after a timeout but surfaces definitive RPC rejects", () => {
+    expect(SPEND_DRAFT_HTML).toContain("timedOut.timedOut = true");
+    expect(SPEND_DRAFT_HTML).toContain("if (err && err.timedOut)");
     expect(SPEND_DRAFT_HTML).toContain('kind: "waiting"');
-    expect(SPEND_DRAFT_HTML).not.toContain('busy = null;\n      decision = { kind: "error"');
+    expect(SPEND_DRAFT_HTML).toContain("late.error");
   });
 });

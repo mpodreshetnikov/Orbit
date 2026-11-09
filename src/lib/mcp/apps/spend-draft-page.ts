@@ -80,7 +80,10 @@ export const SPEND_DRAFT_HTML = `<!doctype html>
         var entry = pending[id];
         if (entry && !entry.settled) {
           entry.settled = true;
-          reject(new Error("нет ответа за " + Math.round(timeoutMs / 1000) + " с"));
+          // Mark timeouts: catch must keep confirm in-flight; a plain JSON-RPC reject is final.
+          var timedOut = new Error("нет ответа за " + Math.round(timeoutMs / 1000) + " с");
+          timedOut.timedOut = true;
+          reject(timedOut);
         }
       }, timeoutMs);
     });
@@ -219,18 +222,33 @@ export const SPEND_DRAFT_HTML = `<!doctype html>
       name: "confirm_spend_draft",
       arguments: { person_id: draft.person_id, mode: draft.mode, draft: draft.input }
     }, 60000, function (late) {
-      // A late answer after the UI timed out: still reconcile once, never re-enable Confirm earlier.
-      if (late && late.result) finishConfirm(late.result);
+      // Late after timeout: reconcile result or definitive JSON-RPC error.
+      if (!late) return;
+      if (late.error) {
+        finishConfirm({
+          isError: true,
+          content: [{ type: "text", text: (late.error && late.error.message) || "ошибка" }]
+        });
+      } else if (late.result) {
+        finishConfirm(late.result);
+      }
     }).then(function (result) {
       finishConfirm(result);
     }).catch(function (err) {
-      // Keep busy=confirm (indeterminate): the first request may still commit. Re-enabling Confirm
-      // would let the owner create a duplicate spend with no idempotency key.
-      decision = {
-        kind: "waiting",
-        message: (err.message || String(err)) + " Ждём, не нажимайте Подтвердить снова."
-      };
-      render();
+      if (err && err.timedOut) {
+        // Indeterminate: the request may still commit. Keep Confirm disabled until late reconcile.
+        decision = {
+          kind: "waiting",
+          message: (err.message || String(err)) + " Ждём, не нажимайте Подтвердить снова."
+        };
+        render();
+        return;
+      }
+      // Definitive RPC reject: pending is gone, nothing will arrive late — show error and unlock.
+      finishConfirm({
+        isError: true,
+        content: [{ type: "text", text: (err && err.message) || String(err) }]
+      });
     });
   }
 
