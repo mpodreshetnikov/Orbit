@@ -25,7 +25,11 @@ vi.mock("../resolve-person", () => ({
 }));
 
 import { SPEND_DRAFT_HTML } from "./spend-draft-page";
-import { registerSpendDraftApp, SPEND_DRAFT_RESOURCE_URI } from "./spend-draft";
+import {
+  confirmSpendDraftInputSchema,
+  registerSpendDraftApp,
+  SPEND_DRAFT_RESOURCE_URI,
+} from "./spend-draft";
 
 type Handler = (
   args: unknown,
@@ -154,10 +158,46 @@ describe("registerSpendDraftApp", () => {
   });
 });
 
+describe("confirmSpendDraftInputSchema", () => {
+  it("keeps transaction_id on edit drafts instead of stripping via create schema", () => {
+    const parsed = confirmSpendDraftInputSchema.parse({
+      person_id: "11111111-1111-4111-8111-111111111111",
+      mode: "edit",
+      draft: {
+        transaction_id: "22222222-2222-4222-8222-222222222222",
+        account_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        posted_at: "2026-11-09T10:00:00.000Z",
+        amount: -200,
+        currency: "RUB",
+        transaction_type: "expense",
+        merchant_name: "Кофе",
+        line_items: [
+          {
+            id: "33333333-3333-4333-8333-333333333333",
+            title: "Латте",
+            amount: -200,
+            assignment_method: "rule",
+          },
+        ],
+      },
+    });
+    expect(parsed.mode).toBe("edit");
+    expect(parsed.draft).toMatchObject({
+      transaction_id: "22222222-2222-4222-8222-222222222222",
+    });
+    expect(parsed.draft.line_items?.[0]).toMatchObject({
+      id: "33333333-3333-4333-8333-333333333333",
+      assignment_method: "rule",
+    });
+  });
+});
+
 describe("the spend card", () => {
   it("confirms through confirm_spend_draft with the draft it was given", () => {
     expect(SPEND_DRAFT_HTML).toContain('name: "confirm_spend_draft"');
     expect(SPEND_DRAFT_HTML).toContain("draft.input");
     expect(SPEND_DRAFT_HTML).toContain("Подтвердить");
+    expect(SPEND_DRAFT_HTML).toContain('protocolVersion: "2026-01-26"');
+    expect(SPEND_DRAFT_HTML).toContain("ui/notifications/initialized");
   });
 });

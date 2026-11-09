@@ -248,10 +248,18 @@ export const SPEND_DRAFT_HTML = `<!doctype html>
     render();
   }
 
-  request("ui/initialize", {}, 10000).then(function (init) {
-    if (init && init.result) takeResult(init.result);
-    else if (init) takeResult(init);
-  }).catch(function () {});
+  request("ui/initialize", {
+    protocolVersion: "2026-01-26",
+    appInfo: { name: "orbit-spend-draft", version: "1.0.0" },
+    appCapabilities: { availableDisplayModes: ["inline", "fullscreen"] }
+  }, 10000).then(function (result) {
+    result = result || {};
+    send({ jsonrpc: "2.0", method: "ui/notifications/initialized", params: {} });
+    if (result.hostContext) { /* host may restyle; draft arrives via tool-result */ }
+  }, function () {
+    document.getElementById("card").textContent = "";
+    document.getElementById("card").appendChild(el("p", "placeholder", "Карточка не смогла связаться с Claude. Трату можно внести в Orbit."));
+  });
 </script>
 </body>
 </html>

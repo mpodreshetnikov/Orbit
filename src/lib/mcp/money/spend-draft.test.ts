@@ -148,7 +148,7 @@ describe("buildCreateSpendDraft", () => {
 });
 
 describe("buildEditSpendDraft", () => {
-  it("loads the existing transaction for the person", async () => {
+  it("loads the existing transaction and keeps line ids for a header-only edit", async () => {
     const built = await buildEditSpendDraft(
       createClient({
         existing: {
@@ -162,7 +162,26 @@ describe("buildEditSpendDraft", () => {
           merchant_name: "Магазин",
           comment: null,
         },
-        lines: [{ id: "li-1", title: "Хлеб", amount: -100, category_id: "c-food" }],
+        lines: [
+          {
+            id: "li-1",
+            title: "Хлеб",
+            amount: -100,
+            quantity: 2,
+            unit: "шт",
+            line_status: "final",
+            related_line_item_id: null,
+            category_id: "c-food",
+            beneficiary_person_id: null,
+            assignment_method: "rule",
+            assignment_rule_id: "rule-1",
+            assignment_confidence: 0.9,
+            category_locked_by_user: false,
+            last_category_rule_id: "rule-1",
+            last_category_rule_run_id: "run-1",
+            category_assigned_at: "2026-11-01T09:00:00.000Z",
+          },
+        ],
       }),
       PERSON,
       { transaction_id: "tx-9", amount: -120, merchant_name: "Магазин у дома" },
@@ -173,6 +192,13 @@ describe("buildEditSpendDraft", () => {
     expect(built.draft.transaction_id).toBe("tx-9");
     expect(built.draft.merchant_name).toBe("Магазин у дома");
     expect(built.draft.amount_label).toBe("-120.00 RUB");
+    expect(built.draft.input.line_items?.[0]).toMatchObject({
+      id: "li-1",
+      title: "Хлеб",
+      quantity: 2,
+      assignment_method: "rule",
+      assignment_rule_id: "rule-1",
+    });
   });
 
   it("refuses another person's transaction", async () => {
@@ -216,6 +242,59 @@ describe("applySpendDraft", () => {
       },
     );
     expect(applied).toEqual({ ok: true, transaction_id: "tx-new", label: "Кофе" });
+  });
+
+  it("rolls back the header when line insert fails", async () => {
+    const deletes: string[] = [];
+    const applied = await applySpendDraft(
+      {
+        from(table: string) {
+          if (table === "money_transactions") {
+            return {
+              insert() {
+                return {
+                  select() {
+                    return {
+                      single: async () => ({
+                        data: { id: "tx-orphan", merchant_name: "Кофе" },
+                        error: null,
+                      }),
+                    };
+                  },
+                };
+              },
+              delete() {
+                return {
+                  eq: async (_col: string, id: string) => {
+                    deletes.push(id);
+                    return { error: null };
+                  },
+                };
+              },
+            };
+          }
+          if (table === "money_line_items") {
+            return {
+              insert: async () => ({ error: { message: "category missing" } }),
+            };
+          }
+          throw new Error(`unexpected table ${table}`);
+        },
+      } as never,
+      PERSON,
+      "create",
+      {
+        account_id: "a-1",
+        posted_at: "2026-11-09T10:00:00.000Z",
+        amount: -80,
+        currency: "RUB",
+        transaction_type: "expense",
+        merchant_name: "Кофе",
+        line_items: [{ title: "Латте", amount: -80, category_id: "c-food" }],
+      },
+    );
+    expect(applied.ok).toBe(false);
+    expect(deletes).toEqual(["tx-orphan"]);
   });
 
   it("updates via the atomic RPC on edit", async () => {

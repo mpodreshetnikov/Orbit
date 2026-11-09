@@ -9,6 +9,8 @@ import {
 import type {
   CreateMoneyLineItemInput,
   CreateMoneyTransactionInput,
+  MoneyAssignmentMethod,
+  MoneyLineStatus,
   MoneyTransactionType,
   UpdateMoneyTransactionInput,
 } from "@/types/money";
@@ -30,9 +32,22 @@ type Client = SupabaseClient<Database>;
 export type SpendDraftMode = "create" | "edit";
 
 export interface SpendLineInput {
+  id?: string;
   title: string;
   amount: number;
+  quantity?: number | null;
+  unit?: string | null;
+  line_status?: MoneyLineStatus;
+  related_line_item_id?: string | null;
   category_id?: string | null;
+  beneficiary_person_id?: string | null;
+  assignment_method?: MoneyAssignmentMethod;
+  assignment_rule_id?: string | null;
+  assignment_confidence?: number | null;
+  category_locked_by_user?: boolean;
+  last_category_rule_id?: string | null;
+  last_category_rule_run_id?: string | null;
+  category_assigned_at?: string | null;
 }
 
 export interface SpendCreateInput {
@@ -89,6 +104,9 @@ const TYPE_LABELS: Record<MoneyTransactionType, string> = {
   adjustment: "корректировка",
 };
 
+const EXISTING_LINE_SELECT =
+  "id, title, amount, quantity, unit, line_status, related_line_item_id, category_id, beneficiary_person_id, assignment_method, assignment_rule_id, assignment_confidence, category_locked_by_user, last_category_rule_id, last_category_rule_run_id, category_assigned_at";
+
 export function formatMoneyAmount(amount: number, currency: string): string {
   const sign = amount > 0 ? "+" : "";
   return `${sign}${amount.toFixed(2)} ${currency}`;
@@ -112,18 +130,64 @@ function toLineInputs(
   amount: number,
 ): CreateMoneyLineItemInput[] {
   const mapped = (items ?? []).map((item) => ({
+    id: item.id,
     title: item.title.trim(),
     amount: item.amount,
+    quantity: item.quantity ?? null,
+    unit: item.unit ?? null,
+    line_status: item.line_status ?? "final",
+    related_line_item_id: item.related_line_item_id ?? null,
     category_id: item.category_id ?? null,
-    assignment_method: "manual" as const,
-    category_locked_by_user: Boolean(item.category_id),
+    beneficiary_person_id: item.beneficiary_person_id ?? null,
+    assignment_method: item.assignment_method ?? "manual",
+    assignment_rule_id: item.assignment_rule_id ?? null,
+    assignment_confidence: item.assignment_confidence ?? null,
+    category_locked_by_user:
+      item.category_locked_by_user ??
+      Boolean(item.category_id && item.assignment_method === "manual"),
+    last_category_rule_id: item.last_category_rule_id ?? null,
+    last_category_rule_run_id: item.last_category_rule_run_id ?? null,
+    category_assigned_at: item.category_assigned_at ?? null,
   }));
   return lineItemsOrWhole(mapped, merchantName, amount);
+}
+
+function serializeLines(items: SpendLineInput[]): SpendLineInput[] {
+  return items.map((item) => ({
+    id: item.id,
+    title: item.title.trim(),
+    amount: item.amount,
+    quantity: item.quantity ?? null,
+    unit: item.unit ?? null,
+    line_status: item.line_status ?? "final",
+    related_line_item_id: item.related_line_item_id ?? null,
+    category_id: item.category_id ?? null,
+    beneficiary_person_id: item.beneficiary_person_id ?? null,
+    assignment_method: item.assignment_method ?? "manual",
+    assignment_rule_id: item.assignment_rule_id ?? null,
+    assignment_confidence: item.assignment_confidence ?? null,
+    category_locked_by_user: item.category_locked_by_user ?? false,
+    last_category_rule_id: item.last_category_rule_id ?? null,
+    last_category_rule_run_id: item.last_category_rule_run_id ?? null,
+    category_assigned_at: item.category_assigned_at ?? null,
+  }));
 }
 
 async function categoryNameMap(supabase: Client): Promise<Map<string, string>> {
   const categories = await listMoneyCategories(supabase);
   return new Map(categories.map((row) => [row.id, row.name_ru || row.name_en || row.id]));
+}
+
+async function unknownCategoryIds(
+  supabase: Client,
+  items: SpendLineInput[] | undefined,
+): Promise<string[]> {
+  const ids = [
+    ...new Set((items ?? []).map((item) => item.category_id).filter(Boolean)),
+  ] as string[];
+  if (ids.length === 0) return [];
+  const names = await categoryNameMap(supabase);
+  return ids.filter((id) => !names.has(id));
 }
 
 async function resolveAccount(
@@ -171,6 +235,14 @@ export async function buildCreateSpendDraft(
   const account = await resolveAccount(supabase, person.id, input.account_id);
   if ("error" in account) return { ok: false, error: account.error };
 
+  const unknown = await unknownCategoryIds(supabase, input.line_items);
+  if (unknown.length > 0) {
+    return {
+      ok: false,
+      error: `Unknown category id(s): ${unknown.join(", ")}. Call list_money_categories.`,
+    };
+  }
+
   const currency = input.currency.trim() || account.currency;
   const lines = toLineInputs(input.line_items, input.merchant_name, input.amount);
   const names = await categoryNameMap(supabase);
@@ -182,11 +254,7 @@ export async function buildCreateSpendDraft(
     transaction_type: input.transaction_type,
     merchant_name: input.merchant_name?.trim() || null,
     comment: input.comment?.trim() || null,
-    line_items: (input.line_items ?? []).map((item) => ({
-      title: item.title.trim(),
-      amount: item.amount,
-      category_id: item.category_id ?? null,
-    })),
+    line_items: serializeLines(input.line_items ?? []),
   };
 
   return {
@@ -251,14 +319,35 @@ export async function buildEditSpendDraft(
   if (!lineSource) {
     const { data: rows, error: lineError } = await supabase
       .from("money_line_items")
-      .select("id, title, amount, category_id")
+      .select(EXISTING_LINE_SELECT)
       .eq("transaction_id", existing.id);
     if (lineError) return { ok: false, error: lineError.message };
     lineSource = (rows ?? []).map((row) => ({
+      id: row.id,
       title: row.title,
       amount: Number(row.amount),
+      quantity: row.quantity,
+      unit: row.unit,
+      line_status: row.line_status as MoneyLineStatus,
+      related_line_item_id: row.related_line_item_id,
       category_id: row.category_id,
+      beneficiary_person_id: row.beneficiary_person_id,
+      assignment_method: row.assignment_method as MoneyAssignmentMethod,
+      assignment_rule_id: row.assignment_rule_id,
+      assignment_confidence: row.assignment_confidence,
+      category_locked_by_user: row.category_locked_by_user ?? false,
+      last_category_rule_id: row.last_category_rule_id,
+      last_category_rule_run_id: row.last_category_rule_run_id,
+      category_assigned_at: row.category_assigned_at,
     }));
+  }
+
+  const unknown = await unknownCategoryIds(supabase, lineSource);
+  if (unknown.length > 0) {
+    return {
+      ok: false,
+      error: `Unknown category id(s): ${unknown.join(", ")}. Call list_money_categories.`,
+    };
   }
 
   const lines = toLineInputs(lineSource, merchant, amount);
@@ -272,11 +361,7 @@ export async function buildEditSpendDraft(
     transaction_type: transactionType,
     merchant_name: merchant,
     comment,
-    line_items: lineSource.map((item) => ({
-      title: item.title.trim(),
-      amount: item.amount,
-      category_id: item.category_id ?? null,
-    })),
+    line_items: serializeLines(lineSource),
   };
 
   return {
@@ -331,7 +416,12 @@ export async function applySpendDraft(
       (item) => lineItemRow(item, tx.id) as MoneyLineItemInsert,
     );
     const { error: lineError } = await supabase.from("money_line_items").insert(items);
-    if (lineError) return { ok: false, error: lineError.message };
+    if (lineError) {
+      // Compensating delete: PostgREST has no multi-statement write here; roll back the header so
+      // a failed confirm cannot leave a partial spend (or duplicate it on retry).
+      await supabase.from("money_transactions").delete().eq("id", tx.id);
+      return { ok: false, error: lineError.message };
+    }
 
     return {
       ok: true,

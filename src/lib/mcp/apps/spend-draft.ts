@@ -28,12 +28,25 @@ export const SPEND_DRAFT_RESOURCE_URI = "ui://orbit/spend-draft.html";
 const TRANSACTION_TYPES = ["expense", "income", "transfer", "refund", "fee", "adjustment"] as const;
 
 const lineItemSchema = z.object({
+  id: uuidSchema.optional().describe("Existing line id; required to keep a saved line on edit."),
   title: z.string().min(1).describe("Line title as the owner would see it."),
   amount: z.number().describe("Line amount, signed the same way as the transaction amount."),
+  quantity: z.number().nullable().optional(),
+  unit: z.string().nullable().optional(),
+  line_status: z.enum(["final", "returned", "cancelled"]).optional(),
+  related_line_item_id: uuidSchema.nullable().optional(),
   category_id: uuidSchema
     .nullable()
     .optional()
     .describe("Orbit category id from list_money_categories."),
+  beneficiary_person_id: uuidSchema.nullable().optional(),
+  assignment_method: z.enum(["manual", "import", "rule", "llm"]).optional(),
+  assignment_rule_id: uuidSchema.nullable().optional(),
+  assignment_confidence: z.number().nullable().optional(),
+  category_locked_by_user: z.boolean().optional(),
+  last_category_rule_id: uuidSchema.nullable().optional(),
+  last_category_rule_run_id: uuidSchema.nullable().optional(),
+  category_assigned_at: z.string().nullable().optional(),
 });
 
 const createDraftSchema = z.object({
@@ -62,6 +75,20 @@ const editDraftSchema = z.object({
   comment: z.string().nullable().optional(),
   line_items: z.array(lineItemSchema).max(40).optional(),
 });
+
+/** Confirm input: mode picks the draft schema so edit keeps `transaction_id`. */
+export const confirmSpendDraftInputSchema = z.discriminatedUnion("mode", [
+  z.object({
+    ...personSelectorSchema,
+    mode: z.literal("create"),
+    draft: createDraftSchema,
+  }),
+  z.object({
+    ...personSelectorSchema,
+    mode: z.literal("edit"),
+    draft: editDraftSchema,
+  }),
+]);
 
 const cardMeta = {
   ui: { resourceUri: SPEND_DRAFT_RESOURCE_URI },
@@ -139,11 +166,7 @@ export function registerSpendDraftApp(
       title: "Confirm a spend draft",
       description:
         "Used by the spend draft card's Confirm button (and after an explicit owner Approve in chat on hosts without MCP Apps): saves the proposed create or edit. Requires money:write. Call only after the owner clearly confirmed this same draft.",
-      inputSchema: z.object({
-        ...personSelectorSchema,
-        mode: z.enum(["create", "edit"]),
-        draft: z.union([createDraftSchema, editDraftSchema]),
-      }),
+      inputSchema: confirmSpendDraftInputSchema,
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
       _meta: { ui: { visibility: ["model", "app"] } },
     },
