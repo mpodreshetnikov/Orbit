@@ -4,7 +4,7 @@ import { chartDomain, plot } from "@/components/charts";
 import { byCategory, formatMoment, trendPercent } from "@/features/measurements/format";
 import HealthScreen from "@/screens/health-screen";
 import MeasurementScreen from "@/screens/measurement-screen";
-import MeasurementsScreen from "@/screens/measurements-screen";
+import MeasurementsScreen, { measurementsEmptyKey } from "@/screens/measurements-screen";
 import { db, fail, fakeSession, seed, setSession } from "../../test/fake-supabase";
 import { household, NOW, PERSON, USER_ID } from "../../test/fixtures";
 import { renderScreens } from "../../test/render";
@@ -134,6 +134,11 @@ describe("the measurements list", () => {
     seedMeasurements({ [PERSON.id]: ["waist", "weight", "bmi"] });
     await renderScreens(routes, "/health/measurements");
     expect(await screen.findByText("Все измерения скрыты")).toBeOnTheScreen();
+  });
+
+  it("uses search-miss copy for a nonempty query, not the all-hidden warning", () => {
+    expect(measurementsEmptyKey("нет-такого")).toBe("measurements.noSearchResults");
+    expect(measurementsEmptyKey("")).toBe("measurements.allHidden");
   });
 
   it("offers a retry when the person cannot be read", async () => {

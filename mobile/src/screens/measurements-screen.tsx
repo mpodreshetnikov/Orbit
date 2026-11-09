@@ -22,10 +22,18 @@ export function TrendMark({ history }: { history: { value: number }[] }) {
 }
 
 /**
+ * Empty-list copy when the person has measurements but none are shown: a nonempty search that
+ * matches nothing, versus every type hidden with no query.
+ */
+export function measurementsEmptyKey(query: string) {
+  return query ? "measurements.noSearchResults" : "measurements.allHidden";
+}
+
+/**
  * The person's measurements — the web measurements page's cards, grouped by category as it groups
  * them, with its search in the navigation bar. The web page's table and body-map views are left to
  * the web: on a phone the cards already show every value, and the table is the same history a card
- * opens.
+ * opens. View-only: recording and visibility live with the agent.
  */
 export default function MeasurementsScreen() {
   const palette = usePalette();
@@ -103,7 +111,7 @@ export default function MeasurementsScreen() {
               </Text>
             </View>
           ) : (
-            <Placeholder message={t("measurements.allHidden")} />
+            <Placeholder message={t(measurementsEmptyKey(query))} />
           )
         }
         ListFooterComponent={
