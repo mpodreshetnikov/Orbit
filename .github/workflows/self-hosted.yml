@@ -1,15 +1,41 @@
 name: Deploy to your server
 
 # Installs Orbit on your own server and keeps it on the latest main, configured entirely by this
-# repository's secrets and variables, or its production environment's (docs/SELF_HOSTING.md,
+# repository's secrets and variables, or a named environment's (docs/SELF_HOSTING.md,
 # "Deploy from GitHub"). Does nothing until the ORBIT_SERVER_HOST variable is set. The work is
-# deploy/ci/deploy.sh.
+# deploy/ci/deploy.sh. Callers pass `environment` (default `production`); a second instance uses
+# Environment `production-cacos` (docs/SELF_HOSTING.md, "Second instance (production-cacos)").
 on:
-  # Every commit on main, once its images are published (deploy-self-hosted in main.yml).
+  # Every commit on main, once its images are published (deploy-self-hosted / deploy-production-cacos
+  # in main.yml).
   workflow_call:
-  # By hand: Actions -> Deploy to your server -> Run workflow.
+    inputs:
+      environment:
+        description: GitHub Environment whose secrets and variables configure this deploy
+        type: string
+        required: false
+        default: production
+      tip_check_job:
+        description: >-
+          Job name the tip check looks up in the tip's main.yml run (caller name / this job name).
+          Leave the default when the caller is still named "Deploy to your server".
+        type: string
+        required: false
+        default: Deploy to your server / Deploy to your server
+      action:
+        description: deploy | restore | doctor | migrate-from-supabase | test-alert
+        type: string
+        required: false
+        default: deploy
+  # By hand: Actions -> Deploy to your server -> Run workflow. Pick Environment production or
+  # production-cacos.
   workflow_dispatch:
     inputs:
+      environment:
+        description: GitHub Environment whose secrets and variables configure this deploy
+        type: choice
+        options: [production, production-cacos]
+        default: production
       action:
         description: "deploy = install or update; restore = then replace the data with the latest backup (a server that replaces a lost one); doctor = only show what the server's network reaches, changing nothing; migrate-from-supabase = then replace the data with the hosted Supabase project's (which is only read); test-alert = then send a test message to the Telegram alerts"
         type: choice
@@ -27,13 +53,14 @@ jobs:
     name: Deploy to your server
     # The settings may be the repository's or this environment's: with it, the job sees both, an
     # environment's value winning. GitHub creates the environment when it does not exist yet.
-    environment: production
+    environment: ${{ inputs.environment }}
     runs-on: ubuntu-latest
-    # One deploy at a time; a newer one waits rather than cancelling one halfway through a migration.
-    # A doctor run only reads, and has a group of its own: in the deploys' group it would take the
-    # single pending slot from a deploy waiting there.
+    # One deploy at a time per environment; a newer one waits rather than cancelling one halfway
+    # through a migration. A doctor run only reads, and has a group of its own: in the deploys'
+    # group it would take the single pending slot from a deploy waiting there. Environments do not
+    # share a group, so production and production-cacos never block each other.
     concurrency:
-      group: ${{ inputs.action == 'doctor' && 'self-hosted-doctor' || 'self-hosted-deploy' }}
+      group: ${{ inputs.action == 'doctor' && format('self-hosted-doctor-{0}', inputs.environment) || format('self-hosted-deploy-{0}', inputs.environment) }}
       cancel-in-progress: false
     steps:
       # Here and not in a job-level `if`, which cannot see an environment's variables.
@@ -42,14 +69,15 @@ jobs:
         env:
           HOST: ${{ vars.ORBIT_SERVER_HOST }}
           EVENT: ${{ github.event_name }}
+          ENVIRONMENT: ${{ inputs.environment }}
         run: |
           if [[ -n "$HOST" ]]; then
             echo "set=true" >>"$GITHUB_OUTPUT"
           elif [[ "$EVENT" == workflow_dispatch ]]; then
-            echo "::error::Set the ORBIT_SERVER_HOST variable to your server's IP address, under Settings -> Secrets and variables -> Actions, or in the production environment (docs/SELF_HOSTING.md, Deploy from GitHub)."
+            echo "::error::Set the ORBIT_SERVER_HOST variable to your server's IP address, under Settings -> Secrets and variables -> Actions, or in the ${ENVIRONMENT} environment (docs/SELF_HOSTING.md, Deploy from GitHub)."
             exit 1
           else
-            echo "::notice::No server to deploy to: the ORBIT_SERVER_HOST variable is not set."
+            echo "::notice::No server to deploy to in environment ${ENVIRONMENT}: the ORBIT_SERVER_HOST variable is not set."
           fi
       - uses: actions/checkout@v4
         if: steps.server.outputs.set == 'true'
@@ -62,7 +90,7 @@ jobs:
         if: steps.server.outputs.set == 'true' && github.event_name == 'push'
         uses: ./.github/actions/production-tip-check
         with:
-          job: Deploy to your server / Deploy to your server
+          job: ${{ inputs.tip_check_job }}
       - name: Deploy
         if: steps.server.outputs.set == 'true' && (github.event_name != 'push' || steps.tip.outputs.deploy_sha != '')
         env:
