@@ -42,8 +42,8 @@ name: Отчеты
     element: "Категории"
     centerElement: true
 - takeScreenshot: reports-03-january-categories
-# Expand housing to the seeded rent leaf (accessibility label Раскрыть «Жилье»).
-- tapOn: "Раскрыть «Жилье»"
+# Treemap UX: tap the housing block (hint «Нажмите на блок…») to open its children.
+- tapOn: "Жилье, .*"
 - extendedWaitUntil:
     visible: "Аренда.*"
     timeout: 15000
