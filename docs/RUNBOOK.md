@@ -7,11 +7,18 @@
 - Stop local runtime/services: run `dev-stop` from `AGENTS.md`.
 - Local DB reset + deploy: run `db-reset` from `AGENTS.md`.
 - Local CI-style gate: run `ci` from `AGENTS.md`.
-- Production deploy path: GitHub Actions workflow `.github/workflows/main.yml` on push to `main` (Vercel production + Supabase production deploy).
+- Production deploy path: GitHub Actions workflow `.github/workflows/main.yml` on push to `main` (Vercel production + Supabase production deploy + self-host).
 
 Notes:
 
-- GitHub Actions jobs run in environment `production`.
+- GitHub Actions hosted/self-host jobs for Maxim run in environment `production`.
+- A second self-host instance uses environment `production-cacos`: job `Deploy production-cacos` in
+  `.github/workflows/main.yml` runs only after successful `Deploy to your server`, quietly skips
+  unless that Environment sets `ORBIT_SELF_HOST_INSTANCE=production-cacos` (plus
+  `ORBIT_SERVER_HOST`), and shares no concurrency group with production. Manual check: _Actions →
+  Deploy to your server_ with Environment `production-cacos`. Secret/variable names and first-boot
+  steps: `docs/SELF_HOSTING.md`, "Second instance (`production-cacos`)". No extension publish on
+  that path.
 - Deploy jobs are gated by `secrets-scan` and `quality-gates`.
 - Configure GitHub Actions Vercel values:
   - Secrets: `VERCEL_TOKEN`
