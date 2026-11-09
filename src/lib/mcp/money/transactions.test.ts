@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { createSupabaseStub } from "../health/test-support";
 import {
+  getMoneyTransactionDetails,
   listMoneyAccounts,
   listMoneyCategories,
   listMoneyTransactions,
   resolveCategoryFilter,
+  searchMoneyLineItems,
   toCompactTransaction,
   type MoneyCategory,
   type MoneyTransactionView,
@@ -230,6 +232,7 @@ describe("listMoneyTransactions", () => {
         p_amount_max: 5000,
         p_offset: 50,
         p_limit: 200,
+        p_include_line_items: true,
       }),
     );
   });
@@ -273,13 +276,29 @@ describe("listMoneyTransactions", () => {
       stub.client,
       { payerPersonId: "p-1", offset: 0, limit: 50 },
       categories,
-      true,
+      { includeBankOperation: true },
     );
 
     expect(page.transactions[0].bank_operation).toEqual({
       mcc: "5411",
       merchant: { name: "ВкусВилл" },
     });
+  });
+
+  it("asks the feed to omit line jsonb for a compact MCP page", async () => {
+    const stub = createSupabaseStub({}, { money_list_transactions_feed: { data: [] } });
+
+    await listMoneyTransactions(
+      stub.client,
+      { payerPersonId: "p-1", offset: 0, limit: 100 },
+      categories,
+      { includeLineItems: false },
+    );
+
+    expect(stub.rpc).toHaveBeenCalledWith(
+      "money_list_transactions_feed",
+      expect.objectContaining({ p_include_line_items: false, p_limit: 100 }),
+    );
   });
 
   it("surfaces an RPC error", async () => {
@@ -362,5 +381,113 @@ describe("a transaction's edges", () => {
 
     expect(transaction.mcc).toBeNull();
     expect(transaction.line_items).toEqual([]);
+  });
+});
+
+describe("getMoneyTransactionDetails", () => {
+  it("loads line items for the requested ids in request order", async () => {
+    const stub = createSupabaseStub({
+      money_transactions: [
+        {
+          data: [
+            {
+              id: "t-2",
+              posted_at: "2026-10-28T10:00:00Z",
+              amount: -10,
+              currency: "RUB",
+              merchant_name: "X",
+              money_line_items: [
+                {
+                  id: "l-1",
+                  title: "Хлеб",
+                  amount: -10,
+                  quantity: 1,
+                  unit: "шт",
+                  line_status: "final",
+                  category_id: "food",
+                  assignment_method: "manual",
+                  created_at: "2026-10-28T10:00:01Z",
+                },
+              ],
+            },
+            {
+              id: "t-1",
+              posted_at: "2026-10-27T10:00:00Z",
+              amount: -5,
+              currency: "RUB",
+              merchant_name: "Y",
+              money_line_items: [],
+            },
+          ],
+        },
+      ],
+    });
+
+    const details = await getMoneyTransactionDetails(
+      stub.client,
+      "p-1",
+      ["t-1", "t-2", "t-1"],
+      categories,
+    );
+
+    expect(stub.argsFor("money_transactions", "eq")[0]).toEqual(["payer_person_id", "p-1"]);
+    expect(stub.argsFor("money_transactions", "in")[0]).toEqual(["id", ["t-1", "t-2"]]);
+    expect(details.map((row) => row.id)).toEqual(["t-1", "t-2"]);
+    expect(details[1].line_items[0]).toMatchObject({
+      title: "Хлеб",
+      category: { id: "food", name: "Еда", canonical_key: "food" },
+    });
+  });
+
+  it("returns an empty list when no ids are left after trimming", async () => {
+    const stub = createSupabaseStub({ money_transactions: [] });
+    expect(await getMoneyTransactionDetails(stub.client, "p-1", ["  ", ""], [])).toEqual([]);
+    expect(stub.client.from).not.toHaveBeenCalled();
+  });
+});
+
+describe("searchMoneyLineItems", () => {
+  it("keeps only lines whose titles match the query, case-insensitively", async () => {
+    const stub = createSupabaseStub(
+      {},
+      {
+        money_list_transactions_feed: {
+          data: [
+            {
+              ...feedRow,
+              line_items: [
+                { title: "МОЛОКО 3.2%", amount: -80, category_id: null },
+                { title: "Хлеб", amount: -40, category_id: null },
+              ],
+              total_count: 3,
+            },
+          ],
+        },
+      },
+    );
+
+    const page = await searchMoneyLineItems(
+      stub.client,
+      { payerPersonId: "p-1", search: "молоко", offset: 0, limit: 50 },
+      categories,
+    );
+
+    expect(page.total).toBe(3);
+    expect(page.transactions).toHaveLength(1);
+    expect(page.transactions[0].matching_line_items).toEqual([
+      expect.objectContaining({ title: "МОЛОКО 3.2%", amount: -80 }),
+    ]);
+  });
+
+  it("returns nothing for a blank query without hitting the feed", async () => {
+    const stub = createSupabaseStub({}, { money_list_transactions_feed: { data: [feedRow] } });
+    expect(
+      await searchMoneyLineItems(
+        stub.client,
+        { payerPersonId: "p-1", search: "   ", offset: 0, limit: 10 },
+        [],
+      ),
+    ).toEqual({ total: 0, transactions: [] });
+    expect(stub.rpc).not.toHaveBeenCalled();
   });
 });

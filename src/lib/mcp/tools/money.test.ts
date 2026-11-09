@@ -3,11 +3,38 @@ import type { McpToolServer } from "./types";
 
 const money = vi.hoisted(() => ({
   MONEY_FEED_MAX_LIMIT: 200,
-  MONEY_MCP_DEFAULT_LIMIT: 20,
+  MONEY_MCP_DEFAULT_LIMIT: 100,
+  MONEY_MCP_DETAIL_MAX_IDS: 50,
+  MONEY_MCP_LINE_SEARCH_DEFAULT_LIMIT: 50,
+  MONEY_MCP_LINE_SEARCH_MAX_LIMIT: 100,
   listMoneyTransactions: vi.fn(),
   listMoneyCategories: vi.fn(),
   listMoneyAccounts: vi.fn(),
+  getMoneyTransactionDetails: vi.fn(),
+  searchMoneyLineItems: vi.fn(),
   resolveCategoryFilter: vi.fn(),
+  compactTransactionsFromPage: (page: {
+    transactions: Array<{
+      line_items: Array<{ category?: { canonical_key?: string | null } | null }>;
+      [key: string]: unknown;
+    }>;
+    feedRows?: Array<{ line_item_count?: number; category_ids?: string[] }>;
+  }) =>
+    page.transactions.map((transaction, index) => {
+      const { line_items, ...rest } = transaction;
+      const row = page.feedRows?.[index];
+      return {
+        ...rest,
+        line_item_count: row?.line_item_count ?? line_items.length,
+        category_keys: [
+          ...new Set(
+            line_items
+              .map((item) => item.category?.canonical_key)
+              .filter((key): key is string => typeof key === "string" && key.length > 0),
+          ),
+        ],
+      };
+    }),
   toCompactTransaction: (transaction: {
     line_items: Array<{ category?: { canonical_key?: string | null } | null }>;
     [key: string]: unknown;
@@ -55,7 +82,7 @@ function contextWith(scopes: string[]) {
         scopes,
         extra: {
           grantId: "g-1",
-          authUserId: "11111111-1111-1111-1111-111111111111",
+          authUserId: "11111111-1111-4111-8111-111111111111",
           userEmail: "u@example.com",
         },
       },
@@ -68,9 +95,8 @@ const DEFAULTS = {
   direction: "all",
   transfers: "all",
   include_bank_payload: false,
-  include_line_items: false,
   sort: "posted_at_desc",
-  limit: 20,
+  limit: 100,
   offset: 0,
 };
 
@@ -94,6 +120,21 @@ const TRANSACTION = {
   ],
 };
 
+function feedPage(
+  transactions: Array<Record<string, unknown> & { line_items: unknown[] }> = [TRANSACTION],
+  total = 1,
+) {
+  return {
+    total,
+    transactions,
+    feedRows: transactions.map((transaction) => ({
+      line_item_count: transaction.line_items.length,
+      category_ids: [],
+    })),
+    categoryById: new Map(),
+  };
+}
+
 async function handlers(): Promise<Map<string, Handler>> {
   const { registerMoneyTools } = await import("./money");
   const map = new Map<string, Handler>();
@@ -112,7 +153,32 @@ beforeEach(() => {
   person.resolvePerson.mockResolvedValue({ status: "ok", person: PERSON });
   regen.readTimezonePreference.mockResolvedValue("Europe/Moscow");
   money.listMoneyCategories.mockResolvedValue([]);
-  money.listMoneyTransactions.mockResolvedValue({ total: 1, transactions: [TRANSACTION] });
+  money.listMoneyTransactions.mockResolvedValue(feedPage());
+  money.getMoneyTransactionDetails.mockResolvedValue([
+    {
+      id: "t-1",
+      posted_at: TRANSACTION.posted_at,
+      amount: -1290,
+      currency: "RUB",
+      merchant_name: "VKUSVILL",
+      line_items: TRANSACTION.line_items,
+    },
+  ]);
+  money.searchMoneyLineItems.mockResolvedValue({
+    total: 1,
+    transactions: [
+      {
+        id: "t-1",
+        posted_at: TRANSACTION.posted_at,
+        amount: -1290,
+        currency: "RUB",
+        merchant_name: "VKUSVILL",
+        account: TRANSACTION.account,
+        matching_line_items: [{ title: "Молоко", amount: -400, category: null }],
+        line_item_count: 2,
+      },
+    ],
+  });
   money.resolveCategoryFilter.mockReturnValue({ ids: ["food", "coffee"], unknown: [] });
 });
 
@@ -122,10 +188,8 @@ describe("list_money_transactions", () => {
 
     expect(result.isError).toBeFalsy();
     expect(result.content[0].text).toContain(
-      "2026-10-28 -1290.00 RUB to ВкусВилл [Кофе] (2 lines) — T-Bank, Tinkoff Black",
+      "2026-10-28 -1290.00 RUB to ВкусВилл [food] (2 lines) — T-Bank, Tinkoff Black",
     );
-    // Default page omits receipt lines in structuredContent (T-261109-hj2): agents walk
-    // the ledger with category_keys + line_item_count, and opt into full lines when needed.
     expect(result.structuredContent?.transactions).toEqual([
       {
         id: TRANSACTION.id,
@@ -143,17 +207,20 @@ describe("list_money_transactions", () => {
     expect(result.structuredContent).toMatchObject({
       has_more: false,
       next_offset: null,
-      limit: 20,
+      limit: 100,
     });
   });
 
-  it("returns full line items only when include_line_items is set", async () => {
-    const result = await (await handlers()).get("list_money_transactions")!(
-      { ...DEFAULTS, include_line_items: true },
-      ctx,
-    );
+  it("asks the feed for a wide page without line jsonb", async () => {
+    await (await handlers()).get("list_money_transactions")!(DEFAULTS, ctx);
 
-    expect(result.structuredContent?.transactions).toEqual([TRANSACTION]);
+    const [, , , options] = money.listMoneyTransactions.mock.calls[0] as [
+      unknown,
+      unknown,
+      unknown,
+      { includeLineItems?: boolean },
+    ];
+    expect(options).toMatchObject({ includeLineItems: false });
   });
 
   it("keeps a large page of receipt-heavy rows inside a compact structured payload", async () => {
@@ -166,7 +233,7 @@ describe("list_money_transactions", () => {
         category: { id: "coffee", name: "Кофе", canonical_key: "food" },
       })),
     }));
-    money.listMoneyTransactions.mockResolvedValue({ total: 400, transactions: fat });
+    money.listMoneyTransactions.mockResolvedValue(feedPage(fat, 400));
 
     const result = await (await handlers()).get("list_money_transactions")!(
       { ...DEFAULTS, limit: 100 },
@@ -185,7 +252,6 @@ describe("list_money_transactions", () => {
     expect(listed).toHaveLength(100);
     expect(listed[0]).toMatchObject({ line_item_count: 20, category_keys: ["food"] });
     expect(listed[0]).not.toHaveProperty("line_items");
-    // Full line items for this page were ~hundreds of KB; compact must stay well under that.
     expect(JSON.stringify(result.structuredContent).length).toBeLessThan(80_000);
   });
 
@@ -246,8 +312,8 @@ describe("list_money_transactions", () => {
 
   it("tells an offset past the end apart from an empty result", async () => {
     money.listMoneyTransactions
-      .mockResolvedValueOnce({ total: 0, transactions: [] })
-      .mockResolvedValueOnce({ total: 12, transactions: [TRANSACTION] });
+      .mockResolvedValueOnce(feedPage([], 0))
+      .mockResolvedValueOnce(feedPage([TRANSACTION], 12));
 
     const result = await (await handlers()).get("list_money_transactions")!(
       { ...DEFAULTS, offset: 50 },
@@ -258,7 +324,7 @@ describe("list_money_transactions", () => {
   });
 
   it("offers the next offset while more rows remain", async () => {
-    money.listMoneyTransactions.mockResolvedValue({ total: 120, transactions: [TRANSACTION] });
+    money.listMoneyTransactions.mockResolvedValue(feedPage([TRANSACTION], 120));
 
     const result = await (await handlers()).get("list_money_transactions")!(
       { ...DEFAULTS, limit: 1 },
@@ -282,6 +348,97 @@ describe("list_money_transactions", () => {
       Record<string, unknown>,
     ];
     expect(query.limit).toBe(50);
+  });
+});
+
+describe("get_money_transaction_details", () => {
+  it("returns receipt lines for the requested ids", async () => {
+    const result = await (await handlers()).get("get_money_transaction_details")!(
+      { transaction_ids: ["11111111-1111-4111-8111-111111111111"] },
+      ctx,
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(money.getMoneyTransactionDetails).toHaveBeenCalledWith(
+      expect.anything(),
+      "p-1",
+      ["11111111-1111-4111-8111-111111111111"],
+      [],
+    );
+    expect(result.structuredContent).toMatchObject({
+      returned: 1,
+      transactions: [expect.objectContaining({ id: "t-1", line_items: TRANSACTION.line_items })],
+    });
+  });
+
+  it("returns an empty page when none of the ids belong to the person", async () => {
+    money.getMoneyTransactionDetails.mockResolvedValue([]);
+
+    const result = await (await handlers()).get("get_money_transaction_details")!(
+      { transaction_ids: ["22222222-2222-4222-8222-222222222222"] },
+      ctx,
+    );
+
+    expect(result.structuredContent).toMatchObject({ returned: 0, transactions: [] });
+  });
+});
+
+describe("search_money_line_items", () => {
+  it("returns matching lines for a Cyrillic query and pages", async () => {
+    money.searchMoneyLineItems.mockResolvedValue({
+      total: 80,
+      transactions: [
+        {
+          id: "t-1",
+          posted_at: TRANSACTION.posted_at,
+          amount: -1290,
+          currency: "RUB",
+          merchant_name: "VKUSVILL",
+          account: TRANSACTION.account,
+          matching_line_items: [{ title: "Молоко", amount: -400, category: null }],
+          line_item_count: 2,
+        },
+      ],
+    });
+
+    const result = await (await handlers()).get("search_money_line_items")!(
+      { query: "МОЛОКО", limit: 50, offset: 0 },
+      ctx,
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(money.searchMoneyLineItems).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ search: "МОЛОКО", limit: 50, offset: 0 }),
+      [],
+    );
+    expect(result.content[0].text).toContain("Молоко");
+    expect(result.structuredContent).toMatchObject({
+      query: "МОЛОКО",
+      total: 80,
+      has_more: true,
+      next_offset: 50,
+      transactions: [
+        expect.objectContaining({
+          matching_line_items: [expect.objectContaining({ title: "Молоко" })],
+        }),
+      ],
+    });
+  });
+
+  it("reports empty results without inventing rows", async () => {
+    money.searchMoneyLineItems.mockResolvedValue({ total: 0, transactions: [] });
+
+    const result = await (await handlers()).get("search_money_line_items")!(
+      { query: "xyz-none", limit: 50, offset: 0 },
+      ctx,
+    );
+
+    expect(result.structuredContent).toMatchObject({
+      total: 0,
+      has_more: false,
+      transactions: [],
+    });
   });
 });
 
@@ -369,9 +526,8 @@ describe("edges of the money tools", () => {
   });
 
   it("names an uncategorized transaction and a counterparty-less one", async () => {
-    money.listMoneyTransactions.mockResolvedValue({
-      total: 1,
-      transactions: [
+    money.listMoneyTransactions.mockResolvedValue(
+      feedPage([
         {
           ...TRANSACTION,
           amount: 500,
@@ -379,8 +535,8 @@ describe("edges of the money tools", () => {
           counterparty: { direction: "from", name: null, channel: null, bank: null },
           line_items: [],
         },
-      ],
-    });
+      ]),
+    );
 
     const result = await (await handlers()).get("list_money_transactions")!(DEFAULTS, ctx);
 
@@ -427,14 +583,26 @@ describe("the money grant", () => {
 
     for (const name of [
       "list_money_transactions",
+      "get_money_transaction_details",
+      "search_money_line_items",
       "list_money_accounts",
       "list_money_categories",
     ]) {
-      const result = await map.get(name)!({ ...DEFAULTS, include_archived: false }, healthOnly);
+      const result = await map.get(name)!(
+        {
+          ...DEFAULTS,
+          include_archived: false,
+          query: "x",
+          transaction_ids: ["11111111-1111-4111-8111-111111111111"],
+        },
+        healthOnly,
+      );
       expect(result.isError, name).toBe(true);
       expect(result.content[0].text).toContain('"money:read"');
     }
     expect(money.listMoneyTransactions).not.toHaveBeenCalled();
+    expect(money.getMoneyTransactionDetails).not.toHaveBeenCalled();
+    expect(money.searchMoneyLineItems).not.toHaveBeenCalled();
     expect(money.listMoneyAccounts).not.toHaveBeenCalled();
     expect(money.listMoneyCategories).not.toHaveBeenCalled();
   });

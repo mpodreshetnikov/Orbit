@@ -4,12 +4,17 @@ import { isValidTimeZone, localDayEndUtc, localDayStartUtc } from "../local-day"
 import {
   MONEY_FEED_MAX_LIMIT,
   MONEY_MCP_DEFAULT_LIMIT,
+  MONEY_MCP_DETAIL_MAX_IDS,
+  MONEY_MCP_LINE_SEARCH_DEFAULT_LIMIT,
+  MONEY_MCP_LINE_SEARCH_MAX_LIMIT,
+  compactTransactionsFromPage,
+  getMoneyTransactionDetails,
   listMoneyAccounts,
   listMoneyCategories,
   listMoneyTransactions,
   resolveCategoryFilter,
-  toCompactTransaction,
-  type MoneyTransactionView,
+  searchMoneyLineItems,
+  type MoneyTransactionCompactView,
 } from "../money/transactions";
 import { dateRangeSchema, personSelectorSchema, uuidSchema } from "../schemas/common";
 import { withPerson, withUserClient } from "../tool-context";
@@ -19,13 +24,12 @@ import { MONEY_READ_SCOPE } from "./scopes";
 import type { McpToolServer } from "./types";
 
 /**
- * Read-only money tools (T-261028-w8i): the ledger, its accounts and its
- * categories. Nothing here writes; every tool is annotated read-only and needs
- * the `money:read` grant, which a health-only connection does not have.
+ * Read-only money tools: wide ledger list, detail-by-ids, line-item search,
+ * accounts and categories. Nothing here writes; every tool needs `money:read`.
  *
- * Transactions belong to a payer person, so the ledger tool resolves a person
- * the way the health tools do. Card and account numbers are never returned:
- * accounts are named by their label, cards by theirs.
+ * Agent steer: start with `list_money_transactions` (wide, no lines) or
+ * `search_money_line_items` (receipt text), then `get_money_transaction_details`
+ * only for the ids whose composition you need.
  */
 
 const TRANSACTION_TYPES = ["expense", "income", "transfer", "refund", "fee", "adjustment"] as const;
@@ -35,27 +39,41 @@ function formatAmount(amount: number, currency: string): string {
   return `${amount > 0 ? "+" : ""}${amount.toFixed(2)} ${currency}`;
 }
 
-function transactionLine(transaction: MoneyTransactionView, timeZone: string): string {
+function compactLine(transaction: MoneyTransactionCompactView, timeZone: string): string {
   const party = transaction.counterparty.name ?? transaction.merchant_name ?? "unknown";
-  const categories = [
-    ...new Set(transaction.line_items.map((item) => item.category?.name).filter(Boolean)),
-  ];
+  const categories = transaction.category_keys.length
+    ? transaction.category_keys.join(", ")
+    : "uncategorized";
   return (
     `${zonedDate(transaction.posted_at, timeZone)} ${formatAmount(transaction.amount, transaction.currency)}` +
     ` ${transaction.counterparty.direction} ${party}` +
-    ` [${categories.join(", ") || "uncategorized"}]` +
-    (transaction.line_items.length > 1 ? ` (${transaction.line_items.length} lines)` : "") +
+    ` [${categories}]` +
+    (transaction.line_item_count > 1 ? ` (${transaction.line_item_count} lines)` : "") +
     ` — ${transaction.bank}, ${transaction.account.label}`
   );
+}
+
+async function resolveMoneyTimezone(
+  supabase: Parameters<typeof readTimezonePreference>[0],
+  authUserId: string,
+  requestedZone: string | null | undefined,
+): Promise<{ timeZone: string } | { error: string }> {
+  if (requestedZone && !isValidTimeZone(requestedZone)) {
+    return {
+      error: `"${requestedZone}" is not a timezone this server recognises. Pass an IANA name like "Europe/Moscow".`,
+    };
+  }
+  const preferredZone = requestedZone ? null : await readTimezonePreference(supabase, authUserId);
+  return { timeZone: requestedZone ?? preferredZone ?? "UTC" };
 }
 
 export function registerMoneyTools(server: McpToolServer): void {
   server.registerTool(
     "list_money_transactions",
     {
-      title: "List money transactions",
+      title: "List money transactions (wide)",
       description:
-        "List a person's bank and manual money transactions, newest first, with the same filters and search as the web ledger, plus bounds on the amount. Pages with limit/offset and returns has_more / next_offset so a month can be walked in a few calls. Each transaction carries the bank and account, the counterparty, the bank's category and MCC, and the comment. Receipt line items are omitted by default (category_keys + line_item_count instead) so large ledgers stay inside MCP deadlines; pass include_line_items for the composition. Use list_money_categories and list_money_accounts to find the names and ids the filters accept.",
+        "Wide compact ledger for a person: date, amount, account, category keys, counterparty/description, line_item_count — no receipt lines. Prefer this (or search_money_line_items) first; call get_money_transaction_details only for ids whose composition you need. Newest first; filters match the web ledger (period, accounts, categories, types, amount bounds, description/merchant search). Pages with limit/offset and has_more / next_offset. Default limit 100 (max 200). Use list_money_categories and list_money_accounts for filter names/ids.",
       inputSchema: z.object({
         ...personSelectorSchema,
         ...dateRangeSchema,
@@ -63,7 +81,7 @@ export function registerMoneyTools(server: McpToolServer): void {
           .string()
           .optional()
           .describe(
-            "Free text matched against merchant, comments and receipt line titles, case-insensitively. Use this for merchant name until a dedicated merchant filter exists.",
+            "Free text on merchant, comments and receipt line titles (case-insensitive). For “find milk on receipts”, prefer search_money_line_items.",
           ),
         categories: z
           .array(z.string())
@@ -98,13 +116,7 @@ export function registerMoneyTools(server: McpToolServer): void {
           .boolean()
           .default(false)
           .describe(
-            "Also return the bank's own operation record (numbers removed). Large; ask only when the summary fields are not enough.",
-          ),
-        include_line_items: z
-          .boolean()
-          .default(false)
-          .describe(
-            "Include every receipt line (title, amount, Orbit category) in structuredContent. Off by default: pages with many grocery lines timed out MCP clients (−32001). Prefer a smaller limit when enabling.",
+            "Also return the bank's own operation record (numbers removed). Large; ask only when the summary fields are not enough. Requires the feed to load raw_payload — prefer leave false on wide pages.",
           ),
         sort: z
           .enum(["posted_at_desc"])
@@ -124,12 +136,10 @@ export function registerMoneyTools(server: McpToolServer): void {
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     withPerson(async (supabase, person, args, auth) => {
-      const requestedZone = args.timezone?.trim() || null;
-      if (requestedZone && !isValidTimeZone(requestedZone)) {
-        return fail(
-          `"${args.timezone}" is not a timezone this server recognises. Pass an IANA name like "Europe/Moscow".`,
-        );
-      }
+      const zone = await resolveMoneyTimezone(supabase, auth.authUserId, args.timezone?.trim());
+      if ("error" in zone) return fail(zone.error);
+      const { timeZone } = zone;
+
       if (
         args.amount_min !== undefined &&
         args.amount_max !== undefined &&
@@ -140,16 +150,7 @@ export function registerMoneyTools(server: McpToolServer): void {
         );
       }
 
-      // Categories and the saved timezone do not depend on each other; start both at once.
-      const categoriesPromise = listMoneyCategories(supabase);
-      const preferredZonePromise = requestedZone
-        ? Promise.resolve(null)
-        : readTimezonePreference(supabase, auth.authUserId);
-      const [categories, preferredZone] = await Promise.all([
-        categoriesPromise,
-        preferredZonePromise,
-      ]);
-      const timeZone = requestedZone ?? preferredZone ?? "UTC";
+      const categories = await listMoneyCategories(supabase);
 
       let categoryIds: string[] | undefined;
       if (args.categories?.length) {
@@ -177,30 +178,34 @@ export function registerMoneyTools(server: McpToolServer): void {
         amountMax: args.amount_max,
       };
 
+      // Wide list: skip line jsonb + raw_payload in SQL unless bank payload was requested.
+      const includeLineItems = args.include_bank_payload === true;
       const page = await listMoneyTransactions(
         supabase,
         { ...query, offset: args.offset, limit: args.limit },
         categories,
-        args.include_bank_payload,
+        {
+          includeBankOperation: args.include_bank_payload,
+          includeLineItems,
+        },
       );
 
-      // Every feed row carries the filtered total, so an empty page past the end has none to read.
-      // Ask for one row from the start to tell "nothing matches" apart from "offset too far".
       const total =
         page.transactions.length === 0 && args.offset > 0
-          ? (await listMoneyTransactions(supabase, { ...query, offset: 0, limit: 1 }, categories))
-              .total
+          ? (
+              await listMoneyTransactions(supabase, { ...query, offset: 0, limit: 1 }, categories, {
+                includeLineItems: false,
+              })
+            ).total
           : page.total;
       const hasMore = args.offset + page.transactions.length < total;
       const nextOffset = hasMore ? args.offset + page.transactions.length : null;
-      const transactions = args.include_line_items
-        ? page.transactions
-        : page.transactions.map(toCompactTransaction);
+      const transactions = compactTransactionsFromPage(page);
 
       return ok(
         summarizePage(
           `transactions for ${person.name} (dates in ${timeZone})`,
-          page.transactions.map((transaction) => transactionLine(transaction, timeZone)),
+          transactions.map((transaction) => compactLine(transaction, timeZone)),
           {
             total,
             offset: args.offset,
@@ -218,6 +223,154 @@ export function registerMoneyTools(server: McpToolServer): void {
           next_offset: nextOffset,
           sort: args.sort,
           transactions,
+        },
+      );
+    }, MONEY_READ_SCOPE),
+  );
+
+  server.registerTool(
+    "get_money_transaction_details",
+    {
+      title: "Money transaction details (line items)",
+      description:
+        "Return receipt line items for a batch of transaction ids from list_money_transactions or search_money_line_items. Do not call this for every row of a wide list — only for ids whose composition you need. Max 50 ids per call; paginate the id list yourself if longer.",
+      inputSchema: z.object({
+        ...personSelectorSchema,
+        transaction_ids: z
+          .array(uuidSchema)
+          .min(1)
+          .max(MONEY_MCP_DETAIL_MAX_IDS)
+          .describe("Transaction ids to expand. Cap 50 per call."),
+      }),
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    withPerson(async (supabase, person, args) => {
+      const categories = await listMoneyCategories(supabase);
+      const transactions = await getMoneyTransactionDetails(
+        supabase,
+        person.id,
+        args.transaction_ids,
+        categories,
+      );
+      return ok(
+        summarizeList(
+          `transaction details for ${person.name}`,
+          transactions.map(
+            (transaction) =>
+              `${transaction.id} ${formatAmount(transaction.amount, transaction.currency)}` +
+              ` ${transaction.merchant_name ?? "unknown"}` +
+              ` (${transaction.line_items.length} lines)`,
+          ),
+          transactions.length,
+          MONEY_MCP_DETAIL_MAX_IDS,
+        ),
+        {
+          person,
+          requested: args.transaction_ids.length,
+          returned: transactions.length,
+          transactions,
+        },
+      );
+    }, MONEY_READ_SCOPE),
+  );
+
+  server.registerTool(
+    "search_money_line_items",
+    {
+      title: "Search money receipt lines",
+      description:
+        "Find transactions by receipt line text (e.g. “молоко”, case-insensitive, Cyrillic-friendly). Returns matching transactions with only the matching lines — use this instead of walking the wide list when the question is about a product/line. Optional period; pages with limit/offset. Then get_money_transaction_details if you need the full receipt for a hit.",
+      inputSchema: z.object({
+        ...personSelectorSchema,
+        ...dateRangeSchema,
+        query: z
+          .string()
+          .min(1)
+          .describe("Substring matched against receipt line titles (ILIKE, case-insensitive)."),
+        timezone: z
+          .string()
+          .optional()
+          .describe(
+            "IANA timezone for from/to and listed dates. Defaults to the user's saved preference, or UTC.",
+          ),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(MONEY_MCP_LINE_SEARCH_MAX_LIMIT)
+          .default(MONEY_MCP_LINE_SEARCH_DEFAULT_LIMIT),
+        offset: z.number().int().min(0).default(0),
+      }),
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    withPerson(async (supabase, person, args, auth) => {
+      const zone = await resolveMoneyTimezone(supabase, auth.authUserId, args.timezone?.trim());
+      if ("error" in zone) return fail(zone.error);
+      const { timeZone } = zone;
+      const categories = await listMoneyCategories(supabase);
+      const page = await searchMoneyLineItems(
+        supabase,
+        {
+          payerPersonId: person.id,
+          search: args.query,
+          fromUtc: args.from ? localDayStartUtc(args.from, timeZone) : undefined,
+          toUtc: args.to ? localDayEndUtc(args.to, timeZone) : undefined,
+          offset: args.offset,
+          limit: args.limit,
+        },
+        categories,
+      );
+
+      const total =
+        page.transactions.length === 0 && args.offset > 0
+          ? (
+              await searchMoneyLineItems(
+                supabase,
+                {
+                  payerPersonId: person.id,
+                  search: args.query,
+                  fromUtc: args.from ? localDayStartUtc(args.from, timeZone) : undefined,
+                  toUtc: args.to ? localDayEndUtc(args.to, timeZone) : undefined,
+                  offset: 0,
+                  limit: 1,
+                },
+                categories,
+              )
+            ).total
+          : page.total;
+      // Pagination follows the underlying feed search window (limit/offset), not the
+      // post-filtered title-hit count on this page.
+      const windowEnd = args.offset + args.limit;
+      const hasMore = windowEnd < total;
+      const nextOffset = hasMore ? windowEnd : null;
+
+      return ok(
+        summarizePage(
+          `line-item hits for ${person.name} matching “${args.query}” (dates in ${timeZone})`,
+          page.transactions.map((transaction) => {
+            const titles = transaction.matching_line_items.map((item) => item.title).join(", ");
+            return (
+              `${zonedDate(transaction.posted_at, timeZone)} ${formatAmount(transaction.amount, transaction.currency)}` +
+              ` ${transaction.merchant_name ?? "unknown"} — ${titles}`
+            );
+          }),
+          {
+            total,
+            offset: args.offset,
+            has_more: hasMore,
+            next_offset: nextOffset,
+          },
+        ),
+        {
+          person,
+          timezone: timeZone,
+          query: args.query,
+          total,
+          offset: args.offset,
+          limit: args.limit,
+          has_more: hasMore,
+          next_offset: nextOffset,
+          transactions: page.transactions,
         },
       );
     }, MONEY_READ_SCOPE),
@@ -266,7 +419,7 @@ export function registerMoneyTools(server: McpToolServer): void {
       const all = await listMoneyCategories(supabase);
       const categories = args.include_archived
         ? all
-        : all.filter((category) => !category.archived_at);
+        : all.filter((category) => category.archived_at == null);
       const byId = new Map(all.map((category) => [category.id, category]));
       return ok(
         summarizeList(

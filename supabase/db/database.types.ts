@@ -3061,6 +3061,7 @@ export type Database = {
           p_amount_sign?: string
           p_category_ids?: string[]
           p_from?: string
+          p_include_line_items?: boolean
           p_limit?: number
           p_offset?: number
           p_payer_person_id: string

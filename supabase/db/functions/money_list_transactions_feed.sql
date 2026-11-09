@@ -1,6 +1,10 @@
 -- Function: money_list_transactions_feed(...)
 -- Returns a paged money transaction feed with server-side filters, stable ordering,
 -- account/card metadata, and aggregated line items for the UI ledger feed.
+--
+-- p_include_line_items (default true): when false, skip jsonb_agg of full line
+-- rows and omit raw_payload. MCP wide list uses this so PostgREST does not ship
+-- receipt JSON the agent will discard; the web ledger keeps the default.
 
 DROP FUNCTION IF EXISTS public.money_list_transactions_feed(
   uuid,
@@ -34,6 +38,24 @@ DROP FUNCTION IF EXISTS public.money_list_transactions_feed(
   numeric
 );
 
+DROP FUNCTION IF EXISTS public.money_list_transactions_feed(
+  uuid,
+  text,
+  uuid[],
+  public.money_transaction_type[],
+  public.money_transaction_status[],
+  uuid[],
+  text,
+  text,
+  timestamptz,
+  timestamptz,
+  integer,
+  integer,
+  numeric,
+  numeric,
+  boolean
+);
+
 CREATE OR REPLACE FUNCTION public.money_list_transactions_feed(
   p_payer_person_id uuid,
   p_search text DEFAULT NULL,
@@ -50,7 +72,8 @@ CREATE OR REPLACE FUNCTION public.money_list_transactions_feed(
   -- Bounds on the amount's size, whatever its sign: 1000..5000 matches a 3000 purchase and a
   -- 3000 refund alike; p_amount_sign picks the side.
   p_amount_min numeric DEFAULT NULL,
-  p_amount_max numeric DEFAULT NULL
+  p_amount_max numeric DEFAULT NULL,
+  p_include_line_items boolean DEFAULT true
 )
 RETURNS TABLE (
   id uuid,
@@ -100,6 +123,7 @@ DECLARE
   v_search text := NULLIF(btrim(p_search), '');
   v_offset integer := GREATEST(COALESCE(p_offset, 0), 0);
   v_limit integer := LEAST(GREATEST(COALESCE(p_limit, 50), 1), 200);
+  v_include_line_items boolean := COALESCE(p_include_line_items, true);
   v_uncategorized_category_id uuid;
 BEGIN
   SELECT category.id
@@ -240,9 +264,15 @@ BEGIN
     pt.source_category_name,
     pt.receipt_enrichment_status,
     pt.receipt_request_key,
-    pt.raw_payload,
-    COALESCE(line_item_data.line_items, '[]'::jsonb) AS line_items,
-    COALESCE(line_item_data.line_item_titles, '{}'::text[]) AS line_item_titles,
+    CASE WHEN v_include_line_items THEN pt.raw_payload ELSE NULL END AS raw_payload,
+    CASE
+      WHEN v_include_line_items THEN COALESCE(line_item_data.line_items, '[]'::jsonb)
+      ELSE '[]'::jsonb
+    END AS line_items,
+    CASE
+      WHEN v_include_line_items THEN COALESCE(line_item_data.line_item_titles, '{}'::text[])
+      ELSE '{}'::text[]
+    END AS line_item_titles,
     COALESCE(line_item_data.line_item_count, 0) AS line_item_count,
     COALESCE(line_item_data.category_ids, '{}'::uuid[]) AS category_ids,
     pt.total_count
@@ -253,8 +283,14 @@ BEGIN
     ON cards.id = pt.card_id
   LEFT JOIN LATERAL (
     SELECT
-      jsonb_agg(to_jsonb(li) ORDER BY li.created_at, li.id) AS line_items,
-      array_remove(array_agg(li.title ORDER BY li.created_at, li.id), NULL) AS line_item_titles,
+      CASE
+        WHEN v_include_line_items THEN jsonb_agg(to_jsonb(li) ORDER BY li.created_at, li.id)
+        ELSE NULL
+      END AS line_items,
+      CASE
+        WHEN v_include_line_items THEN array_remove(array_agg(li.title ORDER BY li.created_at, li.id), NULL)
+        ELSE NULL
+      END AS line_item_titles,
       count(*)::integer AS line_item_count,
       array_remove(array_agg(DISTINCT li.category_id), NULL) AS category_ids
     FROM public.money_line_items AS li
@@ -278,6 +314,7 @@ COMMENT ON FUNCTION public.money_list_transactions_feed(
   integer,
   integer,
   numeric,
-  numeric
+  numeric,
+  boolean
 ) IS
-  'Returns a paged money transaction feed with server-side search, filters (amount bounds included), stable ordering, and aggregated line items.';
+  'Returns a paged money transaction feed with server-side search, filters (amount bounds included), stable ordering, and aggregated line items. Pass p_include_line_items=false for a compact page (count + category ids, no line jsonb / raw_payload).';

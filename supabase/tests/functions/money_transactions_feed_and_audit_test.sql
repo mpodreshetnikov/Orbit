@@ -1,9 +1,9 @@
 BEGIN;
-SELECT plan(27);
+SELECT plan(29);
 
 SELECT ok(
   to_regprocedure(
-    'public.money_list_transactions_feed(uuid,text,uuid[],public.money_transaction_type[],public.money_transaction_status[],uuid[],text,text,timestamp with time zone,timestamp with time zone,integer,integer,numeric,numeric)'
+    'public.money_list_transactions_feed(uuid,text,uuid[],public.money_transaction_type[],public.money_transaction_status[],uuid[],text,text,timestamp with time zone,timestamp with time zone,integer,integer,numeric,numeric,boolean)'
   ) IS NOT NULL,
   'money_list_transactions_feed exists'
 );
@@ -763,6 +763,60 @@ SELECT is(
   ),
   2::bigint,
   'summary counts line items with no category under the uncategorized category'
+);
+
+-- Compact MCP page: keep line_item_count / category_ids, drop line jsonb and raw_payload.
+SELECT ok(
+  (
+    SELECT bool_and(line_items = '[]'::jsonb)
+      AND bool_and(raw_payload IS NULL)
+      AND bool_or(line_item_count > 0)
+    FROM public.money_list_transactions_feed(
+      '73000000-0000-0000-0000-000000000010'::uuid,
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+      'all',
+      'all',
+      NULL,
+      NULL,
+      0,
+      10,
+      NULL,
+      NULL,
+      false
+    )
+  ),
+  'p_include_line_items=false omits line jsonb and raw_payload but keeps counts'
+);
+
+UPDATE public.money_line_items
+SET title = 'Молоко 3.2%'
+WHERE id = '73000000-0000-0000-0000-000000000502';
+
+SELECT is(
+  (
+    SELECT id::text
+    FROM public.money_list_transactions_feed(
+      '73000000-0000-0000-0000-000000000010'::uuid,
+      'МОЛОКО',
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+      'all',
+      'all',
+      NULL,
+      NULL,
+      0,
+      10
+    )
+    LIMIT 1
+  ),
+  '73000000-0000-0000-0000-000000000402',
+  'feed search matches Cyrillic line titles case-insensitively'
 );
 
 SELECT * FROM finish();

@@ -20,11 +20,18 @@ export type MoneyTransactionStatus = Database["public"]["Enums"]["money_transact
 export const MONEY_FEED_MAX_LIMIT = 200;
 
 /**
- * Default page size for the MCP list tool. Smaller than the historical 50 so a
- * month of mixed receipt lines stays inside typical MCP client deadlines
- * (~20–30s, error −32001) without asking the model to guess a limit.
+ * Default page size for the MCP wide list. Seed benches: 100 wide rows ≈ 30 KB
+ * wire / ≪1 s SQL+assemble with `p_include_line_items=false`; 200 ≈ 61 KB.
+ * Headroom under typical MCP client deadlines (~20–30s, −32001).
  */
-export const MONEY_MCP_DEFAULT_LIMIT = 20;
+export const MONEY_MCP_DEFAULT_LIMIT = 100;
+
+/** Max transaction ids per detail-by-ids call. Seed: 50 ids ≈ 44 KB avg-4-line; heavy 20-line receipts ~220 KB — still inside deadlines with margin. */
+export const MONEY_MCP_DETAIL_MAX_IDS = 50;
+
+/** Default / max page for line-item text search (matching txs + matching lines only). */
+export const MONEY_MCP_LINE_SEARCH_DEFAULT_LIMIT = 50;
+export const MONEY_MCP_LINE_SEARCH_MAX_LIMIT = 100;
 
 export interface MoneyCategory {
   id: string;
@@ -174,13 +181,14 @@ export interface MoneyTransactionView {
 export interface MoneyFeedPage {
   total: number;
   transactions: MoneyTransactionView[];
+  /** Feed rows as returned by the RPC — used to read counts when line jsonb was omitted. */
+  feedRows: FeedRow[];
+  categoryById: Map<string, MoneyCategory>;
 }
 
 /**
- * MCP list payload without per-line receipt detail. Full `line_items` on a page
- * of grocery receipts is what pushed `list_money_transactions` past client
- * deadlines (−32001) once the ledger grew past a few dozen rows; agents that
- * need the composition pass `include_line_items: true` on a smaller page.
+ * MCP wide-list payload: no receipt lines. Agents walk the ledger here, then
+ * call detail-by-ids only for transactions whose composition they need.
  */
 export type MoneyTransactionCompactView = Omit<MoneyTransactionView, "line_items"> & {
   line_item_count: number;
@@ -189,9 +197,10 @@ export type MoneyTransactionCompactView = Omit<MoneyTransactionView, "line_items
 
 export function toCompactTransaction(
   transaction: MoneyTransactionView,
+  options?: { lineItemCount?: number; categoryKeys?: string[] },
 ): MoneyTransactionCompactView {
   const { line_items, ...rest } = transaction;
-  const category_keys = [
+  const category_keys = options?.categoryKeys ?? [
     ...new Set(
       line_items
         .map((item) => item.category?.canonical_key)
@@ -200,9 +209,24 @@ export function toCompactTransaction(
   ];
   return {
     ...rest,
-    line_item_count: line_items.length,
+    line_item_count: options?.lineItemCount ?? line_items.length,
     category_keys,
   };
+}
+
+function categoryKeysFromIds(
+  categoryIds: string[] | null | undefined,
+  byId: Map<string, MoneyCategory>,
+): string[] {
+  const keys = new Set<string>();
+  for (const id of categoryIds ?? []) {
+    const category = byId.get(id);
+    if (!category) continue;
+    const root = byId.get(category.canonical_category_id);
+    const key = root?.system_key ?? category.system_key;
+    if (key) keys.add(key);
+  }
+  return [...keys];
 }
 
 const SOURCE_LABELS: Record<string, string> = { tbank: "T-Bank" };
@@ -285,8 +309,10 @@ export async function listMoneyTransactions(
   supabase: Client,
   query: MoneyFeedQuery,
   categories: MoneyCategory[],
-  includeBankOperation = false,
+  options: { includeBankOperation?: boolean; includeLineItems?: boolean } = {},
 ): Promise<MoneyFeedPage> {
+  const includeBankOperation = options.includeBankOperation ?? false;
+  const includeLineItems = options.includeLineItems ?? true;
   const { data, error } = await supabase.rpc("money_list_transactions_feed", {
     p_payer_person_id: query.payerPersonId,
     p_search: query.search?.trim() || undefined,
@@ -302,6 +328,7 @@ export async function listMoneyTransactions(
     p_amount_max: query.amountMax,
     p_offset: query.offset,
     p_limit: Math.min(query.limit, MONEY_FEED_MAX_LIMIT),
+    p_include_line_items: includeLineItems,
   });
 
   if (error) throw new Error(error.message);
@@ -313,5 +340,147 @@ export async function listMoneyTransactions(
     // there and the caller's offset message says so.
     total: rows.length > 0 ? Number(rows[0].total_count) : 0,
     transactions: rows.map((row) => toTransactionView(row, byId, includeBankOperation)),
+    feedRows: rows,
+    categoryById: byId,
   };
+}
+
+export function compactTransactionsFromPage(page: MoneyFeedPage): MoneyTransactionCompactView[] {
+  return page.transactions.map((transaction, index) => {
+    const row = page.feedRows[index];
+    return toCompactTransaction(transaction, {
+      lineItemCount: row ? Number(row.line_item_count) : undefined,
+      categoryKeys: row ? categoryKeysFromIds(row.category_ids, page.categoryById) : undefined,
+    });
+  });
+}
+
+export interface MoneyTransactionDetailView {
+  id: string;
+  posted_at: string;
+  amount: number;
+  currency: string;
+  merchant_name: string | null;
+  line_items: MoneyLineItemView[];
+}
+
+/**
+ * Receipt lines for a batch of transaction ids owned by the payer. Missing or
+ * foreign ids are omitted (not an error): the agent asked for detail, not a
+ * membership check.
+ */
+export async function getMoneyTransactionDetails(
+  supabase: Client,
+  payerPersonId: string,
+  transactionIds: string[],
+  categories: MoneyCategory[],
+): Promise<MoneyTransactionDetailView[]> {
+  const ids = [...new Set(transactionIds.map((id) => id.trim()).filter(Boolean))];
+  if (ids.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from("money_transactions")
+    .select(
+      "id, posted_at, amount, currency, merchant_name, money_line_items(id, title, amount, quantity, unit, line_status, category_id, assignment_method, created_at)",
+    )
+    .eq("payer_person_id", payerPersonId)
+    .in("id", ids);
+
+  if (error) throw new Error(error.message);
+
+  const byId = new Map(categories.map((category) => [category.id, category]));
+  const order = new Map(ids.map((id, index) => [id, index]));
+  const rows = (data ?? []) as Array<{
+    id: string;
+    posted_at: string;
+    amount: number;
+    currency: string;
+    merchant_name: string | null;
+    money_line_items: Array<Record<string, unknown>> | null;
+  }>;
+
+  return rows
+    .map((row) => {
+      const rawLines = Array.isArray(row.money_line_items) ? row.money_line_items : [];
+      const sorted = [...rawLines].sort((a, b) => {
+        const ac = String(a.created_at ?? "");
+        const bc = String(b.created_at ?? "");
+        if (ac !== bc) return ac.localeCompare(bc);
+        return String(a.id ?? "").localeCompare(String(b.id ?? ""));
+      });
+      return {
+        id: row.id,
+        posted_at: row.posted_at,
+        amount: Number(row.amount),
+        currency: row.currency,
+        merchant_name: row.merchant_name,
+        line_items: sorted.map((item) => ({
+          title: String(item.title ?? ""),
+          amount: Number(item.amount),
+          quantity: item.quantity == null ? null : Number(item.quantity),
+          unit: typeof item.unit === "string" ? item.unit : null,
+          status: typeof item.line_status === "string" ? item.line_status : null,
+          category: categoryView(item.category_id, byId),
+          assignment_method:
+            typeof item.assignment_method === "string" ? item.assignment_method : null,
+        })),
+      };
+    })
+    .sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+}
+
+export interface MoneyLineSearchHit {
+  id: string;
+  posted_at: string;
+  amount: number;
+  currency: string;
+  merchant_name: string | null;
+  account: { id: string; label: string; kind: string };
+  matching_line_items: MoneyLineItemView[];
+  line_item_count: number;
+}
+
+export interface MoneyLineSearchPage {
+  total: number;
+  transactions: MoneyLineSearchHit[];
+}
+
+/**
+ * Transactions whose receipt line titles match `query` (ILIKE, case-insensitive,
+ * works for Cyrillic). Returns only the matching lines, not the whole receipt.
+ */
+export async function searchMoneyLineItems(
+  supabase: Client,
+  query: MoneyFeedQuery & { search: string },
+  categories: MoneyCategory[],
+): Promise<MoneyLineSearchPage> {
+  const needle = query.search.trim();
+  if (!needle) return { total: 0, transactions: [] };
+
+  const page = await listMoneyTransactions(supabase, { ...query, search: needle }, categories, {
+    includeLineItems: true,
+  });
+  const lowered = needle.toLowerCase();
+  const transactions: MoneyLineSearchHit[] = [];
+
+  for (const transaction of page.transactions) {
+    const matching = transaction.line_items.filter((item) =>
+      item.title.toLowerCase().includes(lowered),
+    );
+    if (matching.length === 0) continue;
+    transactions.push({
+      id: transaction.id,
+      posted_at: transaction.posted_at,
+      amount: transaction.amount,
+      currency: transaction.currency,
+      merchant_name: transaction.merchant_name,
+      account: transaction.account,
+      matching_line_items: matching,
+      line_item_count: transaction.line_items.length,
+    });
+  }
+
+  // Feed `search` also matches merchant/comment; rows with no title hit are dropped from
+  // `transactions`. `total` / pagination follow the feed so the agent can walk pages.
+  return { total: page.total, transactions };
 }
