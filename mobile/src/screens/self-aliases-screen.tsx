@@ -9,8 +9,9 @@ import { usePerson, useSaveSelfAlias, useSelfAliases } from "@/lib/queries";
 import { space } from "@/theme";
 
 /**
- * "Псевдонимы для переводов себе" — the web report's alias manager: the names the person's own
- * transfers go by, so that the report does not count moving money between their accounts.
+ * "Псевдонимы для переводов себе" — the alias manager of the web accounts page, where it moved from
+ * the report (T-261028-yhm): the names the person's own transfers go by, so that the report does
+ * not count moving money between their accounts.
  */
 export default function SelfAliasesScreen() {
   const person = usePerson();

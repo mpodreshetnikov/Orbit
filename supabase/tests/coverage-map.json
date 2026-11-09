@@ -87,6 +87,9 @@
     "supabase/db/functions/money_get_budget_report.sql": [
       "supabase/tests/functions/money_budget_reporting_test.sql"
     ],
+    "supabase/db/functions/money_get_spending_report.sql": [
+      "supabase/tests/functions/money_spending_report_test.sql"
+    ],
     "supabase/db/functions/money_get_category_rule_context.sql": [
       "supabase/tests/functions/money_category_rule_pipeline_test.sql"
     ],

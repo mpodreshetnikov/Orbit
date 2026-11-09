@@ -14,11 +14,32 @@ name: Сегодня
 - extendedWaitUntil:
     visible: "Сегодня"
     timeout: 60000
-- runFlow:
-    when:
+# A quick tunnel can stall the first PostgREST queries after open the same way it stalls
+# sign-in: the screen paints with empty loading blocks and the seed dose never arrives. Tap
+# the tab once, then relaunch until Vitamin D3 shows — later flows in the same job already
+# recover once the tunnel settles.
+- repeat:
+    times: 4
+    while:
       notVisible: "Vitamin D3.*"
     commands:
       - tapOn: "Сегодня"
+      - extendedWaitUntil:
+          visible: "Vitamin D3.*"
+          timeout: 30000
+          optional: true
+      - runFlow:
+          when:
+            notVisible: "Vitamin D3.*"
+          commands:
+            - runFlow: setup/fresh.yaml
+            - openLink: exp://127.0.0.1:8081/--/today
+            - tapOn:
+                text: "Open"
+                optional: true
+            - extendedWaitUntil:
+                visible: "Сегодня"
+                timeout: 60000
 # A dose row reads as one element, "Vitamin D3, Просрочено · …": Maestro matches the whole text.
 - extendedWaitUntil:
     visible: "Vitamin D3.*"
