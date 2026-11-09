@@ -721,6 +721,8 @@ jobs:
     # GitHub"): it stands down until the ORBIT_SERVER_HOST variable exists, a check made inside it
     # because the variable may live in the production environment, which an `if` here cannot see.
     # After the images, so the server pulls this commit's instead of building it.
+    # Environment defaults to `production` inside self-hosted.yml; tip_check_job keeps the historical
+    # job name so the tip check still finds this caller.
     needs: [publish-self-hosted-images]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Deploy to your server
@@ -729,4 +731,30 @@ jobs:
       packages: read
       actions: read
     uses: ./.github/workflows/self-hosted.yml
+    with:
+      environment: production
+    secrets: inherit
+
+  deploy-production-cacos:
+    # Second independent self-host instance (docs/SELF_HOSTING.md, "Second instance
+    # (production-cacos)"). Runs only after Maxim's production self-host deploy succeeds; if that
+    # job fails, this one is skipped (fail-closed). Inside the reusable workflow it quietly skips
+    # unless Environment `production-cacos` sets ORBIT_SELF_HOST_INSTANCE=production-cacos (and
+    # ORBIT_SERVER_HOST) — so a repository-level ORBIT_SERVER_HOST for production cannot be
+    # inherited into an empty second environment. No extension publish for this instance.
+    # Concurrency is per-environment inside self-hosted.yml, so this does not share a group with
+    # production.
+    needs: [deploy-self-hosted]
+    if: >-
+      github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      needs.deploy-self-hosted.result == 'success'
+    name: Deploy production-cacos
+    permissions:
+      contents: read
+      packages: read
+      actions: read
+    uses: ./.github/workflows/self-hosted.yml
+    with:
+      environment: production-cacos
+      tip_check_job: Deploy production-cacos / Deploy to your server
     secrets: inherit
