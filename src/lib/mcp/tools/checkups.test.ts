@@ -5,6 +5,7 @@ const checkups = vi.hoisted(() => ({
   listCheckups: vi.fn(),
   getCheckup: vi.fn(),
   loadCheckupItem: vi.fn(),
+  latestCompletionDay: vi.fn(),
   markCheckupDone: vi.fn(),
   updateCheckupSchedule: vi.fn(),
   scheduleColumnFromWrite: vi.fn(),
@@ -17,6 +18,7 @@ vi.mock("../health/checkups", async () => {
     listCheckups: checkups.listCheckups,
     getCheckup: checkups.getCheckup,
     loadCheckupItem: checkups.loadCheckupItem,
+    latestCompletionDay: checkups.latestCompletionDay,
     markCheckupDone: checkups.markCheckupDone,
     updateCheckupSchedule: checkups.updateCheckupSchedule,
     scheduleColumnFromWrite: (...args: unknown[]) => {
@@ -84,6 +86,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-06-15T12:00:00Z"));
   checkups.loadCheckupItem.mockResolvedValue(ITEM);
+  checkups.latestCompletionDay.mockResolvedValue(null);
   checkups.markCheckupDone.mockResolvedValue({
     checkup: { ...ITEM, next_due_at: "2026-12-15" },
     completion: {

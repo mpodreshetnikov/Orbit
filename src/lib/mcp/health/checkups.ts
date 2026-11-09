@@ -362,24 +362,77 @@ function toDateOnly(day: string | undefined | null, fallback: string): string {
   return fallback;
 }
 
-/** Build the jsonb `schedule` column from an agent write, anchoring an interval when first due is set. */
-export function scheduleColumnFromWrite(input: CheckupScheduleWrite): Record<string, unknown> {
+/**
+ * Build the jsonb `schedule` column from an agent write.
+ * When `first_due_at` is omitted on an interval, keep the existing anchor (and
+ * `next_due_from` unless the write sets one) so a frequency-only edit does not
+ * drop the series' place in the calendar.
+ */
+export function scheduleColumnFromWrite(
+  input: CheckupScheduleWrite,
+  existingSchedule?: unknown,
+): Record<string, unknown> {
   if (input.type === "one_off") {
     return { type: "one_off", due_at: input.due_at };
   }
+  const previous =
+    existingSchedule && typeof existingSchedule === "object"
+      ? (existingSchedule as Record<string, unknown>)
+      : null;
   const schedule: Record<string, unknown> = {
     type: "interval",
     every: input.every,
     unit: input.unit,
   };
-  if (input.next_due_from) schedule.next_due_from = input.next_due_from;
+  if (input.next_due_from) {
+    schedule.next_due_from = input.next_due_from;
+  } else if (typeof previous?.next_due_from === "string") {
+    schedule.next_due_from = previous.next_due_from;
+  }
   if (input.first_due_at) {
     schedule.anchor_date = anchorFor(
       { type: "interval", every: input.every, unit: input.unit },
       input.first_due_at,
     );
+  } else if (typeof previous?.anchor_date === "string" && previous.anchor_date.length > 0) {
+    schedule.anchor_date = previous.anchor_date;
   }
   return schedule;
+}
+
+/** `null` clears reminders to `[]` — the column is NOT NULL. */
+export function normalizeReminderDays(days: number[] | null | undefined): number[] | undefined {
+  if (days === undefined) return undefined;
+  if (days === null) return [];
+  return [...days].filter((day) => Number.isFinite(day) && day >= 0).sort((a, b) => b - a);
+}
+
+export async function latestCompletionDay(
+  supabase: SupabaseClient<Database>,
+  checkupId: string,
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("checkup_completions")
+    .select("done_at")
+    .eq("checkup_item_id", checkupId)
+    .order("done_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(`Failed to load checkup completions: ${error.message}`);
+  const doneAt = (data as { done_at?: string } | null)?.done_at;
+  return doneAt ? String(doneAt).slice(0, 10) : null;
+}
+
+async function completionCount(
+  supabase: SupabaseClient<Database>,
+  checkupId: string,
+): Promise<number> {
+  const { count, error } = await supabase
+    .from("checkup_completions")
+    .select("id", { count: "exact", head: true })
+    .eq("checkup_item_id", checkupId);
+  if (error) throw new Error(`Failed to count checkup completions: ${error.message}`);
+  return count ?? 0;
 }
 
 export async function loadCheckupItem(
@@ -441,6 +494,16 @@ export async function markCheckupDone(
   }
 
   const doneAt = toDateOnly(params.doneAt, new Date().toISOString().slice(0, 10));
+  // Insert trigger advances next_due from NEW.done_at, not from the latest completion in
+  // history — a backdate older than the last done day would pull the cycle backwards.
+  const latestDone = await latestCompletionDay(supabase, checkup.id);
+  if (latestDone && doneAt < latestDone) {
+    throw new Error(
+      `done_at ${doneAt} is before the latest completion on ${latestDone}. ` +
+        `Logging an older completion would move next_due_at backwards; omit done_at or use a day on or after ${latestDone}.`,
+    );
+  }
+
   const { data: completion, error } = await supabase
     .from("checkup_completions")
     .insert({
@@ -489,26 +552,37 @@ export async function updateCheckupSchedule(
     );
   }
 
-  const payload: Record<string, unknown> = {
-    schedule: scheduleColumnFromWrite(params.schedule),
-  };
-  if (params.reminderDaysBefore !== undefined) {
-    payload.reminder_days_before =
-      params.reminderDaysBefore === null
-        ? null
-        : [...params.reminderDaysBefore]
-            .filter((day) => Number.isFinite(day) && day >= 0)
-            .sort((a, b) => b - a);
+  if (params.schedule.type === "interval" && params.schedule.first_due_at) {
+    const priorCompletions = await completionCount(supabase, before.id);
+    if (priorCompletions > 0) {
+      throw new Error(
+        `first_due_at cannot retarget the next due date after ${priorCompletions} completion(s) are logged; ` +
+          `the database advances from the latest completion. Omit first_due_at to change the interval only, ` +
+          `or set next_due_from="target" and keep the existing anchor.`,
+      );
+    }
   }
 
-  const { data, error } = await supabase
+  const payload: Record<string, unknown> = {
+    schedule: scheduleColumnFromWrite(params.schedule, before.schedule),
+  };
+  const reminders = normalizeReminderDays(params.reminderDaysBefore);
+  if (reminders !== undefined) {
+    payload.reminder_days_before = reminders;
+  }
+
+  const { error } = await supabase
     .from("checkup_items")
     .update(payload as never)
-    .eq("id", before.id)
-    .select("id, person_id, title, category, status, schedule, next_due_at, reminder_days_before")
-    .single();
-  if (error || !data) {
-    throw new Error(`Failed to update checkup schedule: ${error?.message ?? "no row returned"}`);
+    .eq("id", before.id);
+  if (error) {
+    throw new Error(`Failed to update checkup schedule: ${error.message}`);
   }
-  return { before, after: data as CheckupItemSnapshot };
+  // AFTER UPDATE trigger recomputes next_due_at / one-off status in a separate write;
+  // the UPDATE's RETURNING row would still show the pre-trigger values.
+  const after = await loadCheckupItem(supabase, before.id);
+  if (!after) {
+    throw new Error(`Failed to reload checkup ${before.id} after schedule update.`);
+  }
+  return { before, after };
 }

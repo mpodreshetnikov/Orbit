@@ -369,6 +369,27 @@ describe("scheduleColumnFromWrite", () => {
       due_at: "2026-12-01",
     });
   });
+
+  it("keeps the existing anchor when first_due_at is omitted", () => {
+    expect(
+      scheduleColumnFromWrite(
+        { type: "interval", every: 3, unit: "month" },
+        {
+          type: "interval",
+          every: 6,
+          unit: "month",
+          anchor_date: "2026-01-01",
+          next_due_from: "target",
+        },
+      ),
+    ).toEqual({
+      type: "interval",
+      every: 3,
+      unit: "month",
+      next_due_from: "target",
+      anchor_date: "2026-01-01",
+    });
+  });
 });
 
 describe("markCheckupDone", () => {
@@ -393,6 +414,7 @@ describe("markCheckupDone", () => {
         },
       ],
       checkup_completions: [
+        { data: null },
         {
           data: {
             id: "done-1",
@@ -430,6 +452,7 @@ describe("markCheckupDone", () => {
 
     const badEvidence = createSupabaseStub({
       checkup_items: [{ data: checkup() }],
+      checkup_completions: [{ data: null }],
       medical_records: [{ data: null }],
     });
     await expect(
@@ -440,10 +463,20 @@ describe("markCheckupDone", () => {
       }),
     ).rejects.toThrow(/evidence_record_id/);
   });
+
+  it("refuses a backdate older than the latest completion", async () => {
+    const stub = createSupabaseStub({
+      checkup_items: [{ data: checkup() }],
+      checkup_completions: [{ data: { done_at: "2026-06-01" } }],
+    });
+    await expect(
+      markCheckupDone(stub.client, { checkupId: "c-1", doneAt: "2026-05-01" }),
+    ).rejects.toThrow(/before the latest completion/);
+  });
 });
 
 describe("updateCheckupSchedule", () => {
-  it("writes the schedule column and optional reminders", async () => {
+  it("writes the schedule column and optional reminders, then reloads after the trigger", async () => {
     const before = checkup({
       schedule: { type: "interval", every: 6, unit: "month" },
       reminder_days_before: [7],
@@ -453,10 +486,12 @@ describe("updateCheckupSchedule", () => {
       ...before,
       schedule: { type: "interval", every: 3, unit: "month", anchor_date: "2026-03-20" },
       reminder_days_before: [14, 7],
-      next_due_at: "2026-06-20",
+      next_due_at: "2026-09-20",
     };
     const stub = createSupabaseStub({
-      checkup_items: [{ data: before }, { data: after }],
+      // load → update await → reload
+      checkup_items: [{ data: before }, { data: null }, { data: after }],
+      checkup_completions: [{ count: 0 }],
     });
 
     const result = await updateCheckupSchedule(stub.client, {
@@ -479,7 +514,44 @@ describe("updateCheckupSchedule", () => {
       },
       reminder_days_before: [14, 7],
     });
+    expect(result.after.next_due_at).toBe("2026-09-20");
     expect(result.after.reminder_days_before).toEqual([14, 7]);
+  });
+
+  it("clears reminders to an empty array, not null", async () => {
+    const before = checkup({ reminder_days_before: [7] });
+    const after = { ...before, reminder_days_before: [] };
+    const stub = createSupabaseStub({
+      checkup_items: [{ data: before }, { data: null }, { data: after }],
+    });
+
+    await updateCheckupSchedule(stub.client, {
+      checkupId: "c-1",
+      schedule: { type: "interval", every: 6, unit: "month" },
+      reminderDaysBefore: null,
+    });
+
+    expect(stub.argsFor("checkup_items", "update")[0][0]).toMatchObject({
+      reminder_days_before: [],
+    });
+  });
+
+  it("refuses first_due_at when completions already exist", async () => {
+    const stub = createSupabaseStub({
+      checkup_items: [{ data: checkup() }],
+      checkup_completions: [{ count: 2 }],
+    });
+    await expect(
+      updateCheckupSchedule(stub.client, {
+        checkupId: "c-1",
+        schedule: {
+          type: "interval",
+          every: 1,
+          unit: "year",
+          first_due_at: "2027-03-15",
+        },
+      }),
+    ).rejects.toThrow(/first_due_at cannot retarget/);
   });
 
   it("refuses an archived checkup", async () => {

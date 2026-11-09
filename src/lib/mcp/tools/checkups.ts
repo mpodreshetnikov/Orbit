@@ -1,9 +1,11 @@
 import { z } from "zod";
 import {
   getCheckup,
+  latestCompletionDay,
   listCheckups,
   loadCheckupItem,
   markCheckupDone,
+  normalizeReminderDays,
   scheduleColumnFromWrite,
   updateCheckupSchedule,
   type CheckupScheduleWrite,
@@ -23,7 +25,7 @@ const scheduleWriteSchema = z.discriminatedUnion("type", [
       .nullable()
       .optional()
       .describe(
-        "When the series should next fall due. Anchors the interval the same way propose_checkup does. Omit to keep the database's current anchor behaviour after the update.",
+        "When the series should next fall due (sets the interval anchor), only when this checkup has no completions yet. Omit to keep the existing anchor. Refused after completions exist — the next due advances from the latest done day.",
       ),
     next_due_from: z
       .enum(["completion", "target"])
@@ -166,6 +168,13 @@ export function registerCheckupTools(server: McpToolServer): void {
       const doneAt = args.done_at?.trim() ? args.done_at.trim().slice(0, 10) : todayUtc();
       const today = todayUtc();
       const isBackdate = doneAt < today;
+      const latestDone = await latestCompletionDay(supabase, args.checkup_id);
+      if (latestDone && doneAt < latestDone) {
+        return fail(
+          `done_at ${doneAt} is before the latest completion on ${latestDone}. ` +
+            `Logging an older completion would move next_due_at backwards; omit done_at or use a day on or after ${latestDone}.`,
+        );
+      }
 
       if (isBackdate && args.confirm !== true) {
         const checkup = await loadCheckupItem(supabase, args.checkup_id);
@@ -218,7 +227,7 @@ export function registerCheckupTools(server: McpToolServer): void {
           .nullable()
           .optional()
           .describe(
-            "Days before due to remind (furthest first after write). Pass null to clear; omit to leave unchanged.",
+            "Days before due to remind (furthest first after write). Pass null or [] to clear (stored as empty array); omit to leave unchanged.",
           ),
         confirm: z
           .boolean()
@@ -243,15 +252,10 @@ export function registerCheckupTools(server: McpToolServer): void {
         );
       }
 
-      const proposedSchedule = scheduleColumnFromWrite(args.schedule);
+      const proposedSchedule = scheduleColumnFromWrite(args.schedule, checkup.schedule);
+      const normalizedReminders = normalizeReminderDays(args.reminder_days_before);
       const proposedReminders =
-        args.reminder_days_before === undefined
-          ? checkup.reminder_days_before
-          : args.reminder_days_before === null
-            ? null
-            : [...args.reminder_days_before]
-                .filter((day) => Number.isFinite(day) && day >= 0)
-                .sort((a, b) => b - a);
+        normalizedReminders === undefined ? checkup.reminder_days_before : normalizedReminders;
 
       if (args.confirm !== true) {
         return ok(
