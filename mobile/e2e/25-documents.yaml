@@ -17,8 +17,16 @@ name: Документы
 - assertVisible: "Диагнозы"
 - assertVisible: "Находки"
 - assertVisible: "Чек-апы"
+# Secondary charts sit below the checkup strip; after earlier flows mutate due dates the
+# hub grows and this header leaves the first screen / a11y tree until scrolled.
+- scrollUntilVisible:
+    element: "Анализы и измерения"
+    centerElement: true
 - assertVisible: "Анализы и измерения"
 - takeScreenshot: documents-01-health
+- scrollUntilVisible:
+    element: "Все документы"
+    centerElement: true
 - tapOn: "Все документы"
 - extendedWaitUntil:
     visible: "Все типы"

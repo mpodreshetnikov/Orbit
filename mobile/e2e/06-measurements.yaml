@@ -8,9 +8,11 @@ name: Измерения
 - tapOn:
     text: "Open"
     optional: true
-- extendedWaitUntil:
-    visible: "Анализы и измерения"
-    timeout: 60000
+# Secondary charts sit under the checkup strip — scroll before asserting so a tall hub
+# (more overdue/upcoming rows) does not hide the header from the a11y tree.
+- scrollUntilVisible:
+    element: "Анализы и измерения"
+    centerElement: true
 - scrollUntilVisible:
     element: "Измерения"
     centerElement: true
