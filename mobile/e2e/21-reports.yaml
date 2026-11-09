@@ -26,23 +26,28 @@ name: Отчеты
 - extendedWaitUntil:
     visible: "Январь 2026.*"
     timeout: 30000
-# RPC→render: seed January has rent, groceries and salary — amounts and category rows.
+# Signed seed: expenses are non-empty on the Расходы treemap (parents), not absolute leaf names
+# until a block is expanded. Empty state must not show.
 - extendedWaitUntil:
-    visible: "Аренда.*"
+    notVisible: "За этот период операций нет."
     timeout: 30000
 - extendedWaitUntil:
-    visible: "Продукты.*"
+    visible: "Жилье.*"
+    timeout: 30000
+- extendedWaitUntil:
+    visible: "Еда.*"
     timeout: 15000
 - takeScreenshot: reports-02-january-filled
 - scrollUntilVisible:
     element: "Категории"
     centerElement: true
 - takeScreenshot: reports-03-january-categories
-- runFlow:
-    when: { visible: "Раскрыть «.*»" }
-    commands:
-      - tapOn: "Раскрыть «.*»"
-      - takeScreenshot: reports-04-category-open
+# Expand housing to the seeded rent leaf (accessibility label Раскрыть «Жилье»).
+- tapOn: "Раскрыть «Жилье»"
+- extendedWaitUntil:
+    visible: "Аренда.*"
+    timeout: 15000
+- takeScreenshot: reports-04-category-open
 # Period change: February 2026 still has seed spend (Steam / entertainment).
 - tapOn: "Следующий период"
 - extendedWaitUntil:

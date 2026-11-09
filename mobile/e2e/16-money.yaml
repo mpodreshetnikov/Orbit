@@ -20,11 +20,30 @@ name: Деньги
 - extendedWaitUntil:
     visible: "-12,50.*"
     timeout: 20000
+# Signed seed expense totals stay negative in the summary (Jan+Feb RUB outflows).
+- extendedWaitUntil:
+    visible: "-60.*"
+    timeout: 10000
 - takeScreenshot: money-01-feed
-- tapOn:
-    text: "Доходы"
-    retryTapIfNoChange: true
+# On a938a85 CI this pass; on 7eef967 the Доходы chip tap completed while «Все» stayed selected
+# (screenshot), so Employer LLC stayed below the fold. Retap until the income row is on screen.
+- repeat:
+    times: 4
+    while:
+      notVisible: "Employer LLC.*"
+    commands:
+      - tapOn:
+          text: "Доходы"
+          retryTapIfNoChange: true
+      - extendedWaitUntil:
+          visible: "Employer LLC.*"
+          timeout: 20000
+          optional: true
 - extendedWaitUntil:
     visible: "Employer LLC.*"
-    timeout: 20000
+    timeout: 30000
+# Income side of the signed seed (January salary).
+- extendedWaitUntil:
+    visible: "180.*"
+    timeout: 10000
 - takeScreenshot: money-02-income
