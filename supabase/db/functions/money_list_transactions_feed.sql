@@ -264,7 +264,10 @@ BEGIN
     pt.source_category_name,
     pt.receipt_enrichment_status,
     pt.receipt_request_key,
-    CASE WHEN v_include_line_items THEN pt.raw_payload ELSE NULL END AS raw_payload,
+    -- Keep raw_payload even when line jsonb is omitted: counterparty name/channel/bank
+    -- and MCC are derived from it in MCP. Line items were the bulk of the payload; raw
+    -- alone stays well under MCP deadlines on measured seed pages.
+    pt.raw_payload,
     CASE
       WHEN v_include_line_items THEN COALESCE(line_item_data.line_items, '[]'::jsonb)
       ELSE '[]'::jsonb

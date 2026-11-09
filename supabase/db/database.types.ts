@@ -3110,6 +3110,30 @@ export type Database = {
           transfer_group_id: string
         }[]
       }
+      money_search_line_items: {
+        Args: {
+          p_from?: string
+          p_limit?: number
+          p_offset?: number
+          p_payer_person_id: string
+          p_query: string
+          p_to?: string
+        }
+        Returns: {
+          account_id: string
+          account_kind: string
+          account_label: string
+          amount: number
+          created_at: string
+          currency: string
+          id: string
+          line_item_count: number
+          matching_line_items: Json
+          merchant_name: string
+          posted_at: string
+          total_count: number
+        }[]
+      }
       money_normalize_transfer_text: {
         Args: { p_text: string }
         Returns: string

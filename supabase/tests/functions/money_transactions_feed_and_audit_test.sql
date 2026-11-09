@@ -765,11 +765,11 @@ SELECT is(
   'summary counts line items with no category under the uncategorized category'
 );
 
--- Compact MCP page: keep line_item_count / category_ids, drop line jsonb and raw_payload.
+-- Compact MCP page: keep line_item_count / category_ids / raw_payload (counterparty/MCC),
+-- drop full line jsonb.
 SELECT ok(
   (
     SELECT bool_and(line_items = '[]'::jsonb)
-      AND bool_and(raw_payload IS NULL)
       AND bool_or(line_item_count > 0)
     FROM public.money_list_transactions_feed(
       '73000000-0000-0000-0000-000000000010'::uuid,
@@ -789,7 +789,7 @@ SELECT ok(
       false
     )
   ),
-  'p_include_line_items=false omits line jsonb and raw_payload but keeps counts'
+  'p_include_line_items=false omits line jsonb but keeps counts'
 );
 
 UPDATE public.money_line_items

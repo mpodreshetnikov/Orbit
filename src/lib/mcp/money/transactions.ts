@@ -445,42 +445,73 @@ export interface MoneyLineSearchPage {
   transactions: MoneyLineSearchHit[];
 }
 
+type LineSearchRow = {
+  id: string;
+  posted_at: string;
+  amount: number;
+  currency: string;
+  merchant_name: string | null;
+  account_id: string;
+  account_label: string;
+  account_kind: string;
+  matching_line_items: unknown;
+  line_item_count: number;
+  total_count: number;
+};
+
 /**
  * Transactions whose receipt line titles match `query` (ILIKE, case-insensitive,
- * works for Cyrillic). Returns only the matching lines, not the whole receipt.
+ * works for Cyrillic). Count and pagination apply the title predicate in SQL first,
+ * so merchant/comment-only feed hits never inflate `total` or empty a page.
  */
 export async function searchMoneyLineItems(
   supabase: Client,
-  query: MoneyFeedQuery & { search: string },
+  query: Pick<MoneyFeedQuery, "payerPersonId" | "fromUtc" | "toUtc" | "offset" | "limit"> & {
+    search: string;
+  },
   categories: MoneyCategory[],
 ): Promise<MoneyLineSearchPage> {
   const needle = query.search.trim();
   if (!needle) return { total: 0, transactions: [] };
 
-  const page = await listMoneyTransactions(supabase, { ...query, search: needle }, categories, {
-    includeLineItems: true,
+  const { data, error } = await supabase.rpc("money_search_line_items", {
+    p_payer_person_id: query.payerPersonId,
+    p_query: needle,
+    p_from: query.fromUtc,
+    p_to: query.toUtc,
+    p_offset: query.offset,
+    p_limit: Math.min(query.limit, MONEY_MCP_LINE_SEARCH_MAX_LIMIT),
   });
-  const lowered = needle.toLowerCase();
-  const transactions: MoneyLineSearchHit[] = [];
 
-  for (const transaction of page.transactions) {
-    const matching = transaction.line_items.filter((item) =>
-      item.title.toLowerCase().includes(lowered),
-    );
-    if (matching.length === 0) continue;
-    transactions.push({
-      id: transaction.id,
-      posted_at: transaction.posted_at,
-      amount: transaction.amount,
-      currency: transaction.currency,
-      merchant_name: transaction.merchant_name,
-      account: transaction.account,
-      matching_line_items: matching,
-      line_item_count: transaction.line_items.length,
-    });
-  }
+  if (error) throw new Error(error.message);
 
-  // Feed `search` also matches merchant/comment; rows with no title hit are dropped from
-  // `transactions`. `total` / pagination follow the feed so the agent can walk pages.
-  return { total: page.total, transactions };
+  const rows = (data ?? []) as LineSearchRow[];
+  const byId = new Map(categories.map((category) => [category.id, category]));
+  return {
+    total: rows.length > 0 ? Number(rows[0].total_count) : 0,
+    transactions: rows.map((row) => {
+      const raw = Array.isArray(row.matching_line_items)
+        ? (row.matching_line_items as Record<string, unknown>[])
+        : [];
+      return {
+        id: row.id,
+        posted_at: row.posted_at,
+        amount: Number(row.amount),
+        currency: row.currency,
+        merchant_name: row.merchant_name,
+        account: { id: row.account_id, label: row.account_label, kind: row.account_kind },
+        matching_line_items: raw.map((item) => ({
+          title: String(item.title ?? ""),
+          amount: Number(item.amount),
+          quantity: item.quantity == null ? null : Number(item.quantity),
+          unit: typeof item.unit === "string" ? item.unit : null,
+          status: typeof item.line_status === "string" ? item.line_status : null,
+          category: categoryView(item.category_id, byId),
+          assignment_method:
+            typeof item.assignment_method === "string" ? item.assignment_method : null,
+        })),
+        line_item_count: Number(row.line_item_count),
+      };
+    }),
+  };
 }

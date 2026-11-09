@@ -447,19 +447,26 @@ describe("getMoneyTransactionDetails", () => {
 });
 
 describe("searchMoneyLineItems", () => {
-  it("keeps only lines whose titles match the query, case-insensitively", async () => {
+  it("pages title hits from money_search_line_items with matching lines only", async () => {
     const stub = createSupabaseStub(
       {},
       {
-        money_list_transactions_feed: {
+        money_search_line_items: {
           data: [
             {
-              ...feedRow,
-              line_items: [
-                { title: "МОЛОКО 3.2%", amount: -80, category_id: null },
-                { title: "Хлеб", amount: -40, category_id: null },
+              id: "t-3",
+              posted_at: "2026-10-12T12:00:00Z",
+              amount: -300,
+              currency: "RUB",
+              merchant_name: "Shop",
+              account_id: "a-1",
+              account_label: "Tinkoff Black",
+              account_kind: "debit",
+              matching_line_items: [
+                { title: "МОЛОКО 3.2%", amount: -150, category_id: null, line_status: "final" },
               ],
-              total_count: 3,
+              line_item_count: 2,
+              total_count: 1,
             },
           ],
         },
@@ -472,15 +479,24 @@ describe("searchMoneyLineItems", () => {
       categories,
     );
 
-    expect(page.total).toBe(3);
+    expect(stub.rpc).toHaveBeenCalledWith(
+      "money_search_line_items",
+      expect.objectContaining({
+        p_payer_person_id: "p-1",
+        p_query: "молоко",
+        p_offset: 0,
+        p_limit: 50,
+      }),
+    );
+    expect(page.total).toBe(1);
     expect(page.transactions).toHaveLength(1);
     expect(page.transactions[0].matching_line_items).toEqual([
-      expect.objectContaining({ title: "МОЛОКО 3.2%", amount: -80 }),
+      expect.objectContaining({ title: "МОЛОКО 3.2%", amount: -150 }),
     ]);
   });
 
-  it("returns nothing for a blank query without hitting the feed", async () => {
-    const stub = createSupabaseStub({}, { money_list_transactions_feed: { data: [feedRow] } });
+  it("returns nothing for a blank query without hitting the RPC", async () => {
+    const stub = createSupabaseStub({}, { money_search_line_items: { data: [] } });
     expect(
       await searchMoneyLineItems(
         stub.client,

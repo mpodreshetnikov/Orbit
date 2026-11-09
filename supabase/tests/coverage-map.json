@@ -99,6 +99,9 @@
     "supabase/db/functions/money_list_transactions_feed.sql": [
       "supabase/tests/functions/money_transactions_feed_and_audit_test.sql"
     ],
+    "supabase/db/functions/money_search_line_items.sql": [
+      "supabase/tests/functions/money_search_line_items_test.sql"
+    ],
     "supabase/db/functions/money_normalize_transfer_text.sql": [
       "supabase/tests/functions/money_budget_reporting_test.sql"
     ],

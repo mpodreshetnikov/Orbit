@@ -58,13 +58,15 @@ async function resolveMoneyTimezone(
   authUserId: string,
   requestedZone: string | null | undefined,
 ): Promise<{ timeZone: string } | { error: string }> {
-  if (requestedZone && !isValidTimeZone(requestedZone)) {
+  // Blank / whitespace must not win over the saved preference via `??`.
+  const normalizedZone = requestedZone?.trim() || null;
+  if (normalizedZone && !isValidTimeZone(normalizedZone)) {
     return {
       error: `"${requestedZone}" is not a timezone this server recognises. Pass an IANA name like "Europe/Moscow".`,
     };
   }
-  const preferredZone = requestedZone ? null : await readTimezonePreference(supabase, authUserId);
-  return { timeZone: requestedZone ?? preferredZone ?? "UTC" };
+  const preferredZone = normalizedZone ? null : await readTimezonePreference(supabase, authUserId);
+  return { timeZone: normalizedZone ?? preferredZone ?? "UTC" };
 }
 
 export function registerMoneyTools(server: McpToolServer): void {
@@ -178,15 +180,14 @@ export function registerMoneyTools(server: McpToolServer): void {
         amountMax: args.amount_max,
       };
 
-      // Wide list: skip line jsonb + raw_payload in SQL unless bank payload was requested.
-      const includeLineItems = args.include_bank_payload === true;
+      // Wide list: skip line jsonb in SQL. raw_payload stays so counterparty/MCC survive.
       const page = await listMoneyTransactions(
         supabase,
         { ...query, offset: args.offset, limit: args.limit },
         categories,
         {
           includeBankOperation: args.include_bank_payload,
-          includeLineItems,
+          includeLineItems: false,
         },
       );
 
@@ -338,11 +339,8 @@ export function registerMoneyTools(server: McpToolServer): void {
               )
             ).total
           : page.total;
-      // Pagination follows the underlying feed search window (limit/offset), not the
-      // post-filtered title-hit count on this page.
-      const windowEnd = args.offset + args.limit;
-      const hasMore = windowEnd < total;
-      const nextOffset = hasMore ? windowEnd : null;
+      const hasMore = args.offset + page.transactions.length < total;
+      const nextOffset = hasMore ? args.offset + page.transactions.length : null;
 
       return ok(
         summarizePage(

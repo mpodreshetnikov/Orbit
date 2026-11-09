@@ -223,6 +223,21 @@ describe("list_money_transactions", () => {
     expect(options).toMatchObject({ includeLineItems: false });
   });
 
+  it("keeps include_line_items false even when bank payload is requested", async () => {
+    await (await handlers()).get("list_money_transactions")!(
+      { ...DEFAULTS, include_bank_payload: true },
+      ctx,
+    );
+
+    const [, , , options] = money.listMoneyTransactions.mock.calls[0] as [
+      unknown,
+      unknown,
+      unknown,
+      { includeLineItems?: boolean; includeBankOperation?: boolean },
+    ];
+    expect(options).toMatchObject({ includeLineItems: false, includeBankOperation: true });
+  });
+
   it("keeps a large page of receipt-heavy rows inside a compact structured payload", async () => {
     const fat = Array.from({ length: 100 }, (_, index) => ({
       ...TRANSACTION,
@@ -417,7 +432,7 @@ describe("search_money_line_items", () => {
       query: "МОЛОКО",
       total: 80,
       has_more: true,
-      next_offset: 50,
+      next_offset: 1,
       transactions: [
         expect.objectContaining({
           matching_line_items: [expect.objectContaining({ title: "Молоко" })],
@@ -515,6 +530,17 @@ describe("edges of the money tools", () => {
     expect(money.listMoneyTransactions).not.toHaveBeenCalled();
   });
 
+  it("treats blank timezone as unset and uses the saved preference", async () => {
+    const result = await (await handlers()).get("list_money_transactions")!(
+      { ...DEFAULTS, timezone: "   " },
+      ctx,
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toContain("dates in Europe/Moscow");
+    expect(regen.readTimezonePreference).toHaveBeenCalled();
+  });
+
   it("uses an explicit timezone over the saved one, and UTC when neither exists", async () => {
     regen.readTimezonePreference.mockResolvedValue(null);
     const handler = (await handlers()).get("list_money_transactions")!;
@@ -523,6 +549,17 @@ describe("edges of the money tools", () => {
     expect(
       (await handler({ ...DEFAULTS, timezone: "Asia/Bangkok" }, ctx)).content[0].text,
     ).toContain("dates in Asia/Bangkok");
+  });
+
+  it("blank timezone on line search also falls back to the saved preference", async () => {
+    const result = await (await handlers()).get("search_money_line_items")!(
+      { query: "молоко", timezone: "", limit: 50, offset: 0 },
+      ctx,
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent?.timezone).toBe("Europe/Moscow");
+    expect(regen.readTimezonePreference).toHaveBeenCalled();
   });
 
   it("names an uncategorized transaction and a counterparty-less one", async () => {
