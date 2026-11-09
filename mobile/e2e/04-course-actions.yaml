@@ -15,9 +15,34 @@ name: Курс — действия
     visible: "Курсы"
     timeout: 60000
 - tapOn: "Курсы"
+# Same tunnel stall as 02-medications: Курсы can paint filters with an empty spinner and no
+# seeded courses (7eef967 fail screenshot). Money seed did not touch Magnesium — harden like
+# Vitamin D3 recovery, not a seed expectation change.
+- repeat:
+    times: 4
+    while:
+      notVisible: "Magnesium.*"
+    commands:
+      - extendedWaitUntil:
+          visible: "Magnesium.*"
+          timeout: 30000
+          optional: true
+      - runFlow:
+          when:
+            notVisible: "Magnesium.*"
+          commands:
+            - runFlow: setup/fresh.yaml
+            - openLink: exp://127.0.0.1:8081/--/medications
+            - tapOn:
+                text: "Open"
+                optional: true
+            - extendedWaitUntil:
+                visible: "Курсы"
+                timeout: 60000
+            - tapOn: "Курсы"
 - extendedWaitUntil:
     visible: "Magnesium.*"
-    timeout: 20000
+    timeout: 60000
 - retry: # A search left open, or a list still settling, can swallow a tap: tap until it opens.
     maxRetries: 3
     commands:

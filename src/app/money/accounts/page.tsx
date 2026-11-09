@@ -27,6 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { SelfTransferAliases } from "@/components/money/self-transfer-aliases";
 import { useUIStore } from "@/stores/ui-store";
 import {
   useMoneyAccounts,
@@ -289,6 +290,8 @@ export default function MoneyAccountsPage() {
           ))}
         </div>
       )}
+
+      <SelfTransferAliases personId={selectedPersonId} />
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-md">

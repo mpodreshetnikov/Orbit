@@ -222,8 +222,23 @@ jobs:
         run: npm --prefix mobile ci
       - name: Install Maestro
         run: |
-          curl -fsSL https://get.maestro.mobile.dev | bash
-          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+          # Download the release zip with retries. The official installer has no --retry and on a
+          # corrupt zip it `exit`s without a non-zero status, so CI can continue without maestro.
+          maestro_dir="$HOME/.maestro"
+          tmp="$maestro_dir/tmp"
+          zip="$tmp/maestro.zip"
+          mkdir -p "$tmp"
+          curl --fail --retry 5 --retry-all-errors --retry-delay 5 \
+            --location -o "$zip" \
+            "https://github.com/mobile-dev-inc/maestro/releases/latest/download/maestro.zip"
+          unzip -t "$zip" >/dev/null \
+            || { echo "::error::Maestro zip failed integrity check (corrupt download)"; exit 1; }
+          unzip -qo "$zip" -d "$tmp"
+          rm -rf "$maestro_dir/lib" "$maestro_dir/bin"
+          cp -rf "$tmp"/maestro/* "$maestro_dir"
+          rm -rf "$tmp"/maestro "$zip"
+          echo "$maestro_dir/bin" >> "$GITHUB_PATH"
+          "$maestro_dir/bin/maestro" --version
       - name: Boot an iPhone and install Expo Go
         run: |
           udid="$(xcrun simctl list devices available -j \
@@ -233,9 +248,20 @@ jobs:
           xcrun simctl boot "$udid"
           xcrun simctl bootstatus "$udid" -b
           sdk="$(node -p "require('./mobile/node_modules/expo/package.json').version.split('.')[0]").0.0"
-          client="$(curl -fsSL https://api.expo.dev/v2/versions/latest | jq -r --arg sdk "$sdk" '.data.sdkVersions[$sdk].iosClientUrl')"
+          client="$(curl --fail --retry 5 --retry-all-errors --retry-delay 5 \
+            --location -fsSL https://api.expo.dev/v2/versions/latest \
+            | jq -r --arg sdk "$sdk" '.data.sdkVersions[$sdk].iosClientUrl')"
           [[ "$client" == https://* ]] || { echo "::error::No Expo Go simulator build for SDK $sdk"; exit 1; }
-          mkdir -p expo-go && curl -fsSL "$client" | tar -xz -C expo-go
+          # File first, then integrity, then unpack — a piped 504 left an empty expo-go and
+          # simctl install failed with Missing bundle ID (IXErrorDomain 13).
+          tarball="${RUNNER_TEMP:-/tmp}/expo-go-client.tgz"
+          curl --fail --retry 5 --retry-all-errors --retry-delay 5 \
+            --location -o "$tarball" "$client"
+          [[ -s "$tarball" ]] || { echo "::error::Expo Go download empty"; exit 1; }
+          tar -tzf "$tarball" >/dev/null \
+            || { echo "::error::Expo Go archive failed integrity check"; exit 1; }
+          mkdir -p expo-go
+          tar -xzf "$tarball" -C expo-go
           xcrun simctl install "$udid" expo-go
       - name: Wait for the backend
         env:
@@ -291,6 +317,9 @@ jobs:
       - name: Run the flows
         run: |
           mkdir -p recordings
+          # Install ffmpeg before open: brew can take minutes on a cold runner, and a long idle
+          # gap after a successful open lets a quick tunnel go cold before the first recorded flow.
+          command -v ffmpeg >/dev/null || brew install --quiet ffmpeg || echo "::warning::No ffmpeg; the videos stay uncut."
           # Load the app and get past the first-launch screens before any camera rolls.
           ( cd recordings && maestro test ../mobile/e2e/setup/open.yaml ) || exit 1
           flows="${{ inputs.flows }}"
@@ -298,7 +327,6 @@ jobs:
           # `maestro test` spends half a minute starting up before its first step, with the camera
           # already rolling, so each video is cut to the flow's own steps afterwards: Maestro logs
           # when each one ran, and the recording started at a known moment.
-          command -v ffmpeg >/dev/null || brew install --quiet ffmpeg || echo "::warning::No ffmpeg; the videos stay uncut."
           status=0
           for flow in $flows; do
             name="${flow%.yaml}"

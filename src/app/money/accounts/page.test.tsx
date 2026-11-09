@@ -50,6 +50,12 @@ vi.mock("@/hooks", () => ({
   useDeleteMoneyCard: (...args: unknown[]) => hookMocks.useDeleteMoneyCard(...args),
 }));
 
+vi.mock("@/components/money/self-transfer-aliases", () => ({
+  SelfTransferAliases: ({ personId }: { personId: string }) => (
+    <div data-testid="self-transfer-aliases">{personId}</div>
+  ),
+}));
+
 vi.mock("@/components/ui/dialog", () => ({
   Dialog: ({
     open,

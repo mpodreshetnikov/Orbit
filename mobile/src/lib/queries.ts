@@ -1,4 +1,5 @@
 import {
+  keepPreviousData,
   QueryClient,
   useInfiniteQuery,
   useMutation,
@@ -110,11 +111,10 @@ import {
   type CheckupReminders,
 } from "@/features/settings";
 import {
-  fetchBudgetReport,
   fetchSelfAliases,
-  saveBudgetTarget,
+  fetchSpendingReport,
   saveSelfAlias,
-  type TargetKey,
+  type SpendingReportQuery,
 } from "@/features/money/reports";
 import { deleteRule, fetchRules, reorderRules, saveRule } from "@/features/money/rules";
 import {
@@ -700,7 +700,7 @@ export function useSaveTransaction() {
       void client.invalidateQueries({ queryKey: ["money-feed"] });
       void client.invalidateQueries({ queryKey: ["money-feed-summary"] });
       void client.invalidateQueries({ queryKey: ["money-merchant-names"] });
-      void client.invalidateQueries({ queryKey: ["money-budget-report"] });
+      void client.invalidateQueries({ queryKey: ["money-spending-report"] });
       if (id) void client.invalidateQueries({ queryKey: ["money-transaction", id] });
     },
   });
@@ -783,31 +783,26 @@ export function useChangeRules() {
   });
 }
 
-export function useBudgetReport(
-  personId: string | undefined,
-  monthStart: string,
-  currency: string,
+/** The spending report; while a new period or filter loads, the last one stays on screen. */
+export function useSpendingReport(
+  query: Omit<SpendingReportQuery, "personId"> & {
+    personId: string | undefined;
+  },
 ) {
+  const { personId, period, currency, accountIds, categoryId } = query;
   return useQuery({
-    queryKey: ["money-budget-report", personId, monthStart, currency],
-    queryFn: () => fetchBudgetReport(personId!, monthStart, currency),
-    enabled: !!personId,
-  });
-}
-
-/** Set (`amount`) or remove (`amount: null`) a category's target for a month. */
-export function useSaveBudgetTarget() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      amount,
+    queryKey: [
+      "money-spending-report",
+      personId,
+      period.start,
+      period.end,
       currency,
-      ...key
-    }: TargetKey & { amount: number | null; currency: string }) =>
-      saveBudgetTarget(key, amount, currency),
-    onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
-    onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
-    onSettled: () => void client.invalidateQueries({ queryKey: ["money-budget-report"] }),
+      [...accountIds].sort().join(","),
+      categoryId,
+    ],
+    queryFn: () => fetchSpendingReport({ ...query, personId: personId! }),
+    enabled: !!personId,
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -828,7 +823,7 @@ export function useSaveSelfAlias() {
     onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
     onSettled: () => {
       void client.invalidateQueries({ queryKey: ["money-transfer-self-aliases"] });
-      void client.invalidateQueries({ queryKey: ["money-budget-report"] });
+      void client.invalidateQueries({ queryKey: ["money-spending-report"] });
     },
   });
 }
