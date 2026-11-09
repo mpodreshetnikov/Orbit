@@ -14,6 +14,9 @@ import type {
 } from "@/types/money";
 import { listMoneyAccounts, listMoneyCategories } from "./transactions";
 
+type MoneyTransactionInsert = Database["public"]["Tables"]["money_transactions"]["Insert"];
+type MoneyLineItemInsert = Database["public"]["Tables"]["money_line_items"]["Insert"];
+
 /**
  * Agent spend create/edit as a draft the owner confirms on a card (stream D / T-261109-23p).
  *
@@ -197,8 +200,8 @@ export async function buildCreateSpendDraft(
       posted_at_label: russianDateTime(normalized.posted_at),
       amount_label: formatMoneyAmount(normalized.amount, currency),
       type_label: TYPE_LABELS[normalized.transaction_type],
-      merchant_name: normalized.merchant_name,
-      comment: normalized.comment,
+      merchant_name: normalized.merchant_name ?? null,
+      comment: normalized.comment ?? null,
       lines: buildLinesView(lines, currency, names),
       input: normalized,
     },
@@ -319,13 +322,13 @@ export async function applySpendDraft(
     };
     const { data: tx, error } = await supabase
       .from("money_transactions")
-      .insert(transactionInsertRow(payload))
+      .insert(transactionInsertRow(payload) as MoneyTransactionInsert)
       .select("id, merchant_name")
       .single();
     if (error) return { ok: false, error: error.message };
 
-    const items = toLineInputs(create.line_items, create.merchant_name, create.amount).map((item) =>
-      lineItemRow(item, tx.id),
+    const items = toLineInputs(create.line_items, create.merchant_name, create.amount).map(
+      (item) => lineItemRow(item, tx.id) as MoneyLineItemInsert,
     );
     const { error: lineError } = await supabase.from("money_line_items").insert(items);
     if (lineError) return { ok: false, error: lineError.message };
