@@ -512,10 +512,7 @@ describe("markCheckupDone", () => {
         { data: null }, // clear
         { data: null }, // restore
       ],
-      checkup_completions: [
-        { data: null },
-        { data: null, error: { message: "insert failed" } },
-      ],
+      checkup_completions: [{ data: null }, { data: null, error: { message: "insert failed" } }],
     });
 
     await expect(

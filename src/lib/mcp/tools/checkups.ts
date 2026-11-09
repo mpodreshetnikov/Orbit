@@ -289,8 +289,7 @@ export function registerCheckupTools(server: McpToolServer): void {
       const proposedReminders =
         normalizedReminders === undefined ? checkup.reminder_days_before : normalizedReminders;
 
-      const willReactivate =
-        args.schedule.type === "interval" && checkup.status === "completed";
+      const willReactivate = args.schedule.type === "interval" && checkup.status === "completed";
 
       if (args.confirm !== true) {
         return ok(
