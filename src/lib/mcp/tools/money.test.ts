@@ -8,10 +8,12 @@ const money = vi.hoisted(() => ({
   listMoneyAccounts: vi.fn(),
   resolveCategoryFilter: vi.fn(),
 }));
+const spending = vi.hoisted(() => ({ fetchMoneySpendingReport: vi.fn() }));
 const regen = vi.hoisted(() => ({ readTimezonePreference: vi.fn() }));
 const person = vi.hoisted(() => ({ resolvePerson: vi.fn(), listPeople: vi.fn() }));
 
 vi.mock("../money/transactions", () => money);
+vi.mock("../money/spending-report", () => spending);
 vi.mock("@/lib/medications/regenerate-dose-events", () => regen);
 vi.mock("../resolve-person", () => person);
 vi.mock("../supabase-user-client", () => ({
@@ -87,6 +89,79 @@ async function handlers(): Promise<Map<string, Handler>> {
   return map;
 }
 
+const REPORT = {
+  period: {
+    start: "2026-11-01",
+    end: "2026-11-30",
+    days: 30,
+    previous_start: "2026-10-02",
+    previous_end: "2026-10-31",
+    last_year: 2025,
+  },
+  currency: "RUB",
+  totals: {
+    income: 100_000,
+    expense: 40_000,
+    net: 60_000,
+    previous_income: 90_000,
+    previous_expense: 50_000,
+    previous_net: 40_000,
+    last_year_income: 80_000,
+    last_year_expense: 35_000,
+    last_year_net: 45_000,
+  },
+  forecast: { expense: 45_000, days_left: 10 },
+  categories: [
+    {
+      id: "food",
+      parent_id: null,
+      system_key: "food",
+      name_en: "Food",
+      name_ru: "Еда",
+      has_children: false,
+      income: 0,
+      expense: 12_000,
+      previous_income: 0,
+      previous_expense: 10_000,
+      last_year_income: 0,
+      last_year_expense: 9_000,
+      months: [],
+    },
+    {
+      id: "transport",
+      parent_id: null,
+      system_key: "transport",
+      name_en: "Transport",
+      name_ru: "Транспорт",
+      has_children: false,
+      income: 0,
+      expense: 8_000,
+      previous_income: 0,
+      previous_expense: 7_000,
+      last_year_income: 0,
+      last_year_expense: 6_000,
+      months: [],
+    },
+  ],
+  days: [{ date: "2026-11-01", income: 0, expense: 1_000 }],
+  merchants: [
+    {
+      brand_id: null,
+      name: "Fixture Cafe",
+      logo_url: null,
+      base_color: null,
+      expense: 3_000,
+      transaction_count: 4,
+    },
+  ],
+  fx_status: { status: "ok" as const, missing: [] as string[] },
+};
+
+const REPORT_DEFAULTS = {
+  period: "month" as const,
+  currency: "RUB",
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   person.resolvePerson.mockResolvedValue({ status: "ok", person: PERSON });
@@ -94,6 +169,7 @@ beforeEach(() => {
   money.listMoneyCategories.mockResolvedValue([]);
   money.listMoneyTransactions.mockResolvedValue({ total: 1, transactions: [TRANSACTION] });
   money.resolveCategoryFilter.mockReturnValue({ ids: ["food", "coffee"], unknown: [] });
+  spending.fetchMoneySpendingReport.mockResolvedValue(REPORT);
 });
 
 describe("list_money_transactions", () => {
@@ -323,6 +399,80 @@ describe("edges of the money tools", () => {
   });
 });
 
+describe("get_money_spending_report", () => {
+  it("summarises period totals, top categories and merchants without the feed", async () => {
+    const result = await (await handlers()).get("get_money_spending_report")!(REPORT_DEFAULTS, ctx);
+
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toContain("spending report for Max");
+    expect(result.content[0].text).toContain("2026-11-01…2026-11-30");
+    expect(result.content[0].text).toContain("expense 40000.00 RUB");
+    expect(result.content[0].text).toContain("Еда 12000.00");
+    expect(result.content[0].text).toContain("Fixture Cafe 3000.00");
+    expect(result.content[0].text).toContain("forecast 45000.00");
+    expect(result.structuredContent?.report).toEqual(REPORT);
+    expect(spending.fetchMoneySpendingReport.mock.calls[0]?.[1]).toMatchObject({
+      personId: "p-1",
+      currency: "RUB",
+      accountIds: [],
+      categoryId: null,
+      period: { start: "2026-11-01", end: "2026-11-30" },
+    });
+    expect(money.listMoneyTransactions).not.toHaveBeenCalled();
+  });
+
+  it("resolves a single category filter and custom dates", async () => {
+    money.listMoneyCategories.mockResolvedValue([
+      {
+        id: "food",
+        parent_id: null,
+        canonical_category_id: "food",
+        category_kind: "canonical",
+        system_key: "food",
+        name_en: "Food",
+        name_ru: "Еда",
+        archived_at: null,
+      },
+    ]);
+
+    await (await handlers()).get("get_money_spending_report")!(
+      {
+        period: "custom",
+        from: "2026-10-01",
+        to: "2026-10-15",
+        category: "food",
+        account_ids: ["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"],
+        currency: "USD",
+      },
+      ctx,
+    );
+
+    expect(spending.fetchMoneySpendingReport.mock.calls[0]?.[1]).toMatchObject({
+      currency: "USD",
+      accountIds: ["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"],
+      categoryId: "food",
+      period: { start: "2026-10-01", end: "2026-10-15" },
+    });
+  });
+
+  it("refuses an unknown category and a backwards custom range", async () => {
+    money.listMoneyCategories.mockResolvedValue([]);
+    const handler = (await handlers()).get("get_money_spending_report")!;
+
+    const unknown = await handler({ ...REPORT_DEFAULTS, category: "nope" }, ctx);
+    expect(unknown.isError).toBe(true);
+    expect(unknown.content[0].text).toContain("No category matches");
+    expect(spending.fetchMoneySpendingReport).not.toHaveBeenCalled();
+
+    const badRange = await handler(
+      { period: "custom", from: "2026-10-15", to: "2026-10-01", currency: "RUB" },
+      ctx,
+    );
+    expect(badRange.isError).toBe(true);
+    expect(spending.fetchMoneySpendingReport).not.toHaveBeenCalled();
+  });
+});
+
 describe("the money grant", () => {
   it("is required: a health-only connection reads no money", async () => {
     const map = await handlers();
@@ -332,13 +482,18 @@ describe("the money grant", () => {
       "list_money_transactions",
       "list_money_accounts",
       "list_money_categories",
+      "get_money_spending_report",
     ]) {
-      const result = await map.get(name)!({ ...DEFAULTS, include_archived: false }, healthOnly);
+      const result = await map.get(name)!(
+        { ...DEFAULTS, ...REPORT_DEFAULTS, include_archived: false },
+        healthOnly,
+      );
       expect(result.isError, name).toBe(true);
       expect(result.content[0].text).toContain('"money:read"');
     }
     expect(money.listMoneyTransactions).not.toHaveBeenCalled();
     expect(money.listMoneyAccounts).not.toHaveBeenCalled();
     expect(money.listMoneyCategories).not.toHaveBeenCalled();
+    expect(spending.fetchMoneySpendingReport).not.toHaveBeenCalled();
   });
 });
