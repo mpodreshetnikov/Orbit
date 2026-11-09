@@ -218,6 +218,6 @@ describe("the spend card", () => {
 
   it("keeps confirm in-flight after a client timeout so a late commit cannot be duplicated", () => {
     expect(SPEND_DRAFT_HTML).toContain('kind: "waiting"');
-    expect(SPEND_DRAFT_HTML).not.toContain("busy = null;\n      decision = { kind: \"error\"");
+    expect(SPEND_DRAFT_HTML).not.toContain('busy = null;\n      decision = { kind: "error"');
   });
 });
