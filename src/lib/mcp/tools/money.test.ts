@@ -471,6 +471,122 @@ describe("get_money_spending_report", () => {
     expect(badRange.isError).toBe(true);
     expect(spending.fetchMoneySpendingReport).not.toHaveBeenCalled();
   });
+
+  it("refuses an ambiguous category name and lists candidate ids", async () => {
+    money.listMoneyCategories.mockResolvedValue([
+      {
+        id: "books-edu",
+        parent_id: "education",
+        canonical_category_id: "education",
+        category_kind: "custom",
+        system_key: null,
+        name_en: "Books",
+        name_ru: "Книги",
+        archived_at: null,
+      },
+      {
+        id: "books-fun",
+        parent_id: "entertainment",
+        canonical_category_id: "entertainment",
+        category_kind: "custom",
+        system_key: null,
+        name_en: "Books",
+        name_ru: "Книги",
+        archived_at: null,
+      },
+    ]);
+
+    const result = await (await handlers()).get("get_money_spending_report")!(
+      { ...REPORT_DEFAULTS, category: "Books" },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("matches more than one category");
+    expect(result.content[0].text).toContain("books-edu");
+    expect(result.content[0].text).toContain("books-fun");
+    expect(result.structuredContent?.candidates).toEqual([
+      { id: "books-edu", name_ru: "Книги", name_en: "Books" },
+      { id: "books-fun", name_ru: "Книги", name_en: "Books" },
+    ]);
+    expect(spending.fetchMoneySpendingReport).not.toHaveBeenCalled();
+  });
+
+  it("summarises filtered categories under the selected branch, not the roots", async () => {
+    spending.fetchMoneySpendingReport.mockResolvedValue({
+      ...REPORT,
+      categories: [
+        {
+          id: "food",
+          parent_id: null,
+          system_key: "food",
+          name_en: "Food",
+          name_ru: "Еда",
+          has_children: true,
+          income: 0,
+          expense: 20_000,
+          previous_income: 0,
+          previous_expense: 18_000,
+          last_year_income: 0,
+          last_year_expense: 15_000,
+          months: [],
+        },
+        {
+          id: "cafe",
+          parent_id: "food",
+          system_key: null,
+          name_en: "Cafe",
+          name_ru: "Кафе",
+          has_children: false,
+          income: 0,
+          expense: 12_000,
+          previous_income: 0,
+          previous_expense: 10_000,
+          last_year_income: 0,
+          last_year_expense: 9_000,
+          months: [],
+        },
+        {
+          id: "takeout",
+          parent_id: "food",
+          system_key: null,
+          name_en: "Takeout",
+          name_ru: "Еда навынос",
+          has_children: false,
+          income: 0,
+          expense: 8_000,
+          previous_income: 0,
+          previous_expense: 8_000,
+          last_year_income: 0,
+          last_year_expense: 6_000,
+          months: [],
+        },
+      ],
+    });
+    money.listMoneyCategories.mockResolvedValue([
+      {
+        id: "food",
+        parent_id: null,
+        canonical_category_id: "food",
+        category_kind: "canonical",
+        system_key: "food",
+        name_en: "Food",
+        name_ru: "Еда",
+        archived_at: null,
+      },
+    ]);
+
+    const result = await (await handlers()).get("get_money_spending_report")!(
+      { ...REPORT_DEFAULTS, category: "food" },
+      ctx,
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toContain("Кафе 12000.00");
+    expect(result.content[0].text).toContain("Еда навынос 8000.00");
+    // Root rollup must not replace the branch breakdown in the summary.
+    expect(result.content[0].text).not.toMatch(/top categories:\n {2}- Еда 20000\.00/);
+  });
 });
 
 describe("the money grant", () => {

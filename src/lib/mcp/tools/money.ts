@@ -73,20 +73,38 @@ function transactionLine(transaction: MoneyTransactionView, timeZone: string): s
   );
 }
 
-/** One category by id, canonical key or name — the report RPC takes a single branch root. */
+/**
+ * One category by id, canonical key or name — the report RPC takes a single branch root.
+ * Ids and system keys are unique; duplicate display names must be disambiguated by id.
+ */
 function resolveOneCategory(
   categories: MoneyCategory[],
   ref: string,
-): { id: string } | { unknown: string } {
-  const needle = ref.trim().toLowerCase();
+):
+  | { id: string }
+  | { unknown: string }
+  | { ambiguous: Array<{ id: string; name_ru: string; name_en: string }> } {
+  const trimmed = ref.trim();
+  const byId = categories.find((category) => category.id === trimmed);
+  if (byId) return { id: byId.id };
+
+  const needle = trimmed.toLowerCase();
   const matches = categories.filter(
     (category) =>
-      category.id === ref.trim() ||
       category.system_key?.toLowerCase() === needle ||
       category.name_en.toLowerCase() === needle ||
       category.name_ru.toLowerCase() === needle,
   );
   if (matches.length === 0) return { unknown: ref };
+  if (matches.length > 1) {
+    return {
+      ambiguous: matches.map((category) => ({
+        id: category.id,
+        name_ru: category.name_ru,
+        name_en: category.name_en,
+      })),
+    };
+  }
   return { id: matches[0]!.id };
 }
 
@@ -94,6 +112,7 @@ function summarizeSpendingReport(
   personName: string,
   report: SpendingReport,
   locale: string,
+  filterCategoryId: string | null = null,
 ): string {
   const { totals, currency } = report;
   const period = `${report.period.start}…${report.period.end}`;
@@ -112,7 +131,7 @@ function summarizeSpendingReport(
       `- forecast ${formatMoney(report.forecast.expense, currency)} (${report.forecast.days_left} days left)`,
     );
   }
-  const categories = topCategories(report.categories, null, "expense").slice(0, 8);
+  const categories = topCategories(report.categories, filterCategoryId, "expense").slice(0, 8);
   if (categories.length > 0) {
     lines.push("- top categories:");
     for (const category of categories) {
@@ -430,6 +449,15 @@ export function registerMoneyTools(server: McpToolServer): void {
             `No category matches "${args.category}". Call list_money_categories for the names, keys and ids that exist.`,
           );
         }
+        if ("ambiguous" in match) {
+          const candidates = match.ambiguous
+            .map((category) => `${category.name_ru} / ${category.name_en} id ${category.id}`)
+            .join("; ");
+          return fail(
+            `"${args.category}" matches more than one category (${candidates}). Pass the id.`,
+            { candidates: match.ambiguous },
+          );
+        }
         categoryId = match.id;
       }
 
@@ -442,7 +470,7 @@ export function registerMoneyTools(server: McpToolServer): void {
         today,
       });
 
-      return ok(summarizeSpendingReport(person.name, report, "ru-RU"), {
+      return ok(summarizeSpendingReport(person.name, report, "ru-RU", categoryId), {
         person,
         timezone: timeZone,
         period: resolvedPeriod,
