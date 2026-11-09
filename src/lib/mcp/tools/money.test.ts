@@ -1,3 +1,4 @@
+// CI retrigger after Quality Gates pg_dump apt-key curl flake (run 42669423828).
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { McpToolServer } from "./types";
 
