@@ -334,3 +334,181 @@ export async function addProposedCheckups(
   if (error) throw new Error(`Failed to add the checkups: ${error.message}`);
   return (data ?? []) as Array<{ id: string; title: string; next_due_at: string | null }>;
 }
+
+/** Schedule shape an agent can set on an existing checkup (same union as propose, plus next_due_from). */
+export type CheckupScheduleWrite =
+  | {
+      type: "interval";
+      every: number;
+      unit: "week" | "month" | "year";
+      first_due_at?: string | null;
+      next_due_from?: "completion" | "target";
+    }
+  | { type: "one_off"; due_at: string };
+
+export interface CheckupItemSnapshot {
+  id: string;
+  person_id: string;
+  title: string;
+  category: string;
+  status: string;
+  schedule: unknown;
+  next_due_at: string | null;
+  reminder_days_before: number[] | null;
+}
+
+function toDateOnly(day: string | undefined | null, fallback: string): string {
+  if (day && day.trim().length > 0) return day.trim().slice(0, 10);
+  return fallback;
+}
+
+/** Build the jsonb `schedule` column from an agent write, anchoring an interval when first due is set. */
+export function scheduleColumnFromWrite(input: CheckupScheduleWrite): Record<string, unknown> {
+  if (input.type === "one_off") {
+    return { type: "one_off", due_at: input.due_at };
+  }
+  const schedule: Record<string, unknown> = {
+    type: "interval",
+    every: input.every,
+    unit: input.unit,
+  };
+  if (input.next_due_from) schedule.next_due_from = input.next_due_from;
+  if (input.first_due_at) {
+    schedule.anchor_date = anchorFor(
+      { type: "interval", every: input.every, unit: input.unit },
+      input.first_due_at,
+    );
+  }
+  return schedule;
+}
+
+export async function loadCheckupItem(
+  supabase: SupabaseClient<Database>,
+  checkupId: string,
+): Promise<CheckupItemSnapshot | null> {
+  const { data, error } = await supabase
+    .from("checkup_items")
+    .select("id, person_id, title, category, status, schedule, next_due_at, reminder_days_before")
+    .eq("id", checkupId)
+    .maybeSingle();
+  if (error) throw new Error(`Failed to load checkup: ${error.message}`);
+  return (data as CheckupItemSnapshot | null) ?? null;
+}
+
+/**
+ * Record that a checkup was done on `doneAt` (YYYY-MM-DD). Database triggers advance
+ * `next_due_at` (or complete a one-off). Refuses archived items and evidence that is not the
+ * person's.
+ */
+export async function markCheckupDone(
+  supabase: SupabaseClient<Database>,
+  params: {
+    checkupId: string;
+    doneAt: string;
+    note?: string | null;
+    evidenceRecordId?: string | null;
+  },
+): Promise<{
+  checkup: CheckupItemSnapshot;
+  completion: {
+    id: string;
+    done_at: string;
+    note: string | null;
+    evidence_record_id: string | null;
+  };
+}> {
+  const checkup = await loadCheckupItem(supabase, params.checkupId);
+  if (!checkup) {
+    throw new Error(`No checkup with id ${params.checkupId}.`);
+  }
+  if (checkup.status === "archived") {
+    throw new Error(
+      `Checkup "${checkup.title}" is archived; restore it in the app before marking it done.`,
+    );
+  }
+
+  if (params.evidenceRecordId) {
+    const { data: evidence, error: evidenceError } = await supabase
+      .from("medical_records")
+      .select("id")
+      .eq("id", params.evidenceRecordId)
+      .eq("person_id", checkup.person_id)
+      .maybeSingle();
+    if (evidenceError) throw new Error(`Failed to check evidence record: ${evidenceError.message}`);
+    if (!evidence) {
+      throw new Error("evidence_record_id is not one of this person's records");
+    }
+  }
+
+  const doneAt = toDateOnly(params.doneAt, new Date().toISOString().slice(0, 10));
+  const { data: completion, error } = await supabase
+    .from("checkup_completions")
+    .insert({
+      checkup_item_id: checkup.id,
+      done_at: doneAt,
+      note: params.note?.trim() ? params.note.trim() : null,
+      evidence_record_id: params.evidenceRecordId ?? null,
+    })
+    .select("id, done_at, note, evidence_record_id")
+    .single();
+  if (error || !completion) {
+    throw new Error(`Failed to mark checkup done: ${error?.message ?? "no row returned"}`);
+  }
+
+  const refreshed = (await loadCheckupItem(supabase, checkup.id)) ?? checkup;
+  return {
+    checkup: refreshed,
+    completion: completion as {
+      id: string;
+      done_at: string;
+      note: string | null;
+      evidence_record_id: string | null;
+    },
+  };
+}
+
+/**
+ * Replace a checkup's schedule (and optionally its reminder lead times). Triggers recompute
+ * `next_due_at`. Refuses archived items.
+ */
+export async function updateCheckupSchedule(
+  supabase: SupabaseClient<Database>,
+  params: {
+    checkupId: string;
+    schedule: CheckupScheduleWrite;
+    reminderDaysBefore?: number[] | null;
+  },
+): Promise<{ before: CheckupItemSnapshot; after: CheckupItemSnapshot }> {
+  const before = await loadCheckupItem(supabase, params.checkupId);
+  if (!before) {
+    throw new Error(`No checkup with id ${params.checkupId}.`);
+  }
+  if (before.status === "archived") {
+    throw new Error(
+      `Checkup "${before.title}" is archived; restore it in the app before editing its schedule.`,
+    );
+  }
+
+  const payload: Record<string, unknown> = {
+    schedule: scheduleColumnFromWrite(params.schedule),
+  };
+  if (params.reminderDaysBefore !== undefined) {
+    payload.reminder_days_before =
+      params.reminderDaysBefore === null
+        ? null
+        : [...params.reminderDaysBefore]
+            .filter((day) => Number.isFinite(day) && day >= 0)
+            .sort((a, b) => b - a);
+  }
+
+  const { data, error } = await supabase
+    .from("checkup_items")
+    .update(payload as never)
+    .eq("id", before.id)
+    .select("id, person_id, title, category, status, schedule, next_due_at, reminder_days_before")
+    .single();
+  if (error || !data) {
+    throw new Error(`Failed to update checkup schedule: ${error?.message ?? "no row returned"}`);
+  }
+  return { before, after: data as CheckupItemSnapshot };
+}

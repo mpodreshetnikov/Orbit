@@ -6,7 +6,10 @@ import {
   firstDueDate,
   getCheckup,
   listCheckups,
+  markCheckupDone,
   reviewCheckupProposals,
+  scheduleColumnFromWrite,
+  updateCheckupSchedule,
   type ProposedCheckup,
 } from "./checkups";
 import { createSupabaseStub } from "./test-support";
@@ -341,5 +344,153 @@ describe("reviewCheckupProposals", () => {
       },
     ]);
     expect(added).toEqual([{ id: "k-1", title: ultrasound.title, next_due_at: "2027-03-06" }]);
+  });
+});
+
+describe("scheduleColumnFromWrite", () => {
+  it("anchors an interval when first_due_at is set, and keeps a one-off date", () => {
+    expect(
+      scheduleColumnFromWrite({
+        type: "interval",
+        every: 6,
+        unit: "month",
+        first_due_at: "2027-01-15",
+        next_due_from: "target",
+      }),
+    ).toEqual({
+      type: "interval",
+      every: 6,
+      unit: "month",
+      next_due_from: "target",
+      anchor_date: "2026-07-15",
+    });
+    expect(scheduleColumnFromWrite({ type: "one_off", due_at: "2026-12-01" })).toEqual({
+      type: "one_off",
+      due_at: "2026-12-01",
+    });
+  });
+});
+
+describe("markCheckupDone", () => {
+  it("inserts a completion and refreshes the checkup", async () => {
+    const stub = createSupabaseStub({
+      checkup_items: [
+        {
+          data: checkup({
+            id: "c-1",
+            title: "Blood panel",
+            status: "active",
+            next_due_at: "2026-06-20",
+          }),
+        },
+        {
+          data: checkup({
+            id: "c-1",
+            title: "Blood panel",
+            status: "active",
+            next_due_at: "2026-12-15",
+          }),
+        },
+      ],
+      checkup_completions: [
+        {
+          data: {
+            id: "done-1",
+            done_at: "2026-06-15",
+            note: "lab",
+            evidence_record_id: null,
+          },
+        },
+      ],
+    });
+
+    const result = await markCheckupDone(stub.client, {
+      checkupId: "c-1",
+      doneAt: "2026-06-15",
+      note: "lab",
+    });
+
+    expect(stub.argsFor("checkup_completions", "insert")[0][0]).toEqual({
+      checkup_item_id: "c-1",
+      done_at: "2026-06-15",
+      note: "lab",
+      evidence_record_id: null,
+    });
+    expect(result.completion.id).toBe("done-1");
+    expect(result.checkup.next_due_at).toBe("2026-12-15");
+  });
+
+  it("refuses an archived checkup and a stranger's evidence record", async () => {
+    const archived = createSupabaseStub({
+      checkup_items: [{ data: checkup({ status: "archived" }) }],
+    });
+    await expect(
+      markCheckupDone(archived.client, { checkupId: "c-1", doneAt: "2026-06-15" }),
+    ).rejects.toThrow(/archived/);
+
+    const badEvidence = createSupabaseStub({
+      checkup_items: [{ data: checkup() }],
+      medical_records: [{ data: null }],
+    });
+    await expect(
+      markCheckupDone(badEvidence.client, {
+        checkupId: "c-1",
+        doneAt: "2026-06-15",
+        evidenceRecordId: "rec-x",
+      }),
+    ).rejects.toThrow(/evidence_record_id/);
+  });
+});
+
+describe("updateCheckupSchedule", () => {
+  it("writes the schedule column and optional reminders", async () => {
+    const before = checkup({
+      schedule: { type: "interval", every: 6, unit: "month" },
+      reminder_days_before: [7],
+      next_due_at: "2026-06-20",
+    });
+    const after = {
+      ...before,
+      schedule: { type: "interval", every: 3, unit: "month", anchor_date: "2026-03-20" },
+      reminder_days_before: [14, 7],
+      next_due_at: "2026-06-20",
+    };
+    const stub = createSupabaseStub({
+      checkup_items: [{ data: before }, { data: after }],
+    });
+
+    const result = await updateCheckupSchedule(stub.client, {
+      checkupId: "c-1",
+      schedule: {
+        type: "interval",
+        every: 3,
+        unit: "month",
+        first_due_at: "2026-06-20",
+      },
+      reminderDaysBefore: [7, 14],
+    });
+
+    expect(stub.argsFor("checkup_items", "update")[0][0]).toEqual({
+      schedule: {
+        type: "interval",
+        every: 3,
+        unit: "month",
+        anchor_date: "2026-03-20",
+      },
+      reminder_days_before: [14, 7],
+    });
+    expect(result.after.reminder_days_before).toEqual([14, 7]);
+  });
+
+  it("refuses an archived checkup", async () => {
+    const stub = createSupabaseStub({
+      checkup_items: [{ data: checkup({ status: "archived" }) }],
+    });
+    await expect(
+      updateCheckupSchedule(stub.client, {
+        checkupId: "c-1",
+        schedule: { type: "one_off", due_at: "2026-12-01" },
+      }),
+    ).rejects.toThrow(/archived/);
   });
 });
