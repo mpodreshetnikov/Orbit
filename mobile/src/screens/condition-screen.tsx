@@ -14,7 +14,7 @@ import {
 import type { ReactNode } from "react";
 import { ActionSheetIOS, Alert, Pressable, RefreshControl, ScrollView, View } from "react-native";
 import { CONDITION_TONE, ConditionStatusBadge } from "@/components/condition-status";
-import { Badge, Button, Card, Icon, Placeholder, Text } from "@/components/ui";
+import { Badge, Card, Icon, Placeholder, Text } from "@/components/ui";
 import type { ConditionMention } from "@/features/conditions/query";
 import { formatDay } from "@/features/measurements/format";
 import { t } from "@/lib/i18n";
@@ -26,7 +26,7 @@ const SHEET_DISMISS_MS = 400;
 /**
  * One condition — the web condition page: its status and ICD code, its dates and how often it was
  * mentioned, its notes, and every mention newest first with the record it is in and the source's own
- * words. Editing opens the form; a condition no record mentions can be deleted.
+ * words. A condition no record mentions can be deleted.
  */
 export default function ConditionScreen() {
   const palette = usePalette();
@@ -39,6 +39,8 @@ export default function ConditionScreen() {
   const linked = (checkups.data ?? []).filter((item) =>
     item.why_links.some((link) => link.id === id),
   );
+  // The web page offers deleting only while no record mentions the condition.
+  const deletable = data?.mention_count === 0;
 
   const remove = () =>
     Alert.alert(t("conditions.deleteCondition"), t("conditions.deleteConditionConfirm"), [
@@ -58,24 +60,16 @@ export default function ConditionScreen() {
     ]);
 
   const actions = () => {
-    // The web page offers deleting only while no record mentions the condition.
-    const deletable = data?.mention_count === 0;
-    const labels = [
-      t("common.edit"),
-      ...(deletable ? [t("conditions.deleteCondition")] : []),
-      t("common.cancel"),
-    ];
+    const labels = [t("conditions.deleteCondition"), t("common.cancel")];
     ActionSheetIOS.showActionSheetWithOptions(
       {
         options: labels,
-        cancelButtonIndex: labels.length - 1,
-        destructiveButtonIndex: deletable ? 1 : undefined,
-        message: deletable ? undefined : t("conditions.cannotDeleteHasHistory"),
+        cancelButtonIndex: 1,
+        destructiveButtonIndex: 0,
       },
       (index) => {
-        if (index === 0) router.push(`/health/conditions/edit?id=${id}` as Href);
         // An alert raised while the sheet is still closing is dropped by iOS.
-        else if (deletable && index === 1) setTimeout(remove, SHEET_DISMISS_MS);
+        if (index === 0) setTimeout(remove, SHEET_DISMISS_MS);
       },
     );
   };
@@ -85,18 +79,19 @@ export default function ConditionScreen() {
       options={{
         title: data?.name ?? "",
         headerLargeTitle: false,
-        headerRight: data
-          ? () => (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`${t("common.actions")}: ${data.name}`}
-                hitSlop={space.sm}
-                onPress={actions}
-              >
-                <Icon icon={Ellipsis} size={22} tone="foreground" />
-              </Pressable>
-            )
-          : undefined,
+        headerRight:
+          data && deletable
+            ? () => (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`${t("common.actions")}: ${data.name}`}
+                  hitSlop={space.sm}
+                  onPress={actions}
+                >
+                  <Icon icon={Ellipsis} size={22} tone="foreground" />
+                </Pressable>
+              )
+            : undefined,
       }}
     />
   );
@@ -196,12 +191,6 @@ export default function ConditionScreen() {
               {t("conditions.noHistory")}
             </Text>
           )}
-          <Button
-            variant="outline"
-            icon={History}
-            label={t("conditions.addToHistory")}
-            onPress={() => router.push(`/health/conditions/history?id=${id}` as Href)}
-          />
         </Card>
 
         <Card style={{ padding: space.lg, gap: space.md }}>

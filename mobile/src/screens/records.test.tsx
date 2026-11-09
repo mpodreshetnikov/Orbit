@@ -1,13 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
 import { fireEvent, screen, waitFor } from "@testing-library/react-native";
-import { ActionSheetIOS, Alert, Text } from "react-native";
+import { Alert, Text } from "react-native";
 import * as WebBrowser from "expo-web-browser";
+import { searchRecords } from "@/features/records/query";
 import HealthScreen from "@/screens/health-screen";
-import RecordFormScreen from "@/screens/record-form-screen";
 import RecordScreen from "@/screens/record-screen";
 import RecordsScreen from "@/screens/records-screen";
 import {
-  db,
   fail,
   failOnce,
   fakeSession,
@@ -25,7 +24,6 @@ const routes = {
   "health/index": HealthScreen,
   "health/records/index": RecordsScreen,
   "health/records/[id]": RecordScreen,
-  "health/records/edit": RecordFormScreen,
 };
 
 function record(id: string, title: string, extra = {}) {
@@ -147,13 +145,6 @@ function seedRecords() {
       description: "простая",
     },
   ];
-}
-
-/** Answer the next action sheet with the option labelled `label`. */
-function chooseInSheet(label: string) {
-  jest
-    .spyOn(ActionSheetIOS, "showActionSheetWithOptions")
-    .mockImplementationOnce((options, callback) => callback(options.options.indexOf(label)));
 }
 
 beforeEach(() => {
@@ -305,69 +296,27 @@ describe("A document", () => {
     expect(await screen.findByText("history")).toBeOnTheScreen();
   });
 
-  it("edits its details", async () => {
+  it("has no edit control on the document page", async () => {
     await renderScreens(routes, "/health/records/r-blood");
-    await fireEvent.press(await screen.findByText("Редактировать"));
-    await fireEvent.changeText(await screen.findByTestId("record-title"), "  ОАК  ");
-    chooseInSheet("Приём врача");
-    await fireEvent.press(screen.getByLabelText("Тип записи: Анализы"));
-    await fireEvent(screen.getByTestId("record-date"), "change", {
-      nativeEvent: { timestamp: new Date(2026, 9, 16, 12).getTime() },
-    });
-    await fireEvent.changeText(screen.getByTestId("record-notes"), "  ");
-    await fireEvent.press(screen.getByText("Сохранить"));
-    await waitFor(() =>
-      expect(db.tables.medical_records?.find((row) => row.id === "r-blood")).toMatchObject({
-        title: "ОАК",
-        record_type: "visit",
-        record_date: "2026-10-16",
-        notes: null,
-      }),
-    );
-    expect(await screen.findByText(/Приём врача · 16/)).toBeOnTheScreen();
-  });
-
-  it("clears and sets a date, and needs a title", async () => {
-    await renderScreens(routes, "/health/records/edit?id=r-blood");
-    await fireEvent.press(await screen.findByText("Очистить"));
-    expect(screen.getByText("Без даты")).toBeOnTheScreen();
-    await fireEvent.press(screen.getByText("Добавить"));
-    expect(screen.getByTestId("record-date")).toBeOnTheScreen();
-    await fireEvent.press(screen.getByText("Очистить"));
-    await fireEvent.changeText(screen.getByTestId("record-title"), "");
-    expect(screen.getByText("Обязательное поле")).toBeOnTheScreen();
-    await fireEvent.changeText(screen.getByTestId("record-title"), "ОАК");
-    await fireEvent.press(screen.getByText("Сохранить"));
-    await waitFor(() =>
-      expect(db.tables.medical_records?.find((row) => row.id === "r-blood")).toMatchObject({
-        record_date: null,
-      }),
-    );
-  });
-
-  it("names a refused save", async () => {
-    const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
-    await renderScreens(routes, "/health/records/edit?id=r-blood");
-    await screen.findByTestId("record-title");
-    fail("medical_records");
-    await fireEvent.press(screen.getByText("Сохранить"));
-    await waitFor(() =>
-      expect(alert).toHaveBeenCalledWith("Что-то пошло не так", "medical_records is unavailable"),
-    );
-  });
-
-  it("shows the edit form's error and retries", async () => {
-    failOnce("medical_records");
-    await renderScreens(routes, "/health/records/edit?id=r-blood");
-    expect(await screen.findByText("medical_records is unavailable")).toBeOnTheScreen();
-    await fireEvent.press(screen.getByText("Повторить"));
-    expect(await screen.findByTestId("record-title")).toBeOnTheScreen();
-  });
-
-  it("cancels the edit", async () => {
-    await renderScreens(routes, "/health/records/r-blood");
-    await fireEvent.press(await screen.findByText("Редактировать"));
-    await fireEvent.press(await screen.findByText("Отмена"));
     expect(await screen.findByText("Натощак")).toBeOnTheScreen();
+    expect(screen.queryByText("Редактировать")).toBeNull();
+  });
+});
+
+describe("searchRecords", () => {
+  it("matches a keyword and ignores blank queries", () => {
+    const rows = [
+      record("a", "Blood", { llm_keywords: ["гемоглобин"], notes: null, llm_summary: null }),
+      record("b", "Visit", {
+        record_type: "visit",
+        llm_keywords: null,
+        notes: "follow-up",
+        llm_summary: null,
+      }),
+    ] as Parameters<typeof searchRecords>[0];
+    expect(searchRecords(rows, "", "all").map((one) => one.id)).toEqual(["a", "b"]);
+    expect(searchRecords(rows, "гемоглобин", "all").map((one) => one.id)).toEqual(["a"]);
+    expect(searchRecords(rows, "follow", "visit").map((one) => one.id)).toEqual(["b"]);
+    expect(searchRecords(rows, "follow", "lab")).toEqual([]);
   });
 });

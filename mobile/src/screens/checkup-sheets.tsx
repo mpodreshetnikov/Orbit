@@ -4,7 +4,7 @@ import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useState, type ReactNode } from "react";
 import { Alert, ScrollView } from "react-native";
 import { Choice, Field, Input, Section } from "@/components/form";
-import { Button, Placeholder, Text } from "@/components/ui";
+import { Button, Placeholder } from "@/components/ui";
 import { dayOf, formatDay } from "@/features/measurements/format";
 import { t } from "@/lib/i18n";
 import {
@@ -18,8 +18,8 @@ import { space } from "@/theme";
 
 /**
  * The checkup a sheet is about, by `?id=`, from the list already loaded; the sheet itself once it
- * is there. Marking done and planning take an active checkup only; a past completion can be
- * corrected whatever the checkup's status.
+ * is there. Marking done takes an active checkup only; a past completion can be corrected whatever
+ * the checkup's status.
  */
 function WithCheckup({
   title,
@@ -213,65 +213,6 @@ function CompletionForm({ item, editing }: { item: CheckupItem; editing?: Checku
         {editing ? (
           <Button variant="outline" label={t("common.delete")} onPress={() => remove(editing.id)} />
         ) : null}
-      </ScrollView>
-    </>
-  );
-}
-
-/** The web "Запланировать на дату" dialog, for one checkup: a day to do it, or none. */
-export function PlanCheckupScreen() {
-  return (
-    <WithCheckup title={t("checkups.planFor")}>{(item) => <PlanForm item={item} />}</WithCheckup>
-  );
-}
-
-function PlanForm({ item }: { item: CheckupItem }) {
-  const router = useRouter();
-  const action = useCheckupAction();
-  const [day, setDay] = useState(() =>
-    item.planned_on ? new Date(`${item.planned_on}T12:00:00`) : new Date(),
-  );
-
-  const plan = (plannedOn: string | null) =>
-    action.mutate(
-      { item, plannedOn },
-      {
-        onSuccess: () => router.back(),
-        onError: (error) => Alert.alert(t("common.error"), error.message),
-      },
-    );
-
-  return (
-    <>
-      <SheetHeader
-        title={t("checkups.planFor")}
-        busy={action.isPending}
-        onSave={() => plan(dayOf(day))}
-      />
-      <ScrollView contentContainerStyle={{ padding: space.lg, gap: space.lg }}>
-        <Section title={item.title}>
-          <Text size="sm" tone="mutedForeground">
-            {t("checkups.planForHint")}
-          </Text>
-          <Field label={t("checkups.plannedOn")}>
-            <DateTimePicker
-              testID="planned-on"
-              value={day}
-              mode="date"
-              display="compact"
-              locale="ru"
-              style={{ alignSelf: "flex-start" }}
-              onValueChange={(_event, date) => setDay(date)}
-            />
-          </Field>
-          {item.planned_on ? (
-            <Button
-              variant="outline"
-              label={t("checkups.removePlannedDate")}
-              onPress={() => plan(null)}
-            />
-          ) : null}
-        </Section>
       </ScrollView>
     </>
   );

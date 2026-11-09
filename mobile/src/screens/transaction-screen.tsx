@@ -1,67 +1,26 @@
 import { formatMoney, preferredComment } from "@orbit-types/money-feed";
-import { Stack, useLocalSearchParams, useRouter, type Href } from "expo-router";
-import { Ellipsis } from "lucide-react-native";
+import { Stack, useLocalSearchParams } from "expo-router";
 import type { ReactNode } from "react";
-import { ActionSheetIOS, Alert, Pressable, RefreshControl, ScrollView, View } from "react-native";
-import { Badge, Card, Icon, Placeholder, Text } from "@/components/ui";
+import { RefreshControl, ScrollView, View } from "react-native";
+import { Badge, Card, Placeholder, Text } from "@/components/ui";
 import { t } from "@/lib/i18n";
-import {
-  useMoneyAccounts,
-  useMoneyCategories,
-  usePerson,
-  useSaveTransaction,
-  useTransaction,
-} from "@/lib/queries";
+import { useMoneyAccounts, useMoneyCategories, usePerson, useTransaction } from "@/lib/queries";
 import { space, usePalette } from "@/theme";
-
-/** How long the system sheet takes to slide away before an alert may be shown. */
-const SHEET_DISMISS_MS = 400;
 
 const capitalized = (text: string) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
 
 /**
- * One transaction — the web transaction page: what kind it is and its state, the amount, account,
- * card and comment, and each line item with its category. Editing and deleting are in the bar's
- * sheet, the delete asked first.
+ * One transaction — the web transaction page, view-only: what kind it is and its state, the amount,
+ * account, card and comment, and each line item with its category.
  */
 export default function TransactionScreen() {
   const palette = usePalette();
-  const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const person = usePerson();
   const transaction = useTransaction(id);
   const accounts = useMoneyAccounts(person.data?.id);
   const categories = useMoneyCategories();
-  const save = useSaveTransaction();
   const item = transaction.data;
-
-  const remove = () =>
-    Alert.alert(t("money.deleteTransaction"), t("money.deleteTransactionConfirm"), [
-      { text: t("common.cancel"), style: "cancel" },
-      {
-        text: t("money.deleteTransaction"),
-        style: "destructive",
-        onPress: () =>
-          save.mutate(
-            { id, remove: true },
-            {
-              onSuccess: () => router.back(),
-              onError: (error) => Alert.alert(t("common.error"), error.message),
-            },
-          ),
-      },
-    ]);
-
-  const actions = () => {
-    const labels = [t("common.edit"), t("money.deleteTransaction"), t("common.cancel")];
-    ActionSheetIOS.showActionSheetWithOptions(
-      { options: labels, destructiveButtonIndex: 1, cancelButtonIndex: 2 },
-      (index) => {
-        if (index === 0) router.push(`/money/form?id=${id}` as Href);
-        if (index === 1) setTimeout(remove, SHEET_DISMISS_MS);
-      },
-    );
-  };
 
   const title = item ? item.merchant_name || t("money.transactionFallback") : "";
   const header = (
@@ -69,18 +28,6 @@ export default function TransactionScreen() {
       options={{
         title,
         headerLargeTitle: false,
-        headerRight: item
-          ? () => (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`${t("common.actions")}: ${title}`}
-                hitSlop={space.sm}
-                onPress={actions}
-              >
-                <Icon icon={Ellipsis} size={22} tone="foreground" />
-              </Pressable>
-            )
-          : undefined,
       }}
     />
   );

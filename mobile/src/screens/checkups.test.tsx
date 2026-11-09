@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
 import { fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { ActionSheetIOS, Alert } from "react-native";
-import CompleteCheckupScreen, { PlanCheckupScreen } from "@/screens/checkup-sheets";
+import CompleteCheckupScreen from "@/screens/checkup-sheets";
 import CheckupsScreen from "@/screens/checkups-screen";
 import HealthScreen from "@/screens/health-screen";
 import { db, fail, fakeSession, seed, setSession } from "../../test/fake-supabase";
@@ -14,7 +14,6 @@ const routes = {
   "health/index": HealthScreen,
   "health/checkups/index": CheckupsScreen,
   "health/checkups/complete": CompleteCheckupScreen,
-  "health/checkups/plan": PlanCheckupScreen,
 };
 
 function checkup(id: string, title: string, extra = {}) {
@@ -95,8 +94,9 @@ describe("the checkups", () => {
     expect(screen.getByText("План просрочен")).toBeOnTheScreen();
     expect(screen.getByText("Следующий срок: 01.10.2026")).toBeOnTheScreen();
     expect(screen.getByText("Запланировано на: 15.10.2026")).toBeOnTheScreen();
-    // A paused checkup is neither done nor planned from its card.
+    // A paused checkup is not marked done from its card.
     expect(screen.getAllByText("Отметить выполненным")).toHaveLength(4);
+    expect(screen.queryByText("Запланировать")).toBeNull();
   });
 
   it("show one group alone from its chip", async () => {
@@ -125,6 +125,15 @@ describe("the checkups", () => {
     expect(screen.queryByText("Анализ крови")).toBeNull();
     await fireEvent.press(screen.getByText("Просрочено"));
     expect(await screen.findByText("Ничего не найдено")).toBeOnTheScreen();
+  });
+
+  it("leaves the category alone when the sheet is cancelled", async () => {
+    await renderScreens(routes, "/health/checkups");
+    jest.spyOn(ActionSheetIOS, "showActionSheetWithOptions").mockImplementation((opts, cb) => {
+      cb(opts.cancelButtonIndex ?? opts.options.length - 1);
+    });
+    await fireEvent.press(await screen.findByLabelText("Категория: Все типы"));
+    expect(screen.getByLabelText("Категория: Все типы")).toBeOnTheScreen();
   });
 
   it("say so when there are none", async () => {
@@ -214,7 +223,7 @@ describe("marking a checkup done", () => {
 });
 
 describe("a checkup no longer active", () => {
-  it("cannot be done or planned from a link", async () => {
+  it("cannot be done from a link", async () => {
     await renderScreens(routes, "/health/checkups/complete?id=flu");
     expect(await screen.findByText("Ничего не найдено")).toBeOnTheScreen();
   });
@@ -230,18 +239,6 @@ describe("a checkup no longer active", () => {
     );
     expect(db.tables.checkup_completions).toEqual([]);
   });
-
-  it("is not planned when it stopped being active", async () => {
-    await renderScreens(routes, "/health/checkups/plan?id=teeth");
-    await screen.findByText(/^Отметить, что вы планируете/);
-    db.tables.checkup_items[3].status = "paused";
-    const alert = jest.spyOn(Alert, "alert");
-    await fireEvent.press(screen.getByText("Сохранить"));
-    await waitFor(() =>
-      expect(alert).toHaveBeenCalledWith("Что-то пошло не так", "Ничего не найдено"),
-    );
-    expect(db.tables.checkup_items[3].planned_on).toBeNull();
-  });
 });
 
 describe("a checkup sheet opened directly", () => {
@@ -256,43 +253,10 @@ describe("a checkup sheet opened directly", () => {
 
   it("offers a retry when the checkups cannot be read", async () => {
     fail("checkup_items");
-    await renderScreens(routes, "/health/checkups/plan?id=eye");
+    await renderScreens(routes, "/health/checkups/complete?id=eye");
     expect(await screen.findByText("checkup_items is unavailable")).toBeOnTheScreen();
     db.failing.clear();
     await fireEvent.press(screen.getByText("Повторить"));
-    expect(await screen.findByText(/^Отметить, что вы планируете/)).toBeOnTheScreen();
-  });
-});
-
-describe("planning a checkup", () => {
-  it("sets the day it is planned for", async () => {
-    await renderScreens(routes, "/health/checkups");
-    await fireEvent.press((await screen.findAllByText("Запланировать"))[3]);
-    expect(await screen.findByText(/^Отметить, что вы планируете/)).toBeOnTheScreen();
-    expect(screen.queryByText("Убрать дату")).toBeNull();
-    await fireEvent(screen.getByTestId("planned-on"), "change", {
-      nativeEvent: { timestamp: new Date(2026, 10, 5, 9, 0).getTime() },
-    });
-    await fireEvent.press(screen.getByText("Сохранить"));
-    await waitFor(() => expect(db.tables.checkup_items[3].planned_on).toBe("2026-11-05"));
-  });
-
-  it("removes a planned day, and says when that fails", async () => {
-    await renderScreens(routes, "/health/checkups");
-    await fireEvent.press((await screen.findAllByText("Запланировать"))[0]);
-    fail("checkup_items");
-    const alert = jest.spyOn(Alert, "alert");
-    await fireEvent.press(await screen.findByText("Убрать дату"));
-    await waitFor(() =>
-      expect(alert).toHaveBeenCalledWith("Что-то пошло не так", "checkup_items is unavailable"),
-    );
-    db.failing.clear();
-    await fireEvent.press(screen.getByText("Убрать дату"));
-    await waitFor(() => expect(db.tables.checkup_items[0].planned_on).toBeNull());
-  });
-
-  it("says when the checkup is not there", async () => {
-    await renderScreens(routes, "/health/checkups/plan?id=gone");
-    expect(await screen.findByText("Ничего не найдено")).toBeOnTheScreen();
+    expect(await screen.findByText("Дата выполнения")).toBeOnTheScreen();
   });
 });

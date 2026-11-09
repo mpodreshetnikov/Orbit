@@ -2,26 +2,23 @@ import { findingKey, findingPointDate } from "@orbit-types/finding-summary";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { Calendar, MapPin } from "lucide-react-native";
 import type { ReactNode } from "react";
-import { ActionSheetIOS, Alert, RefreshControl, ScrollView, View } from "react-native";
+import { RefreshControl, ScrollView, View } from "react-native";
 import { lateralityText, ResolvedBadge, SeverityBadge } from "@/components/finding-badges";
 import { Button, Card, Icon, Placeholder, Text } from "@/components/ui";
 import { formatDay } from "@/features/measurements/format";
 import { t } from "@/lib/i18n";
-import { useActiveRecords, useFindings, useMarkFindingResolved, usePerson } from "@/lib/queries";
+import { useFindings, usePerson } from "@/lib/queries";
 import { space, usePalette } from "@/theme";
 
 /**
- * One finding's history — the web finding page: its latest size, how often and on which side it was
- * seen, and each time it was, newest first, with the source's own words. While it is still present it
- * can be marked resolved, attached to one of the person's records picked from the system sheet.
+ * One finding's history — the web finding page, view-only: its latest size, how often and on which
+ * side it was seen, and each time it was, newest first, with the source's own words.
  */
 export default function FindingScreen() {
   const palette = usePalette();
   const { key } = useLocalSearchParams<{ key: string }>();
   const person = usePerson();
   const findings = useFindings(person.data?.id);
-  const records = useActiveRecords(person.data?.id);
-  const resolve = useMarkFindingResolved();
   const finding = findings.data?.find((one) => findingKey(one) === key);
 
   const header = (
@@ -56,31 +53,7 @@ export default function FindingScreen() {
     );
   }
 
-  const personId = person.data.id;
   const site = finding.catalog_site_name_ru || finding.body_site_text;
-  const choices = records.data ?? [];
-  const markResolved = () =>
-    ActionSheetIOS.showActionSheetWithOptions(
-      {
-        title: t("findings.markAsResolved"),
-        message: t("findings.markAsResolvedDescription"),
-        options: [
-          ...choices.map((one) =>
-            one.record_date ? `${one.title} · ${formatDay(one.record_date)}` : one.title,
-          ),
-          t("common.cancel"),
-        ],
-        cancelButtonIndex: choices.length,
-      },
-      (index) => {
-        const record = choices[index];
-        if (!record) return;
-        resolve.mutate(
-          { personId, recordId: record.id, finding },
-          { onError: (error) => Alert.alert(t("common.error"), error.message) },
-        );
-      },
-    );
 
   return (
     <>
@@ -113,26 +86,6 @@ export default function FindingScreen() {
               <Text tone="mutedForeground">{site}</Text>
             </View>
           ) : null}
-          {finding.is_resolved ? null : records.error ? (
-            // Without the records there is nothing to attach the resolution to: say so, and retry.
-            <View style={{ gap: space.xs }}>
-              <Text size="sm" tone="destructive">
-                {records.error.message}
-              </Text>
-              <Button
-                variant="outline"
-                label={t("common.retry")}
-                onPress={() => void records.refetch()}
-              />
-            </View>
-          ) : (
-            <Button
-              variant="outline"
-              label={t("findings.markAsResolved")}
-              busy={resolve.isPending || records.isPending}
-              onPress={markResolved}
-            />
-          )}
         </View>
 
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}>

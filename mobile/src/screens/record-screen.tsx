@@ -23,12 +23,11 @@ import { recordTypeLabel } from "./records-screen";
 
 /**
  * A document — the web record page, to read: its type and date, its pages to open, its notes, the
- * summary and keywords read from it, and the results and findings it holds. "Изменить" in the bar
- * edits its details; each result leads to its history.
+ * summary and keywords read from it, and the results and findings it holds. Each result leads to
+ * its history.
  */
 export default function RecordScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const router = useRouter();
   const palette = usePalette();
   const { record, attachments, observations, findings } = useRecord(id);
 
@@ -68,14 +67,6 @@ export default function RecordScreen() {
         options={{
           title: doc.title,
           headerLargeTitle: false,
-          headerRight: () => (
-            <Button
-              compact
-              variant="ghost"
-              label={t("common.edit")}
-              onPress={() => router.push(`/health/records/edit?id=${doc.id}` as Href)}
-            />
-          ),
         }}
       />
       <ScrollView
