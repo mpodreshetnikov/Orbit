@@ -1,6 +1,7 @@
 import { assertEquals } from "std/assert/assert-equals";
 import {
   buildImportContext,
+  CATCH_UP_OVERLAP_DAYS,
   classifyRowForWindow,
   IMPORT_HISTORY_STALE_THRESHOLD_DAYS,
   mergeRangeMeta,
@@ -17,9 +18,28 @@ Deno.test("buildImportContext returns automatic range for recent imports", () =>
   assertEquals(context.last_imported_at, "2026-03-01T09:30:00.000Z");
   assertEquals(context.requires_history_prompt, false);
   assertEquals(context.recommended_mode, "auto");
-  assertEquals(context.window_from, "2026-03-01T09:30:00.000Z");
+  assertEquals(context.window_from, "2026-02-26T09:30:00.000Z");
   assertEquals(context.window_to, "2026-03-08T00:00:00.000Z");
 });
+
+Deno.test(
+  "buildImportContext starts a catch-up before the last import to catch late operations",
+  () => {
+    const context = buildImportContext(
+      "2026-10-27T09:41:50.000Z",
+      new Date("2026-10-27T10:00:00.000Z"),
+    );
+
+    assertEquals(CATCH_UP_OVERLAP_DAYS, 3);
+    // An operation the bank shows only now, timed before the last imported one, is inside.
+    const lateOperation = classifyRowForWindow(
+      "2026-10-27T09:36:23.000Z",
+      context.window_from,
+      context.window_to,
+    );
+    assertEquals(lateOperation.kind, "in_range");
+  },
+);
 
 Deno.test("buildImportContext prompts for history when imports are stale or absent", () => {
   const now = new Date("2026-03-08T00:00:00.000Z");

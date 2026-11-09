@@ -2,6 +2,11 @@ import { toIsoOrNull } from "./normalize.ts";
 import type { RangeSelectionMeta } from "./types.ts";
 
 export const IMPORT_HISTORY_STALE_THRESHOLD_DAYS = 365;
+// How far before the newest imported operation a catch-up starts. Starting exactly at it lost
+// every operation the bank showed later with an earlier time (T-261028-wio); the overlap's
+// duplicates are skipped by the transaction identity checks. Same span as the unattended
+// catch-up's lookback in `browserExtension/src/core/backfill-scheduler.ts`.
+export const CATCH_UP_OVERLAP_DAYS = 3;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -47,7 +52,7 @@ export function buildImportContext(lastImportedAt: string | null, now: Date): Im
       requires_history_prompt: false,
       stale_threshold_days: IMPORT_HISTORY_STALE_THRESHOLD_DAYS,
       recommended_mode: "auto",
-      window_from: lastImportedAt,
+      window_from: new Date(lastImportedMs - CATCH_UP_OVERLAP_DAYS * DAY_MS).toISOString(),
       window_to: windowTo,
     };
   }

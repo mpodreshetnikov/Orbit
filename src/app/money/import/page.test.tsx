@@ -643,7 +643,8 @@ describe("MoneyImportPage", () => {
         expect(contextCall).toContain('"action":"get_import_context"');
         expect(createSessionCall).toContain('"action":"create_session"');
         expect(createSessionCall).toContain('"window_from":"2026-02-20T12:00:00.000Z"');
-        expect(createSessionCall).toContain('"window_to":"2026-03-08T00:00:00.000Z"');
+        // The page's load time is not the end of the run: it reads up to when the bank is read.
+        expect(createSessionCall).toContain('"window_to":null');
         expect(createSessionCall).toContain('"selection_mode":"auto"');
         expect(createSessionCall).toContain('"parse_strategy":"full"');
       });
@@ -788,7 +789,7 @@ describe("MoneyImportPage", () => {
       await waitFor(() => {
         const createSessionCall = String(fetchMock.mock.calls[1]?.[1]?.body ?? "");
         expect(createSessionCall).toContain('"window_from":"2025-03-08T00:00:00.000Z"');
-        expect(createSessionCall).toContain('"window_to":"2026-03-08T00:00:00.000Z"');
+        expect(createSessionCall).toContain('"window_to":null');
         expect(createSessionCall).toContain('"selection_mode":"preset"');
         expect(createSessionCall).toContain('"preset_key":"1y"');
         expect(createSessionCall).toContain('"prompted_for_history":true');
