@@ -11,6 +11,10 @@ const checkups = vi.hoisted(() => ({
   scheduleColumnFromWrite: vi.fn(),
 }));
 
+const regen = vi.hoisted(() => ({
+  readTimezonePreference: vi.fn(),
+}));
+
 vi.mock("../health/checkups", async () => {
   const actual = await vi.importActual<typeof import("../health/checkups")>("../health/checkups");
   return {
@@ -29,6 +33,9 @@ vi.mock("../health/checkups", async () => {
     },
   };
 });
+vi.mock("@/lib/medications/regenerate-dose-events", () => ({
+  readTimezonePreference: (...args: unknown[]) => regen.readTimezonePreference(...args),
+}));
 vi.mock("../supabase-user-client", () => ({
   createUserScopedSupabaseClient: vi.fn(() => ({}) as never),
 }));
@@ -85,6 +92,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-06-15T12:00:00Z"));
+  regen.readTimezonePreference.mockResolvedValue("UTC");
   checkups.loadCheckupItem.mockResolvedValue(ITEM);
   checkups.latestCompletionDay.mockResolvedValue(null);
   checkups.markCheckupDone.mockResolvedValue({
@@ -157,6 +165,48 @@ describe("mark_checkup_done", () => {
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("health:write");
     expect(checkups.markCheckupDone).not.toHaveBeenCalled();
+  });
+
+  it("defaults done_at to local today across the Krasnoyarsk day boundary", async () => {
+    // 01:00 Asia/Krasnoyarsk (UTC+7) is still 18:00 UTC on the previous calendar day.
+    vi.setSystemTime(new Date("2026-06-14T18:00:00Z"));
+    regen.readTimezonePreference.mockResolvedValue("Asia/Krasnoyarsk");
+    checkups.markCheckupDone.mockResolvedValue({
+      checkup: { ...ITEM, next_due_at: "2026-12-15" },
+      completion: {
+        id: "done-1",
+        done_at: "2026-06-15",
+        note: null,
+        evidence_record_id: null,
+      },
+    });
+
+    const result = await (await handlers()).get("mark_checkup_done")!(
+      { checkup_id: ITEM.id },
+      ctx(),
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(checkups.markCheckupDone).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ doneAt: "2026-06-15" }),
+    );
+    expect(result.content[0].text).not.toContain("Preview only");
+  });
+
+  it("keeps an explicit done_at even when local today differs from UTC", async () => {
+    vi.setSystemTime(new Date("2026-06-14T18:00:00Z"));
+    regen.readTimezonePreference.mockResolvedValue("Asia/Krasnoyarsk");
+
+    await (await handlers()).get("mark_checkup_done")!(
+      { checkup_id: ITEM.id, done_at: "2026-06-14", confirm: true },
+      ctx(),
+    );
+
+    expect(checkups.markCheckupDone).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ doneAt: "2026-06-14" }),
+    );
   });
 });
 

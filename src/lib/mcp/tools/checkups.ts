@@ -13,6 +13,8 @@ import {
 import { isoDateSchema, personSelectorSchema, uuidSchema } from "../schemas/common";
 import { withPerson, withUserClient } from "../tool-context";
 import { fail, ok, summarizeList } from "../tool-result";
+import { readTimezonePreference } from "@/lib/medications/regenerate-dose-events";
+import { isValidTimeZone, zonedDate } from "../zoned-time";
 import { WRITE_SCOPE } from "./scopes";
 import type { McpToolServer } from "./types";
 
@@ -40,8 +42,23 @@ const scheduleWriteSchema = z.discriminatedUnion("type", [
   }),
 ]);
 
-function todayUtc(): string {
-  return new Date().toISOString().slice(0, 10);
+/**
+ * Calendar "today" for mark-done defaults and the backdate guard.
+ * Same preference money MCP uses; UTC only when none is saved.
+ */
+async function resolveToday(
+  supabase: Parameters<typeof readTimezonePreference>[0],
+  authUserId: string,
+  requestedZone: string | null | undefined,
+): Promise<{ today: string; timeZone: string } | { error: string }> {
+  const trimmed = requestedZone?.trim() || null;
+  if (trimmed && !isValidTimeZone(trimmed)) {
+    return {
+      error: `"${requestedZone}" is not a timezone this server recognises. Pass an IANA name like "Asia/Krasnoyarsk".`,
+    };
+  }
+  const timeZone = trimmed ?? (await readTimezonePreference(supabase, authUserId)) ?? "UTC";
+  return { today: zonedDate(new Date(), timeZone), timeZone };
 }
 
 function describeSchedule(schedule: unknown): string {
@@ -138,12 +155,20 @@ export function registerCheckupTools(server: McpToolServer): void {
     {
       title: "Mark checkup done",
       description:
-        "Log that a scheduled checkup was completed on a given day (defaults to today). The database advances next_due_at for interval schedules or marks a one-off completed. For a done_at before today (a backdate), call once without confirm to preview, then again with confirm=true after the owner agrees — nothing is written on the preview call. Mobile one-tap complete remains available; this is the agent path.",
+        "Log that a scheduled checkup was completed on a given day (defaults to today in the user's timezone preference). The database advances next_due_at for interval schedules or marks a one-off completed. For a done_at before today (a backdate), call once without confirm to preview, then again with confirm=true after the owner agrees — nothing is written on the preview call. Mobile one-tap complete remains available; this is the agent path.",
       inputSchema: z.object({
         checkup_id: uuidSchema.describe("From list_checkups or get_checkup."),
         done_at: isoDateSchema
           .optional()
-          .describe("Completion day as YYYY-MM-DD. Defaults to today (UTC date)."),
+          .describe(
+            "Completion day as YYYY-MM-DD. Defaults to today in the user's timezone preference (or timezone when passed). An explicit date is used as given.",
+          ),
+        timezone: z
+          .string()
+          .optional()
+          .describe(
+            "IANA timezone for resolving «today» when done_at is omitted, and for the backdate guard. Defaults to the user's saved preference, or UTC.",
+          ),
         note: z.string().optional().describe("Optional short note about the completion."),
         evidence_record_id: uuidSchema
           .nullable()
@@ -153,7 +178,7 @@ export function registerCheckupTools(server: McpToolServer): void {
           .boolean()
           .optional()
           .describe(
-            "Required true when done_at is before today. Omit or false on the preview call for a backdate.",
+            "Required true when done_at is before today (local calendar day). Omit or false on the preview call for a backdate.",
           ),
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
@@ -161,12 +186,18 @@ export function registerCheckupTools(server: McpToolServer): void {
     withUserClient<{
       checkup_id: string;
       done_at?: string;
+      timezone?: string;
       note?: string;
       evidence_record_id?: string | null;
       confirm?: boolean;
-    }>(async (supabase, args) => {
-      const doneAt = args.done_at?.trim() ? args.done_at.trim().slice(0, 10) : todayUtc();
-      const today = todayUtc();
+    }>(async (supabase, args, auth) => {
+      const resolved = await resolveToday(supabase, auth.authUserId, args.timezone);
+      if ("error" in resolved) {
+        return fail(resolved.error);
+      }
+      const { today } = resolved;
+      // Explicit done_at keeps caller semantics; only the default uses local today.
+      const doneAt = args.done_at?.trim() ? args.done_at.trim().slice(0, 10) : today;
       const isBackdate = doneAt < today;
       const latestDone = await latestCompletionDay(supabase, args.checkup_id);
       if (latestDone && doneAt < latestDone) {
