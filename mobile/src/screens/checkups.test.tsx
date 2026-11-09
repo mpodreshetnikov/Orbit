@@ -115,9 +115,12 @@ describe("the checkups", () => {
 
   it("narrow to a category, and say when nothing is left", async () => {
     await renderScreens(routes, "/health/checkups");
+    // Category Choice is in the list header and is tappable while checkups are still
+    // pending (ListEmptyComponent shows ActivityIndicator). Wait for the filtered row
+    // rather than asserting synchronously after the sheet pick.
     pickOption("Визит");
     await fireEvent.press(await screen.findByLabelText("Категория: Все типы"));
-    expect(screen.getByText("Окулист")).toBeOnTheScreen();
+    expect(await screen.findByText("Окулист")).toBeOnTheScreen();
     expect(screen.queryByText("Анализ крови")).toBeNull();
     await fireEvent.press(screen.getByText("Просрочено"));
     expect(await screen.findByText("Ничего не найдено")).toBeOnTheScreen();
