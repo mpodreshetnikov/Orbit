@@ -24,8 +24,10 @@ name: Документы
     centerElement: true
 - assertVisible: "Анализы и измерения"
 - takeScreenshot: documents-01-health
+# Hero is above secondary charts; default DOWN would keep scrolling past the footer and time out.
 - scrollUntilVisible:
     element: "Все документы"
+    direction: UP
     centerElement: true
 - tapOn: "Все документы"
 - extendedWaitUntil:
