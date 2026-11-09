@@ -180,10 +180,15 @@ function buildRangeSelectionPayload(
   windowTo: string | null;
   rangeSelectionMeta: MoneyImportRangeSelectionMeta;
 } {
+  // Only a custom range has an end of its own. Every other choice runs up to when the bank is
+  // read: the context's `window_to` is when this page loaded it, and a session that froze it there
+  // lost every operation made between opening the page and starting the run -- the extension drops
+  // them before anything reaches the report (T-261028-wio). With no end, the extension reads up to
+  // now and the batch records the end it actually read to.
   if (choice === "auto") {
     return {
       windowFrom: context.window_from,
-      windowTo: context.window_to,
+      windowTo: null,
       rangeSelectionMeta: {
         selection_mode: "auto",
         preset_key: null,
@@ -196,8 +201,8 @@ function buildRangeSelectionPayload(
 
   if (choice === "custom") {
     const windowFrom = toIsoFromDateTimeInput(customFromInput);
-    const windowTo = toIsoFromDateTimeInput(customToInput) ?? context.window_to;
-    if (!windowFrom || !windowTo) {
+    const windowTo = toIsoFromDateTimeInput(customToInput);
+    if (!windowFrom) {
       throw new Error(t("money.importRangeCustomInvalid"));
     }
     return {
@@ -219,12 +224,12 @@ function buildRangeSelectionPayload(
     context.window_to ?? new Date().toISOString(),
     context.last_imported_at,
   );
-  if (!windowFrom || !context.window_to) {
+  if (!windowFrom) {
     throw new Error(t("money.importRangePresetInvalid"));
   }
   return {
     windowFrom,
-    windowTo: context.window_to,
+    windowTo: null,
     rangeSelectionMeta: {
       selection_mode: "preset",
       preset_key: presetKey,

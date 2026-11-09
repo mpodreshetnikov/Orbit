@@ -18,6 +18,34 @@ name: Лекарства
     timeout: 30000
 - takeScreenshot: meds-00-doses
 - tapOn: "Курсы"
+# Same tunnel stall as 01-today: Курсы paints its filters with an empty loading list. Relaunch
+# and reopen the tab until the seed course appears.
+- repeat:
+    times: 4
+    while:
+      notVisible: "Vitamin D3.*"
+    commands:
+      - extendedWaitUntil:
+          visible: "Vitamin D3.*"
+          timeout: 30000
+          optional: true
+      - runFlow:
+          when:
+            notVisible: "Vitamin D3.*"
+          commands:
+            - runFlow: setup/fresh.yaml
+            - openLink: exp://127.0.0.1:8081
+            - tapOn:
+                text: "Open"
+                optional: true
+            - extendedWaitUntil:
+                visible: "Лекарства"
+                timeout: 60000
+            - tapOn: "Лекарства"
+            - extendedWaitUntil:
+                visible: "Курсы"
+                timeout: 30000
+            - tapOn: "Курсы"
 - extendedWaitUntil:
     visible: "Vitamin D3.*"
     timeout: 30000

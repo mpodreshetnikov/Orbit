@@ -3041,6 +3041,18 @@ export type Database = {
         Args: { p_limit?: number; p_line_item_id: string }
         Returns: Json
       }
+      money_get_spending_report: {
+        Args: {
+          p_account_ids?: string[]
+          p_category_id?: string
+          p_end: string
+          p_person_id: string
+          p_report_currency?: string
+          p_start: string
+          p_today?: string
+        }
+        Returns: Json
+      }
       money_list_transactions_feed: {
         Args: {
           p_account_ids?: string[]

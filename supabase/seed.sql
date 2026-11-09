@@ -824,8 +824,10 @@ BEGIN
     (v_tx2, v_max_person_id, v_acc_tinkoff, '2026-01-15 10:00:00+03', -45000, 'RUB', 'expense', 'posted', 'Rent for January')
   ON CONFLICT (id) DO NOTHING;
 
+  -- Line amounts follow the signed ledger convention (expenses negative, income positive),
+  -- matching import connectors and money_get_*_report readers. See T-261028-yhm.
   INSERT INTO public.money_line_items (id, transaction_id, title, amount, category_id, assignment_method) VALUES
-    (v_li2, v_tx2, 'Rent Jan 2026', 45000, v_cat_rent, 'manual')
+    (v_li2, v_tx2, 'Rent Jan 2026', -45000, v_cat_rent, 'manual')
   ON CONFLICT (id) DO NOTHING;
 
   -- 3. Grocery run at Pyatyorochka (multi-item receipt)
@@ -834,10 +836,10 @@ BEGIN
   ON CONFLICT (id) DO NOTHING;
 
   INSERT INTO public.money_line_items (id, transaction_id, title, amount, quantity, unit, category_id, beneficiary_person_id, assignment_method) VALUES
-    (v_li3, v_tx3, 'Milk 3.2%',      89,  2, 'pcs', v_cat_groceries, v_max_person_id, 'manual'),
-    (v_li4, v_tx3, 'Bread',          65,  1, 'pcs', v_cat_groceries, v_max_person_id, 'manual'),
-    (v_li5, v_tx3, 'Chicken breast', 420, 1, 'kg',  v_cat_groceries, v_max_person_id, 'manual'),
-    (v_li6, v_tx3, 'Other groceries', 2300, NULL, NULL, v_cat_groceries, NULL, 'manual')
+    (v_li3, v_tx3, 'Milk 3.2%',      -89,  2, 'pcs', v_cat_groceries, v_max_person_id, 'manual'),
+    (v_li4, v_tx3, 'Bread',          -65,  1, 'pcs', v_cat_groceries, v_max_person_id, 'manual'),
+    (v_li5, v_tx3, 'Chicken breast', -420, 1, 'kg',  v_cat_groceries, v_max_person_id, 'manual'),
+    (v_li6, v_tx3, 'Other groceries', -2300, NULL, NULL, v_cat_groceries, NULL, 'manual')
   ON CONFLICT (id) DO NOTHING;
 
   -- 4. Yandex Go taxi
@@ -846,7 +848,7 @@ BEGIN
   ON CONFLICT (id) DO NOTHING;
 
   INSERT INTO public.money_line_items (id, transaction_id, title, amount, category_id, assignment_method) VALUES
-    (v_li7, v_tx4, 'Taxi to office', 650, v_cat_taxi, 'manual')
+    (v_li7, v_tx4, 'Taxi to office', -650, v_cat_taxi, 'manual')
   ON CONFLICT (id) DO NOTHING;
 
   -- 5. Restaurant dinner
@@ -855,7 +857,7 @@ BEGIN
   ON CONFLICT (id) DO NOTHING;
 
   INSERT INTO public.money_line_items (id, transaction_id, title, amount, category_id, beneficiary_person_id, assignment_method) VALUES
-    (v_li8, v_tx5, 'Dinner for two', 3200, v_cat_restaurants, v_max_person_id, 'manual')
+    (v_li8, v_tx5, 'Dinner for two', -3200, v_cat_restaurants, v_max_person_id, 'manual')
   ON CONFLICT (id) DO NOTHING;
 
   -- 6. Utilities
@@ -864,7 +866,7 @@ BEGIN
   ON CONFLICT (id) DO NOTHING;
 
   INSERT INTO public.money_line_items (id, transaction_id, title, amount, category_id, assignment_method) VALUES
-    (v_li9, v_tx6, 'Utilities Jan 2026', 4800, v_cat_utilities, 'manual')
+    (v_li9, v_tx6, 'Utilities Jan 2026', -4800, v_cat_utilities, 'manual')
   ON CONFLICT (id) DO NOTHING;
 
   -- 7. Pharmacy
@@ -873,7 +875,7 @@ BEGIN
   ON CONFLICT (id) DO NOTHING;
 
   INSERT INTO public.money_line_items (id, transaction_id, title, amount, category_id, beneficiary_person_id, assignment_method) VALUES
-    (v_li10, v_tx7, 'Vitamins & supplements', 1350, v_cat_pharmacy, v_max_person_id, 'manual')
+    (v_li10, v_tx7, 'Vitamins & supplements', -1350, v_cat_pharmacy, v_max_person_id, 'manual')
   ON CONFLICT (id) DO NOTHING;
 
   -- 8. Pending transaction (Steam purchase)
@@ -882,7 +884,7 @@ BEGIN
   ON CONFLICT (id) DO NOTHING;
 
   INSERT INTO public.money_line_items (id, transaction_id, title, amount, category_id, assignment_method) VALUES
-    (v_li11, v_tx8, 'Game purchase', 1999, v_cat_entertainment, 'manual')
+    (v_li11, v_tx8, 'Game purchase', -1999, v_cat_entertainment, 'manual')
   ON CONFLICT (id) DO NOTHING;
 
   -- ── Max's cash transactions ──────────────────────────────────────────
@@ -893,7 +895,7 @@ BEGIN
   ON CONFLICT (id) DO NOTHING;
 
   INSERT INTO public.money_line_items (id, transaction_id, title, amount, category_id, assignment_method) VALUES
-    (v_li12, v_tx9, 'Latte', 350, v_cat_restaurants, 'manual')
+    (v_li12, v_tx9, 'Latte', -350, v_cat_restaurants, 'manual')
   ON CONFLICT (id) DO NOTHING;
 
   -- ── Kate's transactions on Sberbank ──────────────────────────────────
@@ -914,7 +916,7 @@ BEGIN
     ON CONFLICT (id) DO NOTHING;
 
     INSERT INTO public.money_line_items (id, transaction_id, title, amount, category_id, assignment_method) VALUES
-      (v_li14, v_tx11, 'Weekly groceries', 3150, v_cat_groceries, 'manual')
+      (v_li14, v_tx11, 'Weekly groceries', -3150, v_cat_groceries, 'manual')
     ON CONFLICT (id) DO NOTHING;
 
     -- 12. Kate freelance income
