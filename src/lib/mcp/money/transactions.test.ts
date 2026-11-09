@@ -5,7 +5,9 @@ import {
   listMoneyCategories,
   listMoneyTransactions,
   resolveCategoryFilter,
+  toCompactTransaction,
   type MoneyCategory,
+  type MoneyTransactionView,
 } from "./transactions";
 
 function category(overrides: Partial<MoneyCategory> & { id: string }): MoneyCategory {
@@ -120,6 +122,79 @@ const feedRow = {
   category_ids: ["coffee"],
   total_count: 37,
 };
+
+describe("toCompactTransaction", () => {
+  it("drops receipt lines and keeps canonical category keys for MCP pages", () => {
+    const full = {
+      id: "t-1",
+      posted_at: "2026-10-27T18:30:00Z",
+      amount: -1290,
+      currency: "RUB",
+      transaction_type: "expense",
+      status: "posted",
+      merchant_name: "VKUSVILL",
+      bank: "T-Bank",
+      account: { id: "a-1", label: "Tinkoff Black", kind: "debit" },
+      card_label: null,
+      counterparty: { direction: "to", name: "ВкусВилл", channel: null, bank: null },
+      is_transfer: false,
+      mcc: "5411",
+      bank_category: null,
+      comment: null,
+      cashback: null,
+      line_items: [
+        {
+          title: "Кофе",
+          amount: -890,
+          quantity: 1,
+          unit: null,
+          status: null,
+          category: { id: "coffee", name: "Кофе", canonical_key: "food" },
+          assignment_method: null,
+        },
+        {
+          title: "Молоко",
+          amount: -400,
+          quantity: 1,
+          unit: null,
+          status: null,
+          category: { id: "dairy", name: "Молоко", canonical_key: "food" },
+          assignment_method: null,
+        },
+        {
+          title: "Без категории",
+          amount: -1,
+          quantity: null,
+          unit: null,
+          status: null,
+          category: null,
+          assignment_method: null,
+        },
+      ],
+    } satisfies MoneyTransactionView;
+
+    expect(toCompactTransaction(full)).toEqual({
+      id: "t-1",
+      posted_at: "2026-10-27T18:30:00Z",
+      amount: -1290,
+      currency: "RUB",
+      transaction_type: "expense",
+      status: "posted",
+      merchant_name: "VKUSVILL",
+      bank: "T-Bank",
+      account: { id: "a-1", label: "Tinkoff Black", kind: "debit" },
+      card_label: null,
+      counterparty: { direction: "to", name: "ВкусВилл", channel: null, bank: null },
+      is_transfer: false,
+      mcc: "5411",
+      bank_category: null,
+      comment: null,
+      cashback: null,
+      line_item_count: 3,
+      category_keys: ["food"],
+    });
+  });
+});
 
 describe("listMoneyTransactions", () => {
   it("passes the filters to the web feed's RPC and caps the page size", async () => {

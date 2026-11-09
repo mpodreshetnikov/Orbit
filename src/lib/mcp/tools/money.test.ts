@@ -3,10 +3,28 @@ import type { McpToolServer } from "./types";
 
 const money = vi.hoisted(() => ({
   MONEY_FEED_MAX_LIMIT: 200,
+  MONEY_MCP_DEFAULT_LIMIT: 20,
   listMoneyTransactions: vi.fn(),
   listMoneyCategories: vi.fn(),
   listMoneyAccounts: vi.fn(),
   resolveCategoryFilter: vi.fn(),
+  toCompactTransaction: (transaction: {
+    line_items: Array<{ category?: { canonical_key?: string | null } | null }>;
+    [key: string]: unknown;
+  }) => {
+    const { line_items, ...rest } = transaction;
+    return {
+      ...rest,
+      line_item_count: line_items.length,
+      category_keys: [
+        ...new Set(
+          line_items
+            .map((item) => item.category?.canonical_key)
+            .filter((key): key is string => typeof key === "string" && key.length > 0),
+        ),
+      ],
+    };
+  },
 }));
 const regen = vi.hoisted(() => ({ readTimezonePreference: vi.fn() }));
 const person = vi.hoisted(() => ({ resolvePerson: vi.fn(), listPeople: vi.fn() }));
@@ -50,7 +68,9 @@ const DEFAULTS = {
   direction: "all",
   transfers: "all",
   include_bank_payload: false,
-  limit: 50,
+  include_line_items: false,
+  sort: "posted_at_desc",
+  limit: 20,
   offset: 0,
 };
 
@@ -104,7 +124,69 @@ describe("list_money_transactions", () => {
     expect(result.content[0].text).toContain(
       "2026-10-28 -1290.00 RUB to ВкусВилл [Кофе] (2 lines) — T-Bank, Tinkoff Black",
     );
+    // Default page omits receipt lines in structuredContent (T-261109-hj2): agents walk
+    // the ledger with category_keys + line_item_count, and opt into full lines when needed.
+    expect(result.structuredContent?.transactions).toEqual([
+      {
+        id: TRANSACTION.id,
+        posted_at: TRANSACTION.posted_at,
+        amount: TRANSACTION.amount,
+        currency: TRANSACTION.currency,
+        merchant_name: TRANSACTION.merchant_name,
+        bank: TRANSACTION.bank,
+        account: TRANSACTION.account,
+        counterparty: TRANSACTION.counterparty,
+        line_item_count: 2,
+        category_keys: ["food"],
+      },
+    ]);
+    expect(result.structuredContent).toMatchObject({
+      has_more: false,
+      next_offset: null,
+      limit: 20,
+    });
+  });
+
+  it("returns full line items only when include_line_items is set", async () => {
+    const result = await (await handlers()).get("list_money_transactions")!(
+      { ...DEFAULTS, include_line_items: true },
+      ctx,
+    );
+
     expect(result.structuredContent?.transactions).toEqual([TRANSACTION]);
+  });
+
+  it("keeps a large page of receipt-heavy rows inside a compact structured payload", async () => {
+    const fat = Array.from({ length: 100 }, (_, index) => ({
+      ...TRANSACTION,
+      id: `t-${index}`,
+      line_items: Array.from({ length: 20 }, (_, line) => ({
+        title: `line-${line}`,
+        amount: -10,
+        category: { id: "coffee", name: "Кофе", canonical_key: "food" },
+      })),
+    }));
+    money.listMoneyTransactions.mockResolvedValue({ total: 400, transactions: fat });
+
+    const result = await (await handlers()).get("list_money_transactions")!(
+      { ...DEFAULTS, limit: 100 },
+      ctx,
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent).toMatchObject({
+      total: 400,
+      offset: 0,
+      limit: 100,
+      has_more: true,
+      next_offset: 100,
+    });
+    const listed = result.structuredContent?.transactions as Array<Record<string, unknown>>;
+    expect(listed).toHaveLength(100);
+    expect(listed[0]).toMatchObject({ line_item_count: 20, category_keys: ["food"] });
+    expect(listed[0]).not.toHaveProperty("line_items");
+    // Full line items for this page were ~hundreds of KB; compact must stay well under that.
+    expect(JSON.stringify(result.structuredContent).length).toBeLessThan(80_000);
   });
 
   it("bounds dates by the user's local days and passes category ids with their subcategories", async () => {
@@ -183,8 +265,23 @@ describe("list_money_transactions", () => {
       ctx,
     );
 
-    expect(result.structuredContent?.next_offset).toBe(1);
+    expect(result.structuredContent).toMatchObject({
+      has_more: true,
+      next_offset: 1,
+      limit: 1,
+      total: 120,
+    });
     expect(result.content[0].text).toContain("pass offset: 1");
+  });
+
+  it("still accepts the pre-timeout default limit of 50", async () => {
+    await (await handlers()).get("list_money_transactions")!({ ...DEFAULTS, limit: 50 }, ctx);
+
+    const [, query] = money.listMoneyTransactions.mock.calls[0] as [
+      unknown,
+      Record<string, unknown>,
+    ];
+    expect(query.limit).toBe(50);
   });
 });
 

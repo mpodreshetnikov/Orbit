@@ -3,10 +3,12 @@ import { readTimezonePreference } from "@/lib/medications/regenerate-dose-events
 import { isValidTimeZone, localDayEndUtc, localDayStartUtc } from "../local-day";
 import {
   MONEY_FEED_MAX_LIMIT,
+  MONEY_MCP_DEFAULT_LIMIT,
   listMoneyAccounts,
   listMoneyCategories,
   listMoneyTransactions,
   resolveCategoryFilter,
+  toCompactTransaction,
   type MoneyTransactionView,
 } from "../money/transactions";
 import { dateRangeSchema, personSelectorSchema, uuidSchema } from "../schemas/common";
@@ -53,7 +55,7 @@ export function registerMoneyTools(server: McpToolServer): void {
     {
       title: "List money transactions",
       description:
-        "List a person's bank and manual money transactions, newest first, with the same filters and search as the web ledger, plus bounds on the amount. Each transaction carries the bank and account it came from, the counterparty (who the money came from or went to, the channel, and their bank when the bank reports it), the bank's own category and MCC, the comment, and its composition: every line item (receipt line) with amount and Orbit category, including the canonical category key. Use list_money_categories and list_money_accounts to find the names and ids the filters accept.",
+        "List a person's bank and manual money transactions, newest first, with the same filters and search as the web ledger, plus bounds on the amount. Pages with limit/offset and returns has_more / next_offset so a month can be walked in a few calls. Each transaction carries the bank and account, the counterparty, the bank's category and MCC, and the comment. Receipt line items are omitted by default (category_keys + line_item_count instead) so large ledgers stay inside MCP deadlines; pass include_line_items for the composition. Use list_money_categories and list_money_accounts to find the names and ids the filters accept.",
       inputSchema: z.object({
         ...personSelectorSchema,
         ...dateRangeSchema,
@@ -61,7 +63,7 @@ export function registerMoneyTools(server: McpToolServer): void {
           .string()
           .optional()
           .describe(
-            "Free text matched against merchant, comments and receipt line titles, case-insensitively.",
+            "Free text matched against merchant, comments and receipt line titles, case-insensitively. Use this for merchant name until a dedicated merchant filter exists.",
           ),
         categories: z
           .array(z.string())
@@ -98,13 +100,25 @@ export function registerMoneyTools(server: McpToolServer): void {
           .describe(
             "Also return the bank's own operation record (numbers removed). Large; ask only when the summary fields are not enough.",
           ),
+        include_line_items: z
+          .boolean()
+          .default(false)
+          .describe(
+            "Include every receipt line (title, amount, Orbit category) in structuredContent. Off by default: pages with many grocery lines timed out MCP clients (−32001). Prefer a smaller limit when enabling.",
+          ),
+        sort: z
+          .enum(["posted_at_desc"])
+          .default("posted_at_desc")
+          .describe(
+            "Order of the page. Only newest-first is implemented today; additional values can be added later without renaming this field.",
+          ),
         timezone: z
           .string()
           .optional()
           .describe(
             "IANA timezone the from/to dates and the listed dates are in. Defaults to the user's saved preference, or UTC.",
           ),
-        limit: z.number().int().min(1).max(MONEY_FEED_MAX_LIMIT).default(50),
+        limit: z.number().int().min(1).max(MONEY_FEED_MAX_LIMIT).default(MONEY_MCP_DEFAULT_LIMIT),
         offset: z.number().int().min(0).default(0),
       }),
       annotations: { readOnlyHint: true, openWorldHint: false },
@@ -125,10 +139,18 @@ export function registerMoneyTools(server: McpToolServer): void {
           `amount_min (${args.amount_min}) is above amount_max (${args.amount_max}); nothing could match.`,
         );
       }
-      const timeZone =
-        requestedZone ?? (await readTimezonePreference(supabase, auth.authUserId)) ?? "UTC";
 
-      const categories = await listMoneyCategories(supabase);
+      // Categories and the saved timezone do not depend on each other; start both at once.
+      const categoriesPromise = listMoneyCategories(supabase);
+      const preferredZonePromise = requestedZone
+        ? Promise.resolve(null)
+        : readTimezonePreference(supabase, auth.authUserId);
+      const [categories, preferredZone] = await Promise.all([
+        categoriesPromise,
+        preferredZonePromise,
+      ]);
+      const timeZone = requestedZone ?? preferredZone ?? "UTC";
+
       let categoryIds: string[] | undefined;
       if (args.categories?.length) {
         const resolved = resolveCategoryFilter(categories, args.categories);
@@ -170,6 +192,10 @@ export function registerMoneyTools(server: McpToolServer): void {
               .total
           : page.total;
       const hasMore = args.offset + page.transactions.length < total;
+      const nextOffset = hasMore ? args.offset + page.transactions.length : null;
+      const transactions = args.include_line_items
+        ? page.transactions
+        : page.transactions.map(toCompactTransaction);
 
       return ok(
         summarizePage(
@@ -179,7 +205,7 @@ export function registerMoneyTools(server: McpToolServer): void {
             total,
             offset: args.offset,
             has_more: hasMore,
-            next_offset: hasMore ? args.offset + page.transactions.length : null,
+            next_offset: nextOffset,
           },
         ),
         {
@@ -187,8 +213,11 @@ export function registerMoneyTools(server: McpToolServer): void {
           timezone: timeZone,
           total,
           offset: args.offset,
-          next_offset: hasMore ? args.offset + page.transactions.length : null,
-          transactions: page.transactions,
+          limit: args.limit,
+          has_more: hasMore,
+          next_offset: nextOffset,
+          sort: args.sort,
+          transactions,
         },
       );
     }, MONEY_READ_SCOPE),

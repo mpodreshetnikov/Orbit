@@ -19,6 +19,13 @@ export type MoneyTransactionStatus = Database["public"]["Enums"]["money_transact
 /** The feed RPC refuses more than this per page. */
 export const MONEY_FEED_MAX_LIMIT = 200;
 
+/**
+ * Default page size for the MCP list tool. Smaller than the historical 50 so a
+ * month of mixed receipt lines stays inside typical MCP client deadlines
+ * (~20–30s, error −32001) without asking the model to guess a limit.
+ */
+export const MONEY_MCP_DEFAULT_LIMIT = 20;
+
 export interface MoneyCategory {
   id: string;
   parent_id: string | null;
@@ -167,6 +174,35 @@ export interface MoneyTransactionView {
 export interface MoneyFeedPage {
   total: number;
   transactions: MoneyTransactionView[];
+}
+
+/**
+ * MCP list payload without per-line receipt detail. Full `line_items` on a page
+ * of grocery receipts is what pushed `list_money_transactions` past client
+ * deadlines (−32001) once the ledger grew past a few dozen rows; agents that
+ * need the composition pass `include_line_items: true` on a smaller page.
+ */
+export type MoneyTransactionCompactView = Omit<MoneyTransactionView, "line_items"> & {
+  line_item_count: number;
+  category_keys: string[];
+};
+
+export function toCompactTransaction(
+  transaction: MoneyTransactionView,
+): MoneyTransactionCompactView {
+  const { line_items, ...rest } = transaction;
+  const category_keys = [
+    ...new Set(
+      line_items
+        .map((item) => item.category?.canonical_key)
+        .filter((key): key is string => typeof key === "string" && key.length > 0),
+    ),
+  ];
+  return {
+    ...rest,
+    line_item_count: line_items.length,
+    category_keys,
+  };
 }
 
 const SOURCE_LABELS: Record<string, string> = { tbank: "T-Bank" };
