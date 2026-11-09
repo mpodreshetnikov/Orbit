@@ -1,8 +1,9 @@
 import type { MedicalRecord, RecordType } from "@orbit-types/medical-record";
 import { Stack, useLocalSearchParams, useRouter, type Href } from "expo-router";
 import { ChevronRight, FileText } from "lucide-react-native";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FlatList, Pressable, RefreshControl, ScrollView, View } from "react-native";
+import type { SearchBarCommands } from "react-native-screens";
 import { Chip } from "@/components/form";
 import { Button, Icon, Placeholder, Text } from "@/components/ui";
 import { formatDay } from "@/features/measurements/format";
@@ -36,9 +37,15 @@ export default function RecordsScreen() {
   const fromRoute = queryParam(q);
   const [query, setQuery] = useState(fromRoute);
   const [type, setType] = useState<RecordType | "all">("all");
-  // Hub push may land before params hydrate; keep the bar in sync with `q`.
+  const searchBarRef = useRef<SearchBarCommands | null>(null);
+  // Hub push may land before params hydrate; keep React state and the native field in sync with `q`.
   useEffect(() => {
     setQuery(fromRoute);
+    // The native search bar attaches after options mount — apply now and once on the next tick.
+    const apply = () => searchBarRef.current?.setText(fromRoute);
+    apply();
+    const timer = setTimeout(apply, 0);
+    return () => clearTimeout(timer);
   }, [fromRoute]);
   const visible = searchRecords(records.data ?? [], query, type);
 
@@ -47,10 +54,14 @@ export default function RecordsScreen() {
       options={{
         title: t("health.documents"),
         headerSearchBarOptions: {
+          ref: searchBarRef,
           placeholder: t("records.search"),
           hideWhenScrolling: false,
           onChangeText: (event) => setQuery(event.nativeEvent.text),
-          onCancelButtonPress: () => setQuery(""),
+          onCancelButtonPress: () => {
+            setQuery("");
+            searchBarRef.current?.clearText();
+          },
         },
       }}
     />
