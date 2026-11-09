@@ -4,6 +4,7 @@ import { registerDocumentTools } from "./documents";
 import { registerMeasurementTools } from "./measurements";
 import { registerMedicationTools } from "./medications";
 import { registerMoneyTools } from "./money";
+import { registerNotificationTools } from "./notifications";
 import { registerPersonTools } from "./persons";
 import { registerRecordTools } from "./records";
 import { withStrictInputs } from "./strict";
@@ -19,5 +20,6 @@ export function registerHealthTools(target: McpToolServer): void {
   registerCheckupTools(server);
   registerCatalogTools(server);
   registerMedicationTools(server);
+  registerNotificationTools(server);
   registerMoneyTools(server);
 }

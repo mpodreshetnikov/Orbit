@@ -52,6 +52,7 @@ describe("registerHealthTools", () => {
         "get_measurement_history",
         "get_medical_record",
         "get_medication",
+        "get_notification_settings",
         "get_observation_history",
         "get_person",
         "get_upload_links",
@@ -78,6 +79,7 @@ describe("registerHealthTools", () => {
         "remove_medical_record",
         "search_medical_records",
         "search_observations",
+        "update_notification_settings",
         "upsert_catalog_entry",
         "update_medication",
       ].sort(),
@@ -121,6 +123,7 @@ describe("registerHealthTools", () => {
     "propose_reconciliation",
     "remove_medical_record",
     "update_medication",
+    "update_notification_settings",
     "upsert_catalog_entry",
   ];
 
