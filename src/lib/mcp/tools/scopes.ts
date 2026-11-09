@@ -1,4 +1,4 @@
-import { MCP_SCOPE_MONEY_READ, MCP_SCOPE_WRITE } from "../config";
+import { MCP_SCOPE_MONEY_READ, MCP_SCOPE_MONEY_WRITE, MCP_SCOPE_WRITE } from "../config";
 import type { ToolOptions } from "../tool-context";
 
 /**
@@ -13,3 +13,6 @@ export const WRITE_SCOPE: ToolOptions = { requiredScope: MCP_SCOPE_WRITE };
 
 /** Options every money tool passes: the ledger is its own grant, apart from health data. */
 export const MONEY_READ_SCOPE: ToolOptions = { requiredScope: MCP_SCOPE_MONEY_READ };
+
+/** Mutating money tools (spend draft confirm): separate from money:read and health:write. */
+export const MONEY_WRITE_SCOPE: ToolOptions = { requiredScope: MCP_SCOPE_MONEY_WRITE };
