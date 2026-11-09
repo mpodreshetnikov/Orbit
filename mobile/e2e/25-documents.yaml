@@ -1,5 +1,5 @@
-# Documents: the latest ones atop «Здоровье», the full list, and the seeded blood test with its results.
-# Metadata editing is gone — view and attachments only.
+# Documents: the health dashboard hero (search + latest docs), the full list, and the seeded blood
+# test with its results. Metadata editing is gone — view and attachments only.
 appId: host.exp.Exponent
 name: Документы
 ---
@@ -9,8 +9,15 @@ name: Документы
     text: "Open"
     optional: true
 - extendedWaitUntil:
+    visible: "Поиск документов"
+    timeout: 60000
+- extendedWaitUntil:
     visible: "Annual Blood Test Results.*" # A row reads as one element: match the whole of it.
     timeout: 60000
+- assertVisible: "Диагнозы"
+- assertVisible: "Находки"
+- assertVisible: "Чек-апы"
+- assertVisible: "Анализы и измерения"
 - takeScreenshot: documents-01-health
 - tapOn: "Все документы"
 - extendedWaitUntil:
