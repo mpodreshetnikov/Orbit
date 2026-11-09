@@ -26,6 +26,7 @@ import {
   useCheckups,
   useConditions,
   useFindings,
+  useHiddenMeasurements,
   useMeasurements,
   useObservations,
   usePerson,
@@ -63,7 +64,7 @@ export default function HealthScreen() {
   );
 }
 
-/** Documents first: search jumps into the full list, latest rows open a document. */
+/** Documents first: search jumps into the full list with the query kept, latest rows open a document. */
 function DocumentsHero() {
   const palette = usePalette();
   const router = useRouter();
@@ -75,7 +76,14 @@ function DocumentsHero() {
   const filtered = query.trim() ? searchRecords(approved, query, "all") : approved;
   const latest = filtered.slice(0, LATEST);
 
-  const openAll = () => router.push("/health/records" as Href);
+  const openAll = (search = query) => {
+    const trimmed = search.trim();
+    router.push(
+      (trimmed
+        ? { pathname: "/health/records", params: { q: trimmed } }
+        : "/health/records") as Href,
+    );
+  };
 
   return (
     <View style={{ gap: space.sm }}>
@@ -83,7 +91,12 @@ function DocumentsHero() {
         <Text size="lg" weight="semibold">
           {t("health.documents")}
         </Text>
-        <Button compact variant="ghost" label={t("health.allDocuments")} onPress={openAll} />
+        <Button
+          compact
+          variant="ghost"
+          label={t("health.allDocuments")}
+          onPress={() => openAll("")}
+        />
       </View>
       <View style={{ position: "relative", justifyContent: "center" }}>
         <Input
@@ -91,7 +104,7 @@ function DocumentsHero() {
           onChangeText={setQuery}
           placeholder={t("health.searchDocuments")}
           returnKeyType="search"
-          onSubmitEditing={openAll}
+          onSubmitEditing={() => openAll()}
           accessibilityLabel={t("health.searchDocuments")}
           style={{ paddingLeft: 40 }}
         />
@@ -124,7 +137,7 @@ function DocumentsHero() {
   );
 }
 
-/** Conditions and Findings as two visual tiles with a spark when history exists. */
+/** Conditions and Findings as two visual tiles with a spark when a real series exists. */
 function OverviewTiles() {
   const person = usePerson();
   const conditions = useConditions(person.data?.id);
@@ -133,9 +146,8 @@ function OverviewTiles() {
     (row) => row.current_status === "active" || row.current_status === "suspected",
   );
   const activeFindings = (findings.data ?? []).filter((row) => !row.is_resolved);
-  const conditionSpark = openConditions
-    .map((row) => row.mention_count)
-    .filter((count) => count > 0);
+  // The list RPC has no per-condition temporal series — omit rather than chart mention totals.
+  const conditionSpark: number[] = [];
   const findingSpark = findingSparkValues(activeFindings[0] ?? findings.data?.[0]);
 
   return (
@@ -145,21 +157,20 @@ function OverviewTiles() {
         accessibilityLabel={t("conditions.title")}
         icon={HeartPulse}
         href="/health/conditions"
-        summary={
-          conditions.isPending ? "…" : t("health.openConditions", { count: openConditions.length })
-        }
+        summary={t("health.openConditions", { count: openConditions.length })}
         detail={openConditions[0]?.name}
         spark={conditionSpark}
         busy={conditions.isPending}
+        failed={Boolean(conditions.error)}
+        errorMessage={conditions.error?.message}
+        onRetry={() => void conditions.refetch()}
       />
       <DashboardTile
         title={t("findings.navTitle")}
         accessibilityLabel={t("findings.navTitle")}
         icon={Search}
         href="/health/findings"
-        summary={
-          findings.isPending ? "…" : t("health.activeFindings", { count: activeFindings.length })
-        }
+        summary={t("health.activeFindings", { count: activeFindings.length })}
         detail={
           activeFindings[0]
             ? activeFindings[0].catalog_finding_name_ru || activeFindings[0].finding_type_text
@@ -167,15 +178,22 @@ function OverviewTiles() {
         }
         spark={findingSpark}
         busy={findings.isPending}
+        failed={Boolean(findings.error)}
+        errorMessage={findings.error?.message}
+        onRetry={() => void findings.refetch()}
       />
     </View>
   );
 }
 
-/** Size history of one finding, oldest first — empty when there is nothing to draw. */
-function findingSparkValues(finding: FindingSummary | undefined): number[] {
+/**
+ * Size history of one finding as a sparkline series, oldest first. `summarizeFindings` keeps
+ * history newest-first; reverse a copy so growth reads left-to-right.
+ */
+export function findingSparkValues(finding: FindingSummary | undefined): number[] {
   if (!finding) return [];
-  return finding.history
+  return [...finding.history]
+    .reverse()
     .map((point) => point.size_mm)
     .filter((value): value is number => value !== null && value > 0);
 }
@@ -190,6 +208,9 @@ function DashboardTile({
   detail,
   spark,
   busy,
+  failed,
+  errorMessage,
+  onRetry,
 }: {
   title: string;
   accessibilityLabel: string;
@@ -199,31 +220,57 @@ function DashboardTile({
   detail?: string;
   spark: number[];
   busy?: boolean;
+  failed?: boolean;
+  errorMessage?: string;
+  onRetry?: () => void;
 }) {
   const palette = usePalette();
   const router = useRouter();
+  const shell = {
+    flex: 1,
+    gap: space.sm,
+    padding: space.md,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: palette.card,
+    minHeight: 128,
+  } as const;
+  const heading = (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
+      <Icon icon={icon} size={18} tone="foreground" />
+      <Text weight="semibold" numberOfLines={1} style={{ flex: 1 }}>
+        {title}
+      </Text>
+    </View>
+  );
+  if (failed) {
+    // Not a link: retry must not also navigate into an empty list.
+    return (
+      <View style={shell} accessibilityLabel={accessibilityLabel}>
+        {heading}
+        <View style={{ gap: space.sm }}>
+          <Text size="sm" tone="destructive" numberOfLines={3}>
+            {errorMessage ?? t("common.error")}
+          </Text>
+          {onRetry ? (
+            <Button variant="outline" compact label={t("common.retry")} onPress={onRetry} />
+          ) : null}
+        </View>
+      </View>
+    );
+  }
   return (
     <Pressable
       accessibilityRole="link"
       accessibilityLabel={accessibilityLabel}
       onPress={() => router.push(href as Href)}
       style={({ pressed }) => ({
-        flex: 1,
-        gap: space.sm,
-        padding: space.md,
-        borderRadius: radius.lg,
-        borderWidth: 1,
-        borderColor: palette.border,
+        ...shell,
         backgroundColor: pressed ? palette.mutedHalf : palette.card,
-        minHeight: 128,
       })}
     >
-      <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
-        <Icon icon={icon} size={18} tone="foreground" />
-        <Text weight="semibold" numberOfLines={1} style={{ flex: 1 }}>
-          {title}
-        </Text>
-      </View>
+      {heading}
       {busy ? (
         <ActivityIndicator color={palette.mutedForeground} />
       ) : (
@@ -250,8 +297,11 @@ function CheckupsCompact() {
   const router = useRouter();
   const person = usePerson();
   const checkups = useCheckups(person.data?.id);
-  const groups = groupCheckups(checkups.data ?? [], new Date());
-  const preview = [...groups.overdue, ...groups.upcoming].slice(0, CHECKUP_PREVIEW);
+  const items = checkups.data ?? [];
+  const groups = groupCheckups(items, new Date());
+  const imminent = [...groups.overdue, ...groups.upcoming];
+  // Prefer overdue/upcoming; if none are imminent, preview later ones rather than "no checkups".
+  const preview = (imminent.length > 0 ? imminent : groups.later).slice(0, CHECKUP_PREVIEW);
   const overdue = groups.overdue.length;
   const todayIso = isoDay(new Date());
 
@@ -296,7 +346,7 @@ function CheckupsCompact() {
       ) : preview.length === 0 ? (
         <Card style={{ padding: space.md }}>
           <Text size="sm" tone="mutedForeground">
-            {t("checkups.noItems")}
+            {items.length === 0 ? t("checkups.noItems") : t("today.noCheckups")}
           </Text>
         </Card>
       ) : (
@@ -383,8 +433,9 @@ function SecondaryCharts() {
   const person = usePerson();
   const observations = useObservations(person.data?.id);
   const measurements = useMeasurements(person.data?.id);
+  const hidden = useHiddenMeasurements(person.data?.id);
   const topObservation = observations.data?.[0];
-  const topMeasurement = measurements.data?.[0];
+  const topMeasurement = (measurements.data ?? []).find((one) => !hidden.codes.has(one.code));
   const observationSpark = topObservation ? chartValues(topObservation.history) : [];
   const measurementSpark = topMeasurement ? topMeasurement.history.map((point) => point.value) : [];
 

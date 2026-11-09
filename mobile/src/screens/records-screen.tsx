@@ -1,7 +1,7 @@
 import type { MedicalRecord, RecordType } from "@orbit-types/medical-record";
-import { Stack, useRouter, type Href } from "expo-router";
+import { Stack, useLocalSearchParams, useRouter, type Href } from "expo-router";
 import { ChevronRight, FileText } from "lucide-react-native";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { FlatList, Pressable, RefreshControl, ScrollView, View } from "react-native";
 import { Chip } from "@/components/form";
 import { Button, Icon, Placeholder, Text } from "@/components/ui";
@@ -16,17 +16,30 @@ export function recordTypeLabel(type: RecordType): string {
   return t(`records.types.${type}`);
 }
 
+/** A route `q` param as a single string — Expo may hand an array for repeated keys. */
+function queryParam(value: string | string[] | undefined): string {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value) && typeof value[0] === "string") return value[0];
+  return "";
+}
+
 /**
  * The person's documents — the web records list, without its upload: documents arrive through
  * Claude and the web app. Searched from the bar by title, notes, summary and keywords, narrowed by
- * type from the chips; each row opens the document.
+ * type from the chips; each row opens the document. `?q=` from the health hub seeds the search.
  */
 export default function RecordsScreen() {
   const palette = usePalette();
   const person = usePerson();
   const records = useRecords(person.data?.id);
-  const [query, setQuery] = useState("");
+  const { q } = useLocalSearchParams<{ q?: string | string[] }>();
+  const fromRoute = queryParam(q);
+  const [query, setQuery] = useState(fromRoute);
   const [type, setType] = useState<RecordType | "all">("all");
+  // Hub push may land before params hydrate; keep the bar in sync with `q`.
+  useEffect(() => {
+    setQuery(fromRoute);
+  }, [fromRoute]);
   const visible = searchRecords(records.data ?? [], query, type);
 
   const header = (

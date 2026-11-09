@@ -1,15 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
 import { fireEvent, screen } from "@testing-library/react-native";
+import type { FindingSummary } from "@orbit-types/finding";
 import CompleteCheckupScreen from "@/screens/checkup-sheets";
 import CheckupScreen from "@/screens/checkup-screen";
 import CheckupsScreen from "@/screens/checkups-screen";
 import ConditionsScreen from "@/screens/conditions-screen";
 import FindingsScreen from "@/screens/findings-screen";
-import HealthScreen from "@/screens/health-screen";
+import HealthScreen, { findingSparkValues } from "@/screens/health-screen";
 import MeasurementsScreen from "@/screens/measurements-screen";
 import ObservationsScreen from "@/screens/observations-screen";
 import RecordsScreen from "@/screens/records-screen";
-import { db, failOnce, fakeSession, rpcHandlers, seed, setSession } from "../../test/fake-supabase";
+import {
+  db,
+  fail,
+  failOnce,
+  fakeSession,
+  rpcHandlers,
+  seed,
+  setSession,
+} from "../../test/fake-supabase";
 import { household, NOW, PERSON, USER_ID } from "../../test/fixtures";
 import { renderScreens } from "../../test/render";
 
@@ -232,9 +241,168 @@ describe("the health dashboard", () => {
     expect(await screen.findByText("Анализ крови")).toBeOnTheScreen();
   });
 
+  it("retries when the person query fails on the documents hero", async () => {
+    failOnce("persons");
+    await renderScreens(routes, "/health");
+    expect(await screen.findByText("persons is unavailable")).toBeOnTheScreen();
+    await fireEvent.press(screen.getByText("Повторить"));
+    expect(await screen.findByText("Общий анализ крови")).toBeOnTheScreen();
+  });
+
   it("says when there are no checkups yet", async () => {
     db.tables.checkup_items = [];
     await renderScreens(routes, "/health");
     expect(await screen.findByText("Нет чек-апов")).toBeOnTheScreen();
+  });
+
+  it("keeps later checkups visible instead of claiming there are none", async () => {
+    db.tables.checkup_items = [
+      {
+        id: "teeth",
+        person_id: PERSON.id,
+        title: "Стоматолог",
+        category: "dental",
+        schedule: { type: "interval", every: 1, unit: "year" },
+        next_due_at: "2026-12-01",
+        status: "active",
+        reminder_days_before: [7],
+        planned_on: null,
+        why_text: null,
+        why_links: [],
+        notes: null,
+        created_at: "2026-01-01T09:00:00Z",
+        updated_at: "2026-01-01T09:00:00Z",
+      },
+    ];
+    await renderScreens(routes, "/health");
+    expect(await screen.findByText("Стоматолог")).toBeOnTheScreen();
+    expect(screen.queryByText("Нет чек-апов")).toBeNull();
+  });
+
+  it("says when checkups exist but none are imminent or later-dated", async () => {
+    db.tables.checkup_items = [
+      {
+        id: "flu",
+        person_id: PERSON.id,
+        title: "Прививка",
+        category: "vaccination",
+        schedule: { type: "interval", every: 1, unit: "year" },
+        next_due_at: "2026-11-01",
+        status: "paused",
+        reminder_days_before: [7],
+        planned_on: null,
+        why_text: null,
+        why_links: [],
+        notes: null,
+        created_at: "2026-01-01T09:00:00Z",
+        updated_at: "2026-01-01T09:00:00Z",
+      },
+    ];
+    await renderScreens(routes, "/health");
+    expect(await screen.findByText("Нет просроченных и ближайших чек-апов")).toBeOnTheScreen();
+    expect(screen.queryByText("Нет чек-апов")).toBeNull();
+  });
+
+  it("passes the document search into the records list", async () => {
+    db.tables.medical_records.push({
+      id: "r-mri",
+      person_id: PERSON.id,
+      created_by_user_id: USER_ID,
+      record_type: "imaging",
+      record_date: "2026-08-20",
+      title: "МРТ колена",
+      notes: null,
+      status: "active",
+      removed_at: null,
+      created_at: "2026-08-20T10:00:00Z",
+      updated_at: "2026-08-20T10:00:00Z",
+    });
+    await renderScreens(routes, "/health");
+    // Title is «Общий анализ крови» — genitive «крови», not nominative «кровь».
+    await fireEvent.changeText(await screen.findByLabelText("Поиск документов"), "крови");
+    await fireEvent(screen.getByLabelText("Поиск документов"), "submitEditing");
+    expect(await screen.findByText("Общий анализ крови")).toBeOnTheScreen();
+    expect(screen.queryByText("МРТ колена")).toBeNull();
+  });
+
+  it("shows failed overview queries instead of zero counts", async () => {
+    fail("get_person_conditions_with_history");
+    failOnce("record_findings");
+    await renderScreens(routes, "/health");
+    expect(await screen.findByText("get_person_conditions_with_history failed")).toBeOnTheScreen();
+    expect(await screen.findByText("record_findings is unavailable")).toBeOnTheScreen();
+    expect(screen.queryByText("0 открытых")).toBeNull();
+    expect(screen.queryByText("0 активных")).toBeNull();
+    db.failing.delete("get_person_conditions_with_history");
+    const retries = screen.getAllByText("Повторить");
+    await fireEvent.press(retries[0]);
+    await fireEvent.press(retries[1]);
+    expect(await screen.findByText("2 открытых")).toBeOnTheScreen();
+  });
+
+  it("skips a measurement type the person has hidden", async () => {
+    const weight = {
+      id: "cat-weight",
+      code: "weight",
+      name_ru: "Вес",
+      name_en: "weight",
+      unit_ru: "кг",
+      unit_en: "kg",
+      category: "basic",
+      sort_order: 1,
+    };
+    const waist = {
+      id: "cat-waist",
+      code: "waist",
+      name_ru: "Талия",
+      name_en: "waist",
+      unit_ru: "см",
+      unit_en: "cm",
+      category: "body",
+      sort_order: 1,
+    };
+    db.tables.measurement_catalog = [waist, weight];
+    db.tables.measurements = [
+      {
+        id: "t1",
+        person_id: PERSON.id,
+        catalog_id: waist.id,
+        value: 90,
+        measured_at: "2026-10-10T08:30:00Z",
+        notes: null,
+        created_by_user_id: USER_ID,
+        created_at: "2026-10-10T08:30:00Z",
+        measurement_catalog: waist,
+      },
+      {
+        id: "w1",
+        person_id: PERSON.id,
+        catalog_id: weight.id,
+        value: 80,
+        measured_at: "2026-10-15T08:30:00Z",
+        notes: null,
+        created_by_user_id: USER_ID,
+        created_at: "2026-10-15T08:30:00Z",
+        measurement_catalog: weight,
+      },
+    ];
+    db.tables.user_preferences = [
+      { auth_user_id: USER_ID, hidden_measurement_codes: { [PERSON.id]: ["waist"] } },
+    ];
+    await renderScreens(routes, "/health");
+    expect(await screen.findByText("Вес")).toBeOnTheScreen();
+    expect(screen.queryByText("Талия")).toBeNull();
+  });
+});
+
+describe("findingSparkValues", () => {
+  it("plots size history oldest-first so growth reads left to right", () => {
+    const finding = {
+      history: [
+        { size_mm: 14, created_at: "2026-02-10T09:00:00Z" },
+        { size_mm: 12, created_at: "2025-01-10T09:00:00Z" },
+      ],
+    } as FindingSummary;
+    expect(findingSparkValues(finding)).toEqual([12, 14]);
   });
 });
