@@ -330,16 +330,16 @@ ssh-keyscan <server-ip>   # optional → ORBIT_SSH_KNOWN_HOSTS
 
 **Required in Environment `production-cacos` (names only):**
 
-| Where     | Name                    | Notes                                      |
-| --------- | ----------------------- | ------------------------------------------ |
-| Variable  | `ORBIT_SERVER_HOST`     | Server IP; empty → auto-deploy quietly skips |
-| Variable  | `ORBIT_DOMAIN`          | Hostname only, e.g. sslip.io               |
-| Variable  | `ORBIT_ADMIN_EMAIL`     | Let's Encrypt contact                      |
-| Variable  | `ORBIT_ALLOWED_EMAILS`  | Comma-separated Google allowlist           |
-| Variable  | `GOOGLE_CLIENT_ID`      | Own OAuth client or extra redirect URI     |
-| Secret    | `ORBIT_SSH_PRIVATE_KEY` | Whole private key file (`orbit-deploy-cacos`) |
-| Secret    | `ORBIT_MASTER_KEY`      | From `openssl rand -hex 32` above          |
-| Secret    | `GOOGLE_CLIENT_SECRET`  | Matching the client id                     |
+| Where    | Name                    | Notes                                         |
+| -------- | ----------------------- | --------------------------------------------- |
+| Variable | `ORBIT_SERVER_HOST`     | Server IP; empty → auto-deploy quietly skips  |
+| Variable | `ORBIT_DOMAIN`          | Hostname only, e.g. sslip.io                  |
+| Variable | `ORBIT_ADMIN_EMAIL`     | Let's Encrypt contact                         |
+| Variable | `ORBIT_ALLOWED_EMAILS`  | Comma-separated Google allowlist              |
+| Variable | `GOOGLE_CLIENT_ID`      | Own OAuth client or extra redirect URI        |
+| Secret   | `ORBIT_SSH_PRIVATE_KEY` | Whole private key file (`orbit-deploy-cacos`) |
+| Secret   | `ORBIT_MASTER_KEY`      | From `openssl rand -hex 32` above             |
+| Secret   | `GOOGLE_CLIENT_SECRET`  | Matching the client id                        |
 
 **Optional (same names as `deploy/.env.example`; secrets for the secret ones):**
 `ORBIT_SERVER_USER`, `ORBIT_SSH_KNOWN_HOSTS`, `ORBIT_HTTP_ONLY`, `MCP_SERVER_ENABLED`,
