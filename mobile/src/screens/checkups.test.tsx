@@ -118,6 +118,7 @@ describe("the checkups", () => {
     // Category Choice is in the list header and is tappable while checkups are still
     // pending (ListEmptyComponent shows ActivityIndicator). Wait for the filtered row
     // rather than asserting synchronously after the sheet pick.
+    // (Comment-only bump: re-trigger Mobile recordings after Omega-3 tunnel flake.)
     pickOption("Визит");
     await fireEvent.press(await screen.findByLabelText("Категория: Все типы"));
     expect(await screen.findByText("Окулист")).toBeOnTheScreen();
