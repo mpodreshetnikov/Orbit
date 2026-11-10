@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals
 import { fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { ActionSheetIOS, Alert, type AlertButton } from "react-native";
 import CheckupScreen, { reminderDays, scheduleSummary } from "@/screens/checkup-screen";
-import CompleteCheckupScreen, { PlanCheckupScreen } from "@/screens/checkup-sheets";
+import CompleteCheckupScreen from "@/screens/checkup-sheets";
 import CheckupsScreen from "@/screens/checkups-screen";
 import ConditionScreen from "@/screens/condition-screen";
 import { db, fail, fakeSession, seed, setSession } from "../../test/fake-supabase";
@@ -15,7 +15,6 @@ const routes = {
   "health/checkups/index": CheckupsScreen,
   "health/checkups/[id]": CheckupScreen,
   "health/checkups/complete": CompleteCheckupScreen,
-  "health/checkups/plan": PlanCheckupScreen,
   "health/conditions/[id]": ConditionScreen,
 };
 
@@ -150,13 +149,7 @@ describe("a checkup", () => {
 
     const offered = pickOption("Возобновить");
     await fireEvent.press(screen.getByLabelText("Действия: Флюорография"));
-    expect(offered[0]).toEqual([
-      "Редактировать",
-      "Возобновить",
-      "В архив",
-      "Удалить чек-ап",
-      "Отмена",
-    ]);
+    expect(offered[0]).toEqual(["Возобновить", "В архив", "Удалить чек-ап", "Отмена"]);
     await waitFor(() => expect(db.tables.checkup_items[1].status).toBe("active"));
     expect(await screen.findByText("Отметить выполненным")).toBeOnTheScreen();
   });
@@ -188,15 +181,12 @@ describe("a checkup", () => {
     expect(screen.getByText("Анализ крови")).toBeOnTheScreen();
   });
 
-  it("is marked done and planned from its own buttons", async () => {
+  it("is marked done from its own button", async () => {
     await renderScreens(routes, "/health/checkups/blood");
+    expect(screen.queryByText("Запланировать")).toBeNull();
     await fireEvent.press(await screen.findByText("Отметить выполненным"));
     await fireEvent.press(await screen.findByText("Сохранить"));
     await waitFor(() => expect(db.tables.checkup_completions).toHaveLength(3));
-
-    await fireEvent.press(await screen.findByText("Запланировать"));
-    await fireEvent.press(await screen.findByText("Сохранить"));
-    await waitFor(() => expect(db.tables.checkup_items[0].planned_on).toBe("2026-10-21"));
   });
 
   it("says when it is not there", async () => {

@@ -53,10 +53,9 @@ const STATUS_CHANGES: Record<CheckupItemStatus, [CheckupItemStatus, string][]> =
 };
 
 /**
- * One checkup — the web checkup page: what it is and whether it is late, marked done or planned
- * from here, its schedule, reminders, reason, linked conditions and notes, and every completion,
- * each opened to correct or delete. Editing, pausing, resuming, archiving and deleting are in the
- * bar's sheet.
+ * One checkup — the web checkup page: what it is and whether it is late, marked done from here, its
+ * schedule, reminders, reason, linked conditions and notes, and every completion, each opened to
+ * correct or delete. Pausing, resuming, archiving and deleting are in the bar's sheet.
  */
 export default function CheckupScreen() {
   const palette = usePalette();
@@ -73,7 +72,6 @@ export default function CheckupScreen() {
   const actions = (current: CheckupItem) => {
     const changes = STATUS_CHANGES[current.status];
     const labels = [
-      t("common.edit"),
       ...changes.map(([, label]) => t(label)),
       t("checkups.deleteCheckup"),
       t("common.cancel"),
@@ -82,14 +80,13 @@ export default function CheckupScreen() {
       {
         options: labels,
         cancelButtonIndex: labels.length - 1,
-        destructiveButtonIndex: changes.length + 1,
+        destructiveButtonIndex: changes.length,
       },
       (index) => {
-        const change = changes[index - 1];
-        if (index === 0) open(`form?id=${current.id}`);
-        else if (change) action.mutate({ item: current, status: change[0] }, { onError });
+        const change = changes[index];
+        if (change) action.mutate({ item: current, status: change[0] }, { onError });
         // An alert raised while the sheet is still closing is dropped by iOS.
-        else if (index === changes.length + 1) {
+        else if (index === changes.length) {
           setTimeout(() => remove(current), SHEET_DISMISS_MS);
         }
       },
@@ -165,22 +162,11 @@ export default function CheckupScreen() {
           {late.byDue ? <Badge label={t("checkups.overdue")} textTone="warningText" /> : null}
         </View>
         {item.status === "active" ? (
-          <View style={{ flexDirection: "row", gap: space.sm }}>
-            <Button
-              style={{ flex: 1 }}
-              icon={CheckCircle2}
-              label={t("checkups.markComplete")}
-              onPress={() => open(`complete?id=${item.id}`)}
-            />
-            {item.next_due_at ? (
-              <Button
-                variant="outline"
-                icon={CalendarPlus}
-                label={t("checkups.plan")}
-                onPress={() => open(`plan?id=${item.id}`)}
-              />
-            ) : null}
-          </View>
+          <Button
+            icon={CheckCircle2}
+            label={t("checkups.markComplete")}
+            onPress={() => open(`complete?id=${item.id}`)}
+          />
         ) : null}
 
         <Card style={{ padding: space.lg, gap: space.md }}>

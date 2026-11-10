@@ -1,5 +1,4 @@
-import type { MeasurementCatalog, MeasurementSummary } from "@orbit-types/measurement";
-import { sortByMeasurementOrder } from "@orbit-types/measurement-order";
+import type { MeasurementSummary } from "@orbit-types/measurement";
 import {
   MEASUREMENT_LIST_SELECT,
   summarizeMeasurements,
@@ -9,15 +8,7 @@ import {
   normalizeHiddenMeasurementCodes,
   type HiddenMeasurementCodes,
 } from "@orbit-types/measurement-visibility";
-import { t } from "@/lib/i18n";
 import { supabase } from "@/lib/supabase";
-
-/** One value to write: a new entry, or the changed columns of an existing one. */
-export interface MeasurementEntry {
-  value: number;
-  measured_at: string;
-  notes: string | null;
-}
 
 function check<T>({ data, error }: { data: T; error: { message: string } | null }): T {
   if (error) throw new Error(error.message);
@@ -36,36 +27,6 @@ export async function fetchMeasurements(personId: string): Promise<MeasurementSu
   return summarizeMeasurements((rows ?? []) as unknown as MeasurementListRow[]);
 }
 
-/** Every measurement type, in the list's order. */
-export async function fetchMeasurementCatalog(): Promise<MeasurementCatalog[]> {
-  const rows = check(await supabase.from("measurement_catalog").select("*"));
-  return sortByMeasurementOrder((rows ?? []) as MeasurementCatalog[]);
-}
-
-export async function createMeasurement(
-  userId: string,
-  personId: string,
-  catalogId: string,
-  entry: MeasurementEntry,
-) {
-  check(
-    await supabase.from("measurements").insert({
-      person_id: personId,
-      catalog_id: catalogId,
-      created_by_user_id: userId,
-      ...entry,
-    }),
-  );
-}
-
-export async function updateMeasurement(id: string, entry: MeasurementEntry) {
-  check(await supabase.from("measurements").update(entry).eq("id", id));
-}
-
-export async function deleteMeasurement(id: string) {
-  check(await supabase.from("measurements").delete().eq("id", id));
-}
-
 /** The user's hidden types for every person, as `user_preferences` holds them. */
 export async function fetchHiddenCodes(userId: string): Promise<HiddenMeasurementCodes> {
   const row = check(
@@ -76,42 +37,4 @@ export async function fetchHiddenCodes(userId: string): Promise<HiddenMeasuremen
       .maybeSingle(),
   );
   return normalizeHiddenMeasurementCodes(row?.hidden_measurement_codes);
-}
-
-export async function saveHiddenCodes(userId: string, hidden: HiddenMeasurementCodes) {
-  check(
-    await supabase
-      .from("user_preferences")
-      .upsert(
-        { auth_user_id: userId, hidden_measurement_codes: hidden },
-        { onConflict: "auth_user_id" },
-      ),
-  );
-}
-
-/** A catalogue entry's own columns, as the web catalogue dialog saves them. */
-export type CatalogColumns = Pick<
-  MeasurementCatalog,
-  "code" | "name_ru" | "name_en" | "unit_ru" | "unit_en" | "category" | "sort_order"
->;
-
-export async function createCatalogEntry(columns: CatalogColumns) {
-  check(await supabase.from("measurement_catalog").insert(columns));
-}
-
-/** Throws when no row matched, as the web update does: an entry deleted elsewhere is not saved. */
-export async function updateCatalogEntry(id: string, columns: CatalogColumns) {
-  const row = check(
-    await supabase
-      .from("measurement_catalog")
-      .update(columns)
-      .eq("id", id)
-      .select("id")
-      .maybeSingle(),
-  );
-  if (!row) throw new Error(t("common.noResults"));
-}
-
-export async function deleteCatalogEntry(id: string) {
-  check(await supabase.from("measurement_catalog").delete().eq("id", id));
 }

@@ -2,7 +2,7 @@ import type { MeasurementSummary } from "@orbit-types/measurement";
 import { searchMeasurementSummaries } from "@orbit-types/measurement-summary";
 import { getMeasurementTrend } from "@orbit-types/measurement-trend";
 import { Stack, useRouter, type Href } from "expo-router";
-import { Minus, Plus, SlidersHorizontal, TrendingDown, TrendingUp } from "lucide-react-native";
+import { Minus, TrendingDown, TrendingUp } from "lucide-react-native";
 import { useState } from "react";
 import { Pressable, RefreshControl, SectionList, View } from "react-native";
 import { Sparkline } from "@/components/charts";
@@ -22,10 +22,18 @@ export function TrendMark({ history }: { history: { value: number }[] }) {
 }
 
 /**
+ * Empty-list copy when the person has measurements but none are shown: a nonempty search that
+ * matches nothing, versus every type hidden with no query.
+ */
+export function measurementsEmptyKey(query: string) {
+  return query ? "measurements.noSearchResults" : "measurements.allHidden";
+}
+
+/**
  * The person's measurements — the web measurements page's cards, grouped by category as it groups
- * them, with its search in the navigation bar and its "choose measurements" behind the sliders in
- * the bar. The web page's table and body-map views are left to the web: on a phone the cards already
- * show every value, and the table is the same history a card opens.
+ * them, with its search in the navigation bar. The web page's table and body-map views are left to
+ * the web: on a phone the cards already show every value, and the table is the same history a card
+ * opens. View-only: recording and visibility live with the agent.
  */
 export default function MeasurementsScreen() {
   const palette = usePalette();
@@ -43,26 +51,6 @@ export default function MeasurementsScreen() {
     <Stack.Screen
       options={{
         title: t("measurements.title"),
-        headerRight: () => (
-          <View style={{ flexDirection: "row", gap: space.lg }}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={t("measurements.manageVisibility")}
-              hitSlop={space.sm}
-              onPress={() => router.push("/health/measurements/visibility" as Href)}
-            >
-              <Icon icon={SlidersHorizontal} size={22} tone="foreground" />
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={t("measurements.addMeasurement")}
-              hitSlop={space.sm}
-              onPress={() => router.push("/health/measurements/form" as Href)}
-            >
-              <Icon icon={Plus} size={24} tone="foreground" />
-            </Pressable>
-          </View>
-        ),
         headerSearchBarOptions: {
           placeholder: t("measurements.searchPlaceholder"),
           hideWhenScrolling: false,
@@ -123,22 +111,16 @@ export default function MeasurementsScreen() {
               </Text>
             </View>
           ) : (
-            <Placeholder
-              message={t(query ? "measurements.noSearchResults" : "measurements.allHidden")}
-            />
+            <Placeholder message={t(measurementsEmptyKey(query))} />
           )
         }
         ListFooterComponent={
           hiddenCount > 0 ? (
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => router.push("/health/measurements/visibility" as Href)}
-              style={{ paddingTop: space.lg, alignItems: "center" }}
-            >
+            <View style={{ paddingTop: space.lg, alignItems: "center" }}>
               <Text size="sm" tone="mutedForeground">
                 {t("measurements.hiddenSummary", { count: hiddenCount })}
               </Text>
-            </Pressable>
+            </View>
           ) : undefined
         }
         refreshControl={

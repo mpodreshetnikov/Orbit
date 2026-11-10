@@ -1,14 +1,11 @@
 import { Stack, useRouter, type Href } from "expo-router";
 import {
-  BookOpen,
   CalendarCheck,
   ChevronRight,
   FlaskConical,
   HeartPulse,
-  MapPin,
   Search,
   Ruler,
-  Stethoscope,
   type LucideIcon,
 } from "lucide-react-native";
 import { ActivityIndicator, Pressable, ScrollView, View } from "react-native";
@@ -51,24 +48,6 @@ const SECTIONS: { title: string; description?: string; icon: LucideIcon; href: s
     description: "measurements.description",
     icon: Ruler,
     href: "/health/measurements",
-  },
-  {
-    title: "catalogs.measurements",
-    description: "catalogs.measurementsDescription",
-    icon: BookOpen,
-    href: "/health/catalogs/measurements",
-  },
-  {
-    title: "catalogs.findingTypes",
-    description: "catalogs.findingTypesDescription",
-    icon: Stethoscope,
-    href: "/health/catalogs/finding-types",
-  },
-  {
-    title: "catalogs.bodySites",
-    description: "catalogs.bodySitesDescription",
-    icon: MapPin,
-    href: "/health/catalogs/body-sites",
   },
 ];
 

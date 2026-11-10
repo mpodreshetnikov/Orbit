@@ -1,5 +1,5 @@
-# Documents: the latest ones atop «Здоровье», the full list, the seeded blood test with its results,
-# and its details form. Nothing is saved: the recording only shows the form.
+# Documents: the latest ones atop «Здоровье», the full list, and the seeded blood test with its results.
+# Metadata editing is gone — view and attachments only.
 appId: host.exp.Exponent
 name: Документы
 ---
@@ -24,9 +24,4 @@ name: Документы
     visible: "Заметки"
     timeout: 20000
 - takeScreenshot: documents-03-record
-- tapOn: "Редактировать"
-- extendedWaitUntil:
-    visible: "Тип записи"
-    timeout: 20000
-- takeScreenshot: documents-04-edit
-- tapOn: "Отмена"
+- assertVisible: "Заметки"

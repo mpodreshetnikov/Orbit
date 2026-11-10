@@ -10,12 +10,9 @@ import {
   ArrowRightLeft,
   ArrowUpRight,
   ChartPie,
-  ListChecks,
-  Plus,
   ReceiptText,
   RotateCcw,
   Scale,
-  Tags,
   type LucideIcon,
 } from "lucide-react-native";
 import { useEffect, useMemo, useState } from "react";
@@ -28,7 +25,6 @@ import {
   useMoneyCategories,
   useMoneyFeed,
   useMoneyFeedSummary,
-  useMoneyRules,
   usePerson,
 } from "@/lib/queries";
 import { radius, space, usePalette, type Palette } from "@/theme";
@@ -58,19 +54,6 @@ export function useDebounced<T>(value: T, ms: number): T {
   return settled;
 }
 
-/** The money pages read most, as tiles above the feed: what was spent, where it goes, and how. */
-const TILES: [string, string, LucideIcon][] = [
-  ["money.reports", "/money/reports", ChartPie],
-  ["money.categories", "/money/categories", Tags],
-  ["money.rules", "/money/rules", ListChecks],
-];
-
-/** The rest of the web money menu, a row under the tiles. */
-const SECTIONS: [string, string][] = [
-  ["money.accounts", "/money/accounts"],
-  ["money.import", "/money/import"],
-];
-
 const signLabel = (sign: MoneyAmountSignFilter) =>
   t(`money.amountSign${sign.charAt(0).toUpperCase()}${sign.slice(1)}`);
 
@@ -97,7 +80,7 @@ export function byDay(items: MoneyTransactionFeedItem[]) {
 /**
  * "Деньги" — the web transactions page: every transaction of the person, newest first and by day,
  * searched from the bar and narrowed to money in or out, with how many match and their sums. More
- * load as the list nears its end. A row opens its transaction; "+" adds one.
+ * load as the list nears its end. A row opens its transaction; reports and import sit above the feed.
  */
 export default function MoneyScreen() {
   const palette = usePalette();
@@ -112,7 +95,6 @@ export default function MoneyScreen() {
   const summary = useMoneyFeedSummary(personId, filters);
   const accounts = useMoneyAccounts(personId);
   const categories = useMoneyCategories();
-  const rules = useMoneyRules(personId);
 
   const items = useMemo(() => feed.data?.pages.flatMap((page) => page.items) ?? [], [feed.data]);
   const accountLabel = new Map(accounts.data?.map((one) => [one.id, one.account_label]));
@@ -127,16 +109,6 @@ export default function MoneyScreen() {
     <Stack.Screen
       options={{
         title: t("money.title"),
-        headerRight: () => (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={t("money.addTransaction")}
-            hitSlop={space.sm}
-            onPress={() => router.push("/money/form" as Href)}
-          >
-            <Icon icon={Plus} size={24} tone="foreground" />
-          </Pressable>
-        ),
         headerSearchBarOptions: {
           placeholder: t("money.searchTransactions"),
           hideWhenScrolling: false,
@@ -181,35 +153,24 @@ export default function MoneyScreen() {
     </View>
   );
 
+  const month = new Date().toLocaleDateString("ru", { month: "long" });
   const top = (
     <View style={{ gap: space.md, marginBottom: space.sm }}>
       <View style={{ flexDirection: "row", gap: space.sm }}>
-        {TILES.map(([label, href, icon]) => (
-          <Tile
-            key={href}
-            label={t(label)}
-            icon={icon}
-            detail={
-              href === "/money/reports"
-                ? new Date().toLocaleDateString("ru", { month: "long" })
-                : href === "/money/categories"
-                  ? categories.data?.length
-                  : rules.data?.length
-            }
-            onPress={() => router.push(href as Href)}
-          />
-        ))}
+        <Tile
+          label={t("money.reports")}
+          icon={ChartPie}
+          detail={month}
+          onPress={() => router.push("/money/reports" as Href)}
+        />
       </View>
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}>
-        {SECTIONS.map(([label, href]) => (
-          <Button
-            key={href}
-            compact
-            variant="secondary"
-            label={t(label)}
-            onPress={() => router.push(href as Href)}
-          />
-        ))}
+        <Button
+          compact
+          variant="secondary"
+          label={t("money.import")}
+          onPress={() => router.push("/money/import" as Href)}
+        />
       </View>
       <View style={{ flexDirection: "row", gap: space.sm }}>
         {SIGNS.map((sign) => (

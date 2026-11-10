@@ -1,7 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
-import { QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, renderHook, screen, waitFor } from "@testing-library/react-native";
-import { useSaveTransaction } from "@/lib/queries";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import MoneyReportsScreen from "@/screens/money-reports-screen";
 import MoneyScreen from "@/screens/money-screen";
 import { calls, fail, fakeSession, rpcHandlers, seed, setSession } from "../../test/fake-supabase";
@@ -342,17 +340,12 @@ describe("the money report", () => {
     expect(await screen.findByText("Не удалось загрузить отчёт.")).toBeOnTheScreen();
   });
 
-  it("is read again once a transaction changes", async () => {
+  it("is read again once its query is invalidated", async () => {
     const { client } = await renderScreens(routes, "/money/reports");
     await screen.findByTestId("spending-total-expense");
     const before = reportArgs().length;
-    const { result } = await renderHook(() => useSaveTransaction(), {
-      wrapper: ({ children }) => (
-        <QueryClientProvider client={client}>{children}</QueryClientProvider>
-      ),
-    });
     await act(async () => {
-      await result.current.mutateAsync({ id: "gone", remove: true }).catch(() => undefined);
+      await client.invalidateQueries({ queryKey: ["money-spending-report"] });
     });
     await waitFor(() => expect(reportArgs().length).toBeGreaterThan(before));
   });

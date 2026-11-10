@@ -1,8 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
-import { fireEvent, screen, waitFor } from "@testing-library/react-native";
-import { ActionSheetIOS, Alert, type AlertButton } from "react-native";
+import { screen } from "@testing-library/react-native";
 import MoneyScreen from "@/screens/money-screen";
-import TransactionFormScreen from "@/screens/transaction-form-screen";
 import TransactionScreen from "@/screens/transaction-screen";
 import { db, fakeSession, rpcHandlers, seed, setSession } from "../../test/fake-supabase";
 import { household, NOW, PERSON, USER_ID } from "../../test/fixtures";
@@ -13,7 +11,6 @@ jest.mock("@/lib/supabase", () => jest.requireActual("../../test/fake-supabase")
 const routes = {
   "money/index": MoneyScreen,
   "money/[id]": TransactionScreen,
-  "money/form": TransactionFormScreen,
 };
 
 const LINE = {
@@ -112,18 +109,6 @@ afterEach(() => {
   jest.useRealTimers();
 });
 
-function pickOption(label: string) {
-  jest
-    .spyOn(ActionSheetIOS, "showActionSheetWithOptions")
-    .mockImplementationOnce((options, callback) => callback(options.options.indexOf(label)));
-}
-
-function answerAlert(label: string) {
-  jest.spyOn(Alert, "alert").mockImplementationOnce((_title, _message, buttons) => {
-    (buttons as AlertButton[]).find((button) => button.text === label)?.onPress?.();
-  });
-}
-
 describe("a transaction", () => {
   it("shows its kind, amount, account, card, comment and line items", async () => {
     await renderScreens(routes, "/money/tx-1");
@@ -136,16 +121,7 @@ describe("a transaction", () => {
     expect(screen.getByText("Хлеб")).toBeOnTheScreen();
     expect(await screen.findByText("Продукты")).toBeOnTheScreen();
     expect(screen.getByText("Без категории")).toBeOnTheScreen();
-  });
-
-  it("is deleted once confirmed", async () => {
-    rpcHandlers.money_list_transactions_feed = () => [TX];
-    await renderScreens(routes, "/money");
-    await fireEvent.press(await screen.findByText("Пятёрочка"));
-    pickOption("Удалить транзакцию");
-    answerAlert("Удалить транзакцию");
-    await fireEvent.press(await screen.findByLabelText("Действия: Пятёрочка"));
-    await waitFor(() => expect(db.tables.money_transactions).toHaveLength(0));
+    expect(screen.queryByLabelText("Действия: Пятёрочка")).toBeNull();
   });
 
   it("shows the bank's note when it has no comment of its own", async () => {
@@ -168,23 +144,39 @@ describe("a transaction", () => {
     await renderScreens(routes, "/money/gone");
     expect(await screen.findByText("Ничего не найдено")).toBeOnTheScreen();
   });
-});
 
-describe("editing a transaction", () => {
-  it("edits from the page's sheet: a line item changed, one dropped", async () => {
+  it("omits the card row when the spend has none", async () => {
+    db.tables.money_transactions[0] = {
+      ...db.tables.money_transactions[0],
+      money_cards: null,
+    };
     await renderScreens(routes, "/money/tx-1");
-    pickOption("Редактировать");
-    await fireEvent.press(await screen.findByLabelText("Действия: Пятёрочка"));
-    const merchant = await screen.findByLabelText("Мерчант");
-    expect(merchant.props.value).toBe("Пятёрочка");
-    await fireEvent.changeText(screen.getByLabelText("Название 1"), "Батон");
-    await fireEvent.press(screen.getByLabelText("Удалить 2"));
-    await fireEvent.press(screen.getByText("Сохранить"));
-    await waitFor(() =>
-      expect(db.tables.money_line_items.map((row) => [row.id, row.title])).toEqual([
-        ["li-1", "Батон"],
-      ]),
-    );
-    expect(db.tables.money_transactions[0]).toMatchObject({ amount: -350, comment: "К ужину" });
+    expect(await screen.findByText("Тинькофф")).toBeOnTheScreen();
+    expect(screen.queryByText(/^\*1234/)).toBeNull();
+  });
+
+  it("marks a transfer and an income without a card label or comment", async () => {
+    db.tables.money_transactions[0] = {
+      ...db.tables.money_transactions[0],
+      amount: 1200,
+      transaction_type: "income",
+      is_transfer: true,
+      merchant_name: null,
+      comment: null,
+      source_comment: null,
+      money_cards: { id: "card", last4: "9999", card_label: null },
+      money_line_items: [
+        { ...LINE, id: "li-3", title: "Зарплата", amount: 1200, category_id: "gone" },
+      ],
+    };
+    db.tables.money_line_items = [
+      { ...LINE, id: "li-3", title: "Зарплата", amount: 1200, category_id: "gone" },
+    ];
+    await renderScreens(routes, "/money/tx-1");
+    expect(await screen.findByText("Доход")).toBeOnTheScreen();
+    expect(screen.getByText("Перевод")).toBeOnTheScreen();
+    expect(screen.getByText("*9999")).toBeOnTheScreen();
+    expect(screen.getByText("gone")).toBeOnTheScreen();
+    expect(screen.queryByText("Комментарий")).toBeNull();
   });
 });

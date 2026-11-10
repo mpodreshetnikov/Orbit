@@ -1,10 +1,9 @@
-import type { MeasurementHistoryPoint } from "@orbit-types/measurement";
-import { Stack, useLocalSearchParams, useRouter, type Href } from "expo-router";
-import { MoreHorizontal, Plus, TrendingDown, TrendingUp } from "lucide-react-native";
+import { Stack, useLocalSearchParams } from "expo-router";
+import { TrendingDown, TrendingUp } from "lucide-react-native";
 import type { ReactNode } from "react";
-import { ActionSheetIOS, Alert, Pressable, RefreshControl, ScrollView, View } from "react-native";
+import { RefreshControl, ScrollView, View } from "react-native";
 import { LineChart } from "@/components/charts";
-import { Badge, Button, Card, Icon, Placeholder, Text } from "@/components/ui";
+import { Badge, Card, Icon, Placeholder, Text } from "@/components/ui";
 import {
   categoryLabel,
   formatDay,
@@ -13,50 +12,26 @@ import {
   trendPercent,
 } from "@/features/measurements/format";
 import { t } from "@/lib/i18n";
-import {
-  useHiddenMeasurements,
-  useMeasurements,
-  usePerson,
-  useSaveMeasurement,
-} from "@/lib/queries";
+import { useHiddenMeasurements, useMeasurements, usePerson } from "@/lib/queries";
 import { radius, space, usePalette } from "@/theme";
 
-/** How long the system sheet takes to slide away before an alert may be shown. */
-const SHEET_DISMISS_MS = 400;
-
 /**
- * One measurement's history — the web measurement page: the four summary cards, the chart and the
- * history, each entry editable or deletable from its menu. "+" in the bar records a new value of this
- * type.
+ * One measurement's history — the web measurement page, view-only: the four summary cards, the
+ * chart and the history.
  */
 export default function MeasurementScreen() {
-  const router = useRouter();
   const palette = usePalette();
   const { code } = useLocalSearchParams<{ code: string }>();
   const person = usePerson();
   const measurements = useMeasurements(person.data?.id);
   const hidden = useHiddenMeasurements(person.data?.id);
-  const save = useSaveMeasurement();
   const measurement = measurements.data?.find((one) => one.code === code);
-
-  const add = () =>
-    router.push(`/health/measurements/form?code=${encodeURIComponent(code)}` as Href);
 
   const header = (
     <Stack.Screen
       options={{
         title: measurement?.name_ru ?? code,
         headerLargeTitle: false,
-        headerRight: () => (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={t("measurements.addMeasurement")}
-            hitSlop={space.sm}
-            onPress={add}
-          >
-            <Icon icon={Plus} size={24} tone="foreground" />
-          </Pressable>
-        ),
       }}
     />
   );
@@ -79,37 +54,6 @@ export default function MeasurementScreen() {
   const unit = measurement.unit_ru;
   const trend = trendPercent(measurement.history);
   const newestFirst = [...measurement.history].reverse();
-
-  const remove = (point: MeasurementHistoryPoint) =>
-    Alert.alert(t("measurements.deleteTitle"), t("measurements.deleteMessage"), [
-      { text: t("common.cancel"), style: "cancel" },
-      {
-        text: t("common.delete"),
-        style: "destructive",
-        onPress: () => save.mutate({ id: point.id, remove: true }),
-      },
-    ]);
-
-  const more = (point: MeasurementHistoryPoint) => {
-    const labels = [t("common.edit"), t("common.delete"), t("common.cancel")];
-    ActionSheetIOS.showActionSheetWithOptions(
-      {
-        title: `${formatValue(point.value, 2)} ${unit} · ${formatMoment(point.measured_at)}`,
-        options: labels,
-        destructiveButtonIndex: 1,
-        cancelButtonIndex: 2,
-      },
-      (index) => {
-        if (index === 0) {
-          router.push(
-            `/health/measurements/form?code=${encodeURIComponent(code)}&entry=${point.id}` as Href,
-          );
-        } else if (index === 1) {
-          setTimeout(() => remove(point), SHEET_DISMISS_MS);
-        }
-      },
-    );
-  };
 
   return (
     <>
@@ -193,19 +137,16 @@ export default function MeasurementScreen() {
             {t("measurements.historyTitle")}
           </Text>
           {newestFirst.map((point) => (
-            <Pressable
+            <View
               key={point.id}
-              accessibilityRole="button"
               accessibilityLabel={`${formatMoment(point.measured_at)} ${formatValue(point.value, 2)}`}
-              onPress={() => more(point)}
-              style={({ pressed }) => ({
+              style={{
                 flexDirection: "row",
                 alignItems: "center",
                 gap: space.sm,
                 padding: space.sm,
                 borderRadius: radius.sm,
-                backgroundColor: pressed ? palette.mutedHalf : "transparent",
-              })}
+              }}
             >
               <View style={{ flex: 1, gap: 2 }}>
                 <Text size="sm">{formatMoment(point.measured_at)}</Text>
@@ -219,11 +160,9 @@ export default function MeasurementScreen() {
                 {formatValue(point.value, 2)}
                 {unit ? <Text tone="mutedForeground"> {unit}</Text> : null}
               </Text>
-              <Icon icon={MoreHorizontal} />
-            </Pressable>
+            </View>
           ))}
         </Card>
-        <Button variant="outline" label={t("measurements.addMeasurement")} onPress={add} />
       </ScrollView>
     </>
   );

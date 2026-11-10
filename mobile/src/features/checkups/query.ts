@@ -4,13 +4,9 @@ import type {
   CheckupItem,
   CheckupItemStatus,
 } from "@orbit-types/checkup";
-import type { checkupColumns } from "@orbit-types/checkup-form";
 import { rowToCheckupCompletion, rowToCheckupItem } from "@orbit-types/checkup-summary";
-import type { Database } from "@db";
 import { t } from "@/lib/i18n";
 import { supabase } from "@/lib/supabase";
-
-type CheckupRow = Database["public"]["Tables"]["checkup_items"];
 
 function check<T>({ data, error }: { data: T; error: { message: string } | null }): T {
   if (error) throw new Error(error.message);
@@ -71,20 +67,6 @@ export async function completeCheckup(item: CheckupItem, completion: Completion)
   }
 }
 
-/** The day an active checkup is planned for, or none. */
-export async function planCheckup(id: string, plannedOn: string | null): Promise<void> {
-  const row = check(
-    await supabase
-      .from("checkup_items")
-      .update({ planned_on: plannedOn })
-      .eq("id", id)
-      .eq("status", "active")
-      .select("id")
-      .maybeSingle(),
-  );
-  if (!row) throw new Error(t("common.noResults"));
-}
-
 async function setPlannedOn(id: string, plannedOn: string | null): Promise<void> {
   check(await supabase.from("checkup_items").update({ planned_on: plannedOn }).eq("id", id));
 }
@@ -128,21 +110,5 @@ export async function setCheckupStatus(
     status
       ? await supabase.from("checkup_items").update({ status }).eq("id", id)
       : await supabase.from("checkup_items").delete().eq("id", id),
-  );
-}
-
-/** Create a checkup for the person, or update the one with `id`, from the form's columns. */
-export async function saveCheckup(
-  personId: string,
-  id: string | undefined,
-  columns: ReturnType<typeof checkupColumns>,
-): Promise<void> {
-  // The schedule and links are the shared form's typed shapes of the jsonb columns.
-  const row = { person_id: personId, ...columns } as unknown as CheckupRow["Insert"];
-  check(
-    id
-      ? await supabase.from("checkup_items").update(row).eq("id", id)
-      : // The database's default, said here so the list shows the new one as it will be.
-        await supabase.from("checkup_items").insert({ ...row, status: "active" }),
   );
 }

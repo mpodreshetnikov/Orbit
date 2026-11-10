@@ -24,14 +24,6 @@ export const RECORD_TYPES: RecordType[] = [
   "other",
 ];
 
-/** What the phone edits on a record: the web record page's details, nothing it extracted. */
-export interface RecordDetails {
-  title: string;
-  record_type: RecordType;
-  record_date: string | null;
-  notes: string | null;
-}
-
 function check<T>({ data, error }: { data: T; error: { message: string } | null }): T {
   if (error) throw new Error(error.message);
   return data;
@@ -114,8 +106,4 @@ export async function fetchRecordObservations(
 export async function fetchRecordFindings(recordId: string): Promise<RecordFindingWithCatalog[]> {
   const rows = check(await supabase.rpc("get_record_findings", { p_record_id: recordId }));
   return (rows ?? []) as RecordFindingWithCatalog[];
-}
-
-export async function saveRecord(id: string, details: RecordDetails): Promise<void> {
-  check(await supabase.from("medical_records").update(details).eq("id", id));
 }
