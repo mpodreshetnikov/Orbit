@@ -17,8 +17,9 @@ name: Документы
 - assertVisible: "Диагнозы"
 - assertVisible: "Находки"
 - assertVisible: "Чек-апы"
-# Compact hub rows keep mark-done on the first screen with the checkup titles.
-- assertVisible: "Отметить выполненным"
+# Compact hub rows keep mark-done on the first screen; a11y label is
+# «Отметить выполненным: <title>» (Maestro matches the whole string — use a prefix).
+- assertVisible: "Отметить выполненным: .*"
 - takeScreenshot: documents-01-checkups-compact
 # Secondary charts sit below the checkup strip; after earlier flows mutate due dates the
 # hub grows and this header leaves the first screen / a11y tree until scrolled.
