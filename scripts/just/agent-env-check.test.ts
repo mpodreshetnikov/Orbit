@@ -53,6 +53,24 @@ function homeFromDocumentedBlock(bridge = BRIDGE) {
   return home;
 }
 
+/**
+ * The settings the documented Codex setup-script block writes, read from the document.
+ * Codex uses the same bridge file as Claude; only the destination path differs.
+ */
+function homeFromDocumentedCodexBlock(bridge = BRIDGE) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-env-check-codex-ok-"));
+  temporaries.push(home);
+  const doc = fs.readFileSync(DOC, "utf8");
+  const json = /cat > ~\/\.codex\/hooks\.json <<'JSON'\n([\s\S]*?)\nJSON\n/.exec(doc)?.[1];
+  expect(json).toBeTruthy();
+  const settings = JSON.parse(
+    (json as string).replaceAll("/home/user/Orbit/scripts/just/project-hooks-bridge.cjs", bridge),
+  );
+  fs.mkdirSync(path.join(home, ".codex"));
+  fs.writeFileSync(path.join(home, ".codex", "hooks.json"), JSON.stringify(settings));
+  return home;
+}
+
 function cursorRepoWithGitHooks() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-env-check-cursor-repo-"));
   temporaries.push(root);
@@ -216,6 +234,68 @@ describe("the check", () => {
     const result = check({ env: {}, home: "/nonexistent" });
     expect(result.ok).toBe(true);
     expect(result.message).toContain("not a cloud session");
+  });
+
+  it("refuses an unknown agent harness fail-closed (no silent pass)", () => {
+    for (const env of [
+      { OPENCODE: "1", AGENT: "1" },
+      { PI_CODING_AGENT: "true", AI_AGENT: "pi" },
+      { AI_AGENT: "some-new-harness_1-0" },
+      { AGENT: "1" },
+    ]) {
+      const result = check({ env, home: "/nonexistent" });
+      expect(result.ok).toBe(false);
+      expect(result.message).toContain("REFUSED");
+      expect(result.message).toMatch(/unknown|unsupported/i);
+      expect(result.message).toContain("docs/AGENT_ENVIRONMENT.md");
+      expect(result.message).toMatch(/Claude|Cursor|Codex/);
+    }
+  });
+
+  it("refuses a Codex session until hooks.json routes the bridge", () => {
+    // Scratch checkout: no project .codex/hooks.json and empty HOME — must REFUSE.
+    const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-env-check-codex-repo-"));
+    temporaries.push(repoRoot);
+    fs.mkdirSync(path.join(repoRoot, ".claude"), { recursive: true });
+    fs.copyFileSync(
+      path.join(ORBIT_ROOT, ".claude", "settings.json"),
+      path.join(repoRoot, ".claude", "settings.json"),
+    );
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-env-check-codex-"));
+    temporaries.push(home);
+    const result = check({
+      env: { CODEX_THREAD_ID: "thread-test" },
+      home,
+      repoRoot,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("REFUSED");
+    expect(result.message).toMatch(/Codex|codex/);
+    expect(result.message).toContain("docs/AGENT_ENVIRONMENT.md");
+    expect(result.message).toContain("project-hooks-bridge.cjs");
+  });
+
+  it("passes a Codex session whose environment ran the documented Codex block", () => {
+    // Scratch tree without project .codex/hooks.json so only the documented user block counts.
+    const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-env-check-codex-pass-"));
+    temporaries.push(repoRoot);
+    fs.mkdirSync(path.join(repoRoot, ".claude"), { recursive: true });
+    fs.mkdirSync(path.join(repoRoot, "scripts", "just"), { recursive: true });
+    fs.copyFileSync(
+      path.join(ORBIT_ROOT, ".claude", "settings.json"),
+      path.join(repoRoot, ".claude", "settings.json"),
+    );
+    fs.copyFileSync(BRIDGE, path.join(repoRoot, "scripts", "just", "project-hooks-bridge.cjs"));
+    const home = homeFromDocumentedCodexBlock(
+      path.join(repoRoot, "scripts", "just", "project-hooks-bridge.cjs"),
+    );
+    expect(check({ env: { CODEX_CI: "1" }, home, repoRoot }).ok).toBe(true);
+  });
+
+  it("passes a Codex session when the shipped project .codex/hooks.json covers the bridge", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-env-check-codex-project-"));
+    temporaries.push(home);
+    expect(check({ env: { CODEX_SANDBOX: "seatbelt" }, home, repoRoot: ORBIT_ROOT }).ok).toBe(true);
   });
 
   it("exits 1 on a Claude refusal, which is what CLAUDE.md and tasks-claim stop on", () => {

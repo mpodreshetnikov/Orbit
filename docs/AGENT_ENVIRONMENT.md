@@ -3,16 +3,22 @@
 What a cloud environment that runs agents on Orbit must carry, why, and how a session proves it does.
 An agent session that fails the check below changes nothing in this repository.
 
+Supported recipes today: **Claude Code**, **Cursor**, and **Codex**. Any other agent harness is
+**fail-closed** (`REFUSED`) — Orbit does not silently pass an unknown agent. Agents must not edit
+the Cursor Dashboard / `environment.json`; the environment owner applies the recipes below.
+
 ## New developer checklist
 
-| Surface                                            | Out of the box after cloning Orbit                                                                                                           | Manual once                                                                                                                                                                                       |
-| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Claude Code **local** (open the Orbit checkout)    | Project hooks from [`.claude/settings.json`](../.claude/settings.json)                                                                       | `just git-hooks-install` so commit/push run [`.githooks`](../.githooks)                                                                                                                           |
-| Claude Code **cloud**                              | Needs the Claude block below in the cloud environment Setup / install script                                                                 | Paste that block (or keep the Orbit project's Claude env that already has it)                                                                                                                     |
-| Cursor Cloud (shared Orbit env or a personal copy) | After this repository's Cursor bridge is on the branch the env checks out: [`.cursor/hooks.json`](../.cursor/hooks.json) loads automatically | Owner of the Cursor environment must add `bash /agent/repos/Orbit/scripts/cloud/configure-cursor-agent-hooks.sh` to **Install and Start** (see Cursor Cloud setup). Agents cannot change that UI. |
-| Cursor **local / desktop**                         | [`.cursor/hooks.json`](../.cursor/hooks.json) loads from the project                                                                         | `just git-hooks-install` for git gates; caveman/`sessionStart` works on desktop (not on managed Cloud)                                                                                            |
+| Surface                                             | Out of the box after cloning Orbit                                                                                                           | Manual once                                                                                                                                                                                       |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code **local** (open the Orbit checkout)     | Project hooks from [`.claude/settings.json`](../.claude/settings.json)                                                                       | `just git-hooks-install` so commit/push run [`.githooks`](../.githooks)                                                                                                                           |
+| Claude Code **cloud**                               | Needs the Claude block below in the cloud environment Setup / install script                                                                 | Paste that block (or keep the Orbit project's Claude env that already has it)                                                                                                                     |
+| Cursor Cloud (shared Orbit env or a personal copy)  | After this repository's Cursor bridge is on the branch the env checks out: [`.cursor/hooks.json`](../.cursor/hooks.json) loads automatically | Owner of the Cursor environment must add `bash /agent/repos/Orbit/scripts/cloud/configure-cursor-agent-hooks.sh` to **Install and Start** (see Cursor Cloud setup). Agents cannot change that UI. |
+| Cursor **local / desktop**                          | [`.cursor/hooks.json`](../.cursor/hooks.json) loads from the project                                                                         | `just git-hooks-install` for git gates; caveman/`sessionStart` works on desktop (not on managed Cloud)                                                                                            |
+| Codex **local / cloud**                             | Project [`.codex/hooks.json`](../.codex/hooks.json) when the project layer is trusted                                                        | Trust the project hooks in Codex `/hooks`, **or** paste the Codex user block below into the env setup; also `just git-hooks-install`                                                              |
+| Any other agent (OpenCode, pi, novel `AI_AGENT`, …) | —                                                                                                                                            | **Not supported.** `agent-env-check` refuses. Use Claude, Cursor, or Codex with a recipe above.                                                                                                   |
 
-Prove any cloud session with `node scripts/just/agent-env-check.cjs` — `REFUSED` names the missing piece and the script to add.
+Prove any agent/cloud session with `node scripts/just/agent-env-check.cjs` — `REFUSED` names the missing piece and the script to add.
 
 ## Why
 
@@ -21,12 +27,13 @@ task stands behind, the size hook warns before a branch outgrows review, caveman
 session start where the harness can fire it, and git hooks run the claim check on commit and the
 registry / size gates on push.
 
-Two cloud surfaces need that machinery wired differently:
+Three supported surfaces need that machinery wired differently:
 
-| Surface                                                     | How hooks load                                                                                                                                                     | Git hooks                                                       |
-| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------- |
-| Claude Code (`CLAUDE_CODE_REMOTE=true`)                     | `~/.claude/settings.json` → [`project-hooks-bridge.cjs`](../scripts/just/project-hooks-bridge.cjs) → [`.claude/settings.json`](../.claude/settings.json)           | Global `~/.git-hooks` dispatcher → `.githooks/pre-commit`       |
-| Cursor Cloud (`CURSOR_AGENT=1` / `CURSOR_CODE_REMOTE=true`) | [`.cursor/hooks.json`](../.cursor/hooks.json) → [`cursor-hooks-bridge.cjs`](../scripts/just/cursor-hooks-bridge.cjs) → same Claude settings via the project bridge | Cursor's `~/.cursor/agent-hooks/<id>/` dispatcher → `.githooks` |
+| Surface                                                                       | How hooks load                                                                                                                                                              | Git hooks                                                       |
+| ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| Claude Code (`CLAUDE_CODE_REMOTE=true`)                                       | `~/.claude/settings.json` → [`project-hooks-bridge.cjs`](../scripts/just/project-hooks-bridge.cjs) → [`.claude/settings.json`](../.claude/settings.json)                    | Global `~/.git-hooks` dispatcher → `.githooks/pre-commit`       |
+| Cursor Cloud (`CURSOR_AGENT=1` / `CURSOR_CODE_REMOTE=true`)                   | [`.cursor/hooks.json`](../.cursor/hooks.json) → [`cursor-hooks-bridge.cjs`](../scripts/just/cursor-hooks-bridge.cjs) → same Claude settings via the project bridge          | Cursor's `~/.cursor/agent-hooks/<id>/` dispatcher → `.githooks` |
+| Codex (`CODEX_THREAD_ID` / `CODEX_CI` / `CODEX_SANDBOX` / `CODEX_SESSION_ID`) | `~/.codex/hooks.json` and/or trusted [`.codex/hooks.json`](../.codex/hooks.json) → [`project-hooks-bridge.cjs`](../scripts/just/project-hooks-bridge.cjs) → Claude settings | `just git-hooks-install` → `.githooks`                          |
 
 A Claude cloud session holding several repositories (every Orbit project thread with Orbit and
 `orbit-tasks` side by side) starts in the parent directory and loads hooks from neither repository.
@@ -122,6 +129,46 @@ bash /agent/repos/Orbit/scripts/cloud/configure-cursor-agent-hooks.sh
 | `sessionStart` / caveman                                                   | **No** on managed Cloud              | Cursor defers it while early turns can be read-only; wired in `.cursor/hooks.json` for desktop / self-hosted pools. Documented gap: caveman does not auto-enable on managed Cloud the way Claude `SessionStart` does. |
 | `sessionEnd`, MCP before/after, Tab hooks, `workspaceOpen`                 | No                                   | Not required for the safety gates                                                                                                                                                                                     |
 
+## Codex setup
+
+Codex loads lifecycle hooks from `~/.codex/hooks.json` and, when the project layer is trusted, from
+[`.codex/hooks.json`](../.codex/hooks.json). Both forms call the same
+[`project-hooks-bridge.cjs`](../scripts/just/project-hooks-bridge.cjs) Claude Code uses, so claim /
+size / caveman stay one list in [`.claude/settings.json`](../.claude/settings.json).
+
+**Local / trusted project.** After cloning Orbit, open Codex `/hooks`, review and trust the shipped
+project hooks, then run `just git-hooks-install`.
+
+**Cloud / user layer.** When the project `.codex/` layer is not trusted (or the session starts above
+the clone), put this in the environment Setup / install script. Path assumes `/home/user/Orbit` —
+adjust if the clone lives elsewhere. Agents must not write this file only for one session to paper
+over a missing environment setup.
+
+```sh
+# Codex hooks: every Orbit safety event routed through Orbit's bridge.
+mkdir -p ~/.codex
+cat > ~/.codex/hooks.json <<'JSON'
+{"hooks": {
+  "SessionStart": [{"hooks": [{"type": "command", "timeout": 600, "command": "f=/home/user/Orbit/scripts/just/project-hooks-bridge.cjs; [ -f \"$f\" ] && PROJECT_HOOKS_BRIDGE_FORCE=1 exec node \"$f\"; exit 0"}]}],
+  "SessionEnd": [{"hooks": [{"type": "command", "timeout": 600, "command": "f=/home/user/Orbit/scripts/just/project-hooks-bridge.cjs; [ -f \"$f\" ] && PROJECT_HOOKS_BRIDGE_FORCE=1 exec node \"$f\"; exit 0"}]}],
+  "UserPromptSubmit": [{"hooks": [{"type": "command", "timeout": 600, "command": "f=/home/user/Orbit/scripts/just/project-hooks-bridge.cjs; [ -f \"$f\" ] && PROJECT_HOOKS_BRIDGE_FORCE=1 exec node \"$f\"; exit 0"}]}],
+  "PreToolUse": [{"hooks": [{"type": "command", "timeout": 600, "command": "f=/home/user/Orbit/scripts/just/project-hooks-bridge.cjs; [ -f \"$f\" ] && PROJECT_HOOKS_BRIDGE_FORCE=1 exec node \"$f\"; exit 0"}]}],
+  "PermissionRequest": [{"hooks": [{"type": "command", "timeout": 600, "command": "f=/home/user/Orbit/scripts/just/project-hooks-bridge.cjs; [ -f \"$f\" ] && PROJECT_HOOKS_BRIDGE_FORCE=1 exec node \"$f\"; exit 0"}]}],
+  "PostToolUse": [{"hooks": [{"type": "command", "timeout": 600, "command": "f=/home/user/Orbit/scripts/just/project-hooks-bridge.cjs; [ -f \"$f\" ] && PROJECT_HOOKS_BRIDGE_FORCE=1 exec node \"$f\"; exit 0"}]}],
+  "PostToolUseFailure": [{"hooks": [{"type": "command", "timeout": 600, "command": "f=/home/user/Orbit/scripts/just/project-hooks-bridge.cjs; [ -f \"$f\" ] && PROJECT_HOOKS_BRIDGE_FORCE=1 exec node \"$f\"; exit 0"}]}],
+  "Notification": [{"hooks": [{"type": "command", "timeout": 600, "command": "f=/home/user/Orbit/scripts/just/project-hooks-bridge.cjs; [ -f \"$f\" ] && PROJECT_HOOKS_BRIDGE_FORCE=1 exec node \"$f\"; exit 0"}]}],
+  "Stop": [{"hooks": [{"type": "command", "timeout": 600, "command": "f=/home/user/Orbit/scripts/just/project-hooks-bridge.cjs; [ -f \"$f\" ] && PROJECT_HOOKS_BRIDGE_FORCE=1 exec node \"$f\"; exit 0"}]}],
+  "SubagentStop": [{"hooks": [{"type": "command", "timeout": 600, "command": "f=/home/user/Orbit/scripts/just/project-hooks-bridge.cjs; [ -f \"$f\" ] && PROJECT_HOOKS_BRIDGE_FORCE=1 exec node \"$f\"; exit 0"}]}],
+  "PreCompact": [{"hooks": [{"type": "command", "timeout": 600, "command": "f=/home/user/Orbit/scripts/just/project-hooks-bridge.cjs; [ -f \"$f\" ] && PROJECT_HOOKS_BRIDGE_FORCE=1 exec node \"$f\"; exit 0"}]}]
+}}
+JSON
+```
+
+`PROJECT_HOOKS_BRIDGE_FORCE=1` keeps the bridge running when a harness has already pointed
+`CLAUDE_PROJECT_DIR` at this checkout (same reason the Cursor adapter forces a run). Trust new or
+changed hooks in Codex `/hooks` after the file is written. Git gates: `just git-hooks-install` (or
+the same global `~/.git-hooks` dispatcher the Claude block installs).
+
 ## The check
 
 ```sh
@@ -133,7 +180,13 @@ node scripts/just/agent-env-check.cjs
 - Cursor cloud (`CURSOR_AGENT=1` or `CURSOR_CODE_REMOTE=true`): passes only when `.cursor/hooks.json`
   routes the required events through `cursor-hooks-bridge.cjs` **and** the agent-hooks git chain
   points at `.githooks` with a `pre-push` entry.
-- Otherwise it passes and says it is not a cloud session.
+- Codex (`CODEX_THREAD_ID` / `CODEX_CI` / `CODEX_SANDBOX` / `CODEX_SESSION_ID`): passes only when
+  `~/.codex/hooks.json` and/or project `.codex/hooks.json` route every registered event through
+  `project-hooks-bridge.cjs`.
+- Any other detected agent harness (OpenCode, pi, novel `AI_AGENT=…`, bare `AGENT=1`, …):
+  **REFUSED** (fail-closed). Only Claude, Cursor, and Codex have recipes today.
+- Otherwise it passes and says it is not a cloud session (local human / in-checkout Claude or
+  Cursor desktop without cloud markers).
 
 A refusal prints `REFUSED`, names what is missing, and exits 1. It is enforced in three places:
 
@@ -143,5 +196,6 @@ A refusal prints `REFUSED`, names what is missing, and exits 1. It is enforced i
 - The registry's own `tasks-claim` runs the same check against the checkout it arms.
 
 What the refusal asks for is this setup, made by the person who owns the environment. A session that
-rewrites `~/.claude/settings.json` or `~/.cursor/agent-hooks` itself to pass the check has hidden the
-problem from the next session, not fixed it.
+rewrites `~/.claude/settings.json`, `~/.codex/hooks.json`, or `~/.cursor/agent-hooks` itself to pass
+the check has hidden the problem from the next session, not fixed it. Agents must not edit the
+Cursor Dashboard or `environment.json`.

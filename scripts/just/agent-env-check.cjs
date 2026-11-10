@@ -4,15 +4,22 @@
  * Whether this repository's agent hooks reach the session that runs it, and a refusal when they
  * do not.
  *
- * Two cloud surfaces exist:
+ * Supported agent surfaces (each has a recipe in docs/AGENT_ENVIRONMENT.md):
  *
- * - Claude Code (`CLAUDE_CODE_REMOTE=true`): a multi-repo session starts above the clones and loads
- *   no hooks from `.claude/settings.json`. They reach the session only through
- *   `project-hooks-bridge.cjs` registered in `~/.claude/settings.json` (docs/AGENT_ENVIRONMENT.md).
+ * - Claude Code cloud (`CLAUDE_CODE_REMOTE=true`): a multi-repo session starts above the clones and
+ *   loads no hooks from `.claude/settings.json`. They reach the session only through
+ *   `project-hooks-bridge.cjs` registered in `~/.claude/settings.json`.
  * - Cursor Cloud (`CURSOR_AGENT=1` or `CURSOR_CODE_REMOTE=true`): the session loads
  *   `.cursor/hooks.json`. That file must route the safety events through
  *   `cursor-hooks-bridge.cjs`, and Cursor's `~/.cursor/agent-hooks/...` dispatcher must chain this
  *   repository's `.githooks` (T-261106-kp8). Claude Code's setup alone does not cover Cursor.
+ * - Codex (`CODEX_THREAD_ID` / `CODEX_CI` / `CODEX_SANDBOX` / `CODEX_SESSION_ID`): routes the same
+ *   Claude-shaped events through `project-hooks-bridge.cjs` from `~/.codex/hooks.json` (and/or a
+ *   trusted project `.codex/hooks.json`).
+ *
+ * Any other detected agent harness (OpenCode, pi, a novel `AI_AGENT=…`, bare `AGENT=1`, …) is
+ * fail-closed: REFUSED. Orbit does not silently pass an unknown agent that cannot run the gates.
+ * A session with no agent markers is treated as a local human checkout and passes.
  *
  * Exit 1 is a refusal: CLAUDE.md / AGENTS.md tell an agent to stop, and `tasks-claim` refuses to
  * claim anything, so no work in this repository can be started properly without it.
@@ -119,6 +126,51 @@ function isClaudeCloud(env) {
   return env.CLAUDE_CODE_REMOTE === "true";
 }
 
+/** Codex CLI / cloud: any of the harness markers documented for agent detection. */
+function isCodexAgent(env) {
+  return Boolean(
+    env.CODEX_THREAD_ID ||
+    env.CODEX_SESSION_ID ||
+    env.CODEX_CI === "1" ||
+    (typeof env.CODEX_SANDBOX === "string" && env.CODEX_SANDBOX.length > 0),
+  );
+}
+
+/**
+ * Label for a harness that is clearly an agent but not Claude cloud, Cursor, or Codex.
+ * Local Claude (`CLAUDECODE` / `AI_AGENT=claude-code_*` without `CLAUDE_CODE_REMOTE`) is not
+ * unknown: project `.claude/settings.json` loads in-checkout.
+ */
+function unknownAgentLabel(env) {
+  if (isClaudeCloud(env) || isCursorCloud(env) || isCodexAgent(env)) return null;
+  if (env.OPENCODE === "1" || env.AI_AGENT === "opencode") return "OpenCode";
+  if (env.PI_CODING_AGENT === "true" || env.AI_AGENT === "pi") return "pi";
+  if (typeof env.AI_AGENT === "string" && env.AI_AGENT.length > 0) {
+    if (env.AI_AGENT.startsWith("claude-code_")) return null;
+    return env.AI_AGENT;
+  }
+  if (env.AGENT === "1") return "AGENT";
+  return null;
+}
+
+function codexHome(home, env = {}) {
+  return typeof env.CODEX_HOME === "string" && env.CODEX_HOME.length > 0
+    ? path.resolve(env.CODEX_HOME)
+    : path.join(home, ".codex");
+}
+
+/** Merge Codex hook layers: user `~/.codex/hooks.json` plus trusted project `.codex/hooks.json`. */
+function mergeHookSettings(...layers) {
+  const hooks = {};
+  for (const layer of layers) {
+    for (const [event, groups] of Object.entries(layer?.hooks ?? {})) {
+      if (!Array.isArray(groups)) continue;
+      hooks[event] = [...(hooks[event] ?? []), ...groups];
+    }
+  }
+  return { hooks };
+}
+
 /**
  * Cursor `.cursor/hooks.json` must name the Cursor adapter on every required event. Relative
  * commands that mention the bridge script count when the file exists under this repository.
@@ -217,6 +269,47 @@ function checkCursor({ home, repoRoot, exists }) {
   };
 }
 
+/**
+ * Codex reuses the Claude event set via project-hooks-bridge. Coverage may come from user
+ * `~/.codex/hooks.json` and/or project `.codex/hooks.json` (when the project layer is trusted).
+ */
+function checkCodex({ home, repoRoot, exists, env = {} }) {
+  const project = readJson(path.join(repoRoot, ".claude", "settings.json"));
+  const user = readJson(path.join(codexHome(home, env), "hooks.json"));
+  const projectCodex = readJson(path.join(repoRoot, ".codex", "hooks.json"));
+  const missing = missingEvents(project, mergeHookSettings(user, projectCodex), exists);
+  if (missing.length === 0) {
+    return {
+      ok: true,
+      message: "agent-env-check: this repository's Codex hooks reach this session.",
+    };
+  }
+  return {
+    ok: false,
+    message:
+      `agent-env-check: REFUSED. This Codex session does not run this repository's hooks for ` +
+      `${missing.join(", ")}: ~/.codex/hooks.json (and project .codex/hooks.json) do not route ` +
+      `${missing.length === 1 ? "it" : "them"} through scripts/just/${BRIDGE}. The task-claim gate ` +
+      `and every other hook here are silent, so no change to this repository may be made in this ` +
+      `session. Stop, and ask the person to add the Codex block in ${DOC} to the environment setup ` +
+      `(or trust the shipped project .codex/hooks.json), then start a new session. Do not rewrite ` +
+      `~/.codex/hooks.json yourself only for this session: the environment has to carry it.`,
+  };
+}
+
+function checkUnknown(label) {
+  return {
+    ok: false,
+    message:
+      `agent-env-check: REFUSED. Unsupported / unknown agent harness (${label}). Orbit's safety ` +
+      `gates are fail-closed for any agent that is not a documented Claude, Cursor, or Codex recipe ` +
+      `in ${DOC}. The task-claim / size / git push gates would be silent here, so no change to this ` +
+      `repository may be made in this session. Stop. Ask the person to use Claude Code, Cursor, or ` +
+      `Codex with the matching setup in ${DOC} — do not invent a Dashboard / environment.json ` +
+      `workaround from the agent session.`,
+  };
+}
+
 function check({
   env = process.env,
   home = os.homedir(),
@@ -229,10 +322,17 @@ function check({
   if (isCursorCloud(env)) {
     return checkCursor({ home, repoRoot, exists });
   }
+  if (isCodexAgent(env)) {
+    return checkCodex({ home, repoRoot, exists, env });
+  }
+  const unknown = unknownAgentLabel(env);
+  if (unknown) {
+    return checkUnknown(unknown);
+  }
   return {
     ok: true,
     message:
-      "agent-env-check: not a cloud session; Claude hooks load from .claude/settings.json when Claude Code starts in this checkout, and Cursor loads .cursor/hooks.json from the project.",
+      "agent-env-check: not a cloud session; Claude hooks load from .claude/settings.json when Claude Code starts in this checkout, Cursor loads .cursor/hooks.json from the project, and Codex loads ~/.codex/hooks.json / .codex/hooks.json when configured.",
   };
 }
 
@@ -249,8 +349,11 @@ module.exports = {
   cursorRefusalMessage,
   escapeRegExp,
   isClaudeCloud,
+  isCodexAgent,
   isCursorCloud,
+  mergeHookSettings,
   missingCursorEvents,
   missingEvents,
   unbridgeableHooks,
+  unknownAgentLabel,
 };
