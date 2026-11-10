@@ -91,6 +91,11 @@ export interface SpendDraftView {
   merchant_name: string | null;
   comment: string | null;
   lines: SpendDraftLineView[];
+  /**
+   * Edit-only: human-readable field diffs vs the stored transaction (empty when nothing changed).
+   * Create drafts leave this empty — the whole preview is new.
+   */
+  changes: string[];
   /** Opaque payload the card sends back on Confirm, unchanged. */
   input: SpendCreateInput | SpendEditInput;
 }
@@ -276,6 +281,7 @@ export async function buildCreateSpendDraft(
       merchant_name: normalized.merchant_name ?? null,
       comment: normalized.comment ?? null,
       lines: buildLinesView(lines, currency, names),
+      changes: [],
       input: normalized,
     },
   };
@@ -369,6 +375,29 @@ export async function buildEditSpendDraft(
     line_items: serializeLines(lineSource),
   };
 
+  const changes: string[] = [];
+  if (accountId !== existing.account_id) {
+    changes.push(`счёт → ${account.account_label}`);
+  }
+  if (postedAt.toISOString() !== new Date(existing.posted_at).toISOString()) {
+    changes.push(`дата → ${russianDateTime(normalized.posted_at!)}`);
+  }
+  if (amount !== Number(existing.amount) || currency !== existing.currency) {
+    changes.push(`сумма → ${formatMoneyAmount(amount, currency)}`);
+  }
+  if (transactionType !== existing.transaction_type) {
+    changes.push(`тип → ${TYPE_LABELS[transactionType]}`);
+  }
+  if ((merchant ?? null) !== (existing.merchant_name ?? null)) {
+    changes.push(`мерчант → ${merchant ?? "(нет)"}`);
+  }
+  if ((comment ?? null) !== (existing.comment ?? null)) {
+    changes.push(`комментарий → ${comment ?? "(нет)"}`);
+  }
+  if (input.line_items) {
+    changes.push(`строки: ${lines.length} (заданы в предложении)`);
+  }
+
   return {
     ok: true,
     draft: {
@@ -383,6 +412,7 @@ export async function buildEditSpendDraft(
       merchant_name: merchant,
       comment,
       lines: buildLinesView(lines, currency, names),
+      changes,
       input: normalized,
     },
   };
@@ -464,14 +494,19 @@ export async function applySpendDraft(
   };
 }
 
-/** Model-facing summary without amounts (amounts live on the card). */
+/**
+ * Short model-facing lead-in. Figures live in the Markdown preview (and on the card when shown) —
+ * this line stays free of amount numbers so ordinary chat prose does not dump them.
+ */
 export function spendDraftSummaryText(draft: SpendDraftView): string {
   const what = draft.merchant_name ? `"${draft.merchant_name}"` : "a manual spend";
-  const action = draft.mode === "create" ? "create" : "edit";
+  const action = draft.mode === "create" ? "a create" : "an edit";
   return (
-    `Showing a ${action} spend draft for ${draft.person_name} on a card: ${what}` +
+    `Showing ${action} spend draft for ${draft.person_name}: ${what}` +
     ` · ${draft.type_label} · ${draft.posted_at_label} · ${draft.account_label}` +
     (draft.transaction_id ? ` (transaction_id ${draft.transaction_id})` : "") +
-    `. Amount and line items are on the card only. Nothing is saved until the owner presses Confirm; end your turn and wait.`
+    `. Amount and line items are in the Markdown preview below (and on the card when the host shows it).` +
+    ` Nothing is saved until the owner confirms. If the interactive card shows, end your turn and wait;` +
+    ` if it does not, use the text fallback below.`
   );
 }
