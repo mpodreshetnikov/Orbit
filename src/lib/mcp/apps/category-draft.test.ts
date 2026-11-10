@@ -15,8 +15,21 @@ const category = vi.hoisted(() => ({
       `Showing a create category draft for Максим on a card: ${draft.title}`,
   ),
 }));
+const rules = vi.hoisted(() => ({
+  buildCreateRuleDraft: vi.fn(),
+  buildUpdateRuleDraft: vi.fn(),
+  buildDeleteRuleDraft: vi.fn(),
+  buildApplyRulesDraft: vi.fn(),
+  applyRuleDraft: vi.fn(),
+  ruleDraftSummaryText: vi.fn(
+    (draft: { title: string }) =>
+      `Showing a create category rule draft for Максим on a card: ${draft.title}`,
+  ),
+  listMoneyCategoryRules: vi.fn(),
+}));
 
 vi.mock("../money/category-draft", () => category);
+vi.mock("../money/category-rules", () => rules);
 vi.mock("../supabase-user-client", () => ({
   createUserScopedSupabaseClient: vi.fn(() => ({}) as never),
 }));
@@ -98,10 +111,31 @@ beforeEach(() => {
     id: "cccccccc-cccc-cccc-cccc-cccccccccccc",
     label: "Пекарня",
   });
+  rules.buildCreateRuleDraft.mockResolvedValue({
+    ok: true,
+    draft: {
+      mode: "rule_create",
+      person_id: "p-1",
+      person_name: "Максим",
+      title: "Новое правило «Кофе»",
+      summary_lines: ["вид: direct"],
+      input: {
+        name: "Кофе",
+        rule_kind: "direct",
+        target_category_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        sort_order: 1,
+      },
+    },
+  });
+  rules.applyRuleDraft.mockResolvedValue({
+    ok: true,
+    id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    label: "Кофе",
+  });
 });
 
 describe("registerCategoryDraftApp", () => {
-  it("registers the card resource and five tools", () => {
+  it("registers the card resource and category + rule tools", () => {
     const { tools, resources } = register();
     expect(resources.has("orbit-category-draft")).toBe(true);
     expect([...tools.keys()].sort()).toEqual([
@@ -109,6 +143,10 @@ describe("registerCategoryDraftApp", () => {
       "propose_category_create",
       "propose_category_delete",
       "propose_category_rename",
+      "propose_category_rule_create",
+      "propose_category_rule_delete",
+      "propose_category_rule_update",
+      "propose_category_rules_apply",
       "propose_line_recategorize",
     ]);
     expect(tools.get("propose_category_create")!.config._meta).toEqual({
@@ -208,5 +246,60 @@ describe("registerCategoryDraftApp", () => {
       },
     });
     expect(recat.mode).toBe("recategorize");
+    const ruleCreate = confirmCategoryDraftInputSchema.parse({
+      mode: "rule_create",
+      draft: {
+        name: "Кофе",
+        rule_kind: "direct",
+        target_category_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      },
+    });
+    expect(ruleCreate.mode).toBe("rule_create");
+    const ruleApply = confirmCategoryDraftInputSchema.parse({
+      mode: "rule_apply",
+      draft: {
+        line_item_ids: ["cccccccc-cccc-4ccc-8ccc-cccccccccccc"],
+      },
+    });
+    expect(ruleApply.mode).toBe("rule_apply");
+  });
+
+  it("propose_category_rule_create returns Markdown fallback and card payload", async () => {
+    const result = await register().tools.get("propose_category_rule_create")!.handler(
+      {
+        name: "Кофе",
+        rule_kind: "direct",
+        target_category_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      },
+      moneyCtx,
+    );
+    const text = result.content[0].text;
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent?.category_draft).toMatchObject({ mode: "rule_create" });
+    expect(text).toContain("# Новое правило «Кофе»");
+    expect(text).toContain("confirm_category_draft");
+    expect(text).toMatch(/mode=rule_create/);
+    expect(rules.applyRuleDraft).not.toHaveBeenCalled();
+  });
+
+  it("confirm_category_draft applies rule modes with money:write", async () => {
+    const { tools } = register();
+    const confirm = tools.get("confirm_category_draft")!.handler;
+    const saved = await confirm(
+      {
+        person_id: "p-1",
+        mode: "rule_create",
+        draft: {
+          name: "Кофе",
+          rule_kind: "direct",
+          target_category_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          sort_order: 1,
+        },
+      },
+      moneyCtx,
+    );
+    expect(saved.isError).toBeFalsy();
+    expect(rules.applyRuleDraft).toHaveBeenCalledTimes(1);
+    expect(category.applyCategoryDraft).not.toHaveBeenCalled();
   });
 });

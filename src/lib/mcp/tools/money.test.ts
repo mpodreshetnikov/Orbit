@@ -8,10 +8,14 @@ const money = vi.hoisted(() => ({
   listMoneyAccounts: vi.fn(),
   resolveCategoryFilter: vi.fn(),
 }));
+const rules = vi.hoisted(() => ({
+  listMoneyCategoryRules: vi.fn(),
+}));
 const regen = vi.hoisted(() => ({ readTimezonePreference: vi.fn() }));
 const person = vi.hoisted(() => ({ resolvePerson: vi.fn(), listPeople: vi.fn() }));
 
 vi.mock("../money/transactions", () => money);
+vi.mock("../money/category-rules", () => rules);
 vi.mock("@/lib/medications/regenerate-dose-events", () => regen);
 vi.mock("../resolve-person", () => person);
 vi.mock("../supabase-user-client", () => ({
@@ -94,6 +98,26 @@ beforeEach(() => {
   money.listMoneyCategories.mockResolvedValue([]);
   money.listMoneyTransactions.mockResolvedValue({ total: 1, transactions: [TRANSACTION] });
   money.resolveCategoryFilter.mockReturnValue({ ids: ["food", "coffee"], unknown: [] });
+  rules.listMoneyCategoryRules.mockResolvedValue([
+    {
+      id: "r-1",
+      person_id: "p-1",
+      name: "Coffee",
+      description: null,
+      enabled: true,
+      sort_order: 1,
+      rule_kind: "direct",
+      target_category_id: "coffee",
+      match_mode: "all",
+      scope_filter: "all_line_items",
+      filters: [],
+      config: {},
+      stop_processing: false,
+      created_by: null,
+      created_at: "",
+      updated_at: "",
+    },
+  ]);
 });
 
 describe("list_money_transactions", () => {
@@ -332,6 +356,7 @@ describe("the money grant", () => {
       "list_money_transactions",
       "list_money_accounts",
       "list_money_categories",
+      "list_money_category_rules",
     ]) {
       const result = await map.get(name)!({ ...DEFAULTS, include_archived: false }, healthOnly);
       expect(result.isError, name).toBe(true);
@@ -340,5 +365,19 @@ describe("the money grant", () => {
     expect(money.listMoneyTransactions).not.toHaveBeenCalled();
     expect(money.listMoneyAccounts).not.toHaveBeenCalled();
     expect(money.listMoneyCategories).not.toHaveBeenCalled();
+    expect(rules.listMoneyCategoryRules).not.toHaveBeenCalled();
+  });
+});
+
+describe("list_money_category_rules", () => {
+  it("lists rules for the resolved person", async () => {
+    const result = await (await handlers()).get("list_money_category_rules")!({}, ctx);
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toContain("Coffee");
+    expect(result.content[0].text).toContain("direct");
+    expect(result.structuredContent?.rules).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "r-1", name: "Coffee" })]),
+    );
+    expect(rules.listMoneyCategoryRules).toHaveBeenCalledWith(expect.anything(), "p-1");
   });
 });

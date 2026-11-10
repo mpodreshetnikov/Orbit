@@ -64,7 +64,16 @@ export const CATEGORY_DRAFT_HTML = `<!doctype html>
   var draft = null;
   var decision = null;
   var busy = null;
-  var MODE_CHIP = { create: "новая", rename: "правка", delete: "удаление", recategorize: "категория" };
+  var MODE_CHIP = {
+    create: "новая",
+    rename: "правка",
+    delete: "удаление",
+    recategorize: "категория",
+    rule_create: "правило+",
+    rule_update: "правило",
+    rule_delete: "правило−",
+    rule_apply: "применить"
+  };
 
   function send(message) { window.parent.postMessage(message, "*"); }
   function request(method, params, timeoutMs, onLate) {
@@ -171,7 +180,7 @@ export const CATEGORY_DRAFT_HTML = `<!doctype html>
   function draftBody(view) {
     var wrap = document.createDocumentFragment();
     var eye = el("div", "eyebrow");
-    eye.appendChild(el("div", "brand", "Orbit · категории"));
+    eye.appendChild(el("div", "brand", view.mode && String(view.mode).indexOf("rule_") === 0 ? "Orbit · правила" : "Orbit · категории"));
     eye.appendChild(el("span", "chip", MODE_CHIP[view.mode] || view.mode));
     wrap.appendChild(eye);
     wrap.appendChild(el("h1", null, view.title || "Черновик категории"));

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { readTimezonePreference } from "@/lib/medications/regenerate-dose-events";
 import { isValidTimeZone, localDayEndUtc, localDayStartUtc } from "../local-day";
+import { listMoneyCategoryRules } from "../money/category-rules";
 import {
   MONEY_FEED_MAX_LIMIT,
   listMoneyAccounts,
@@ -260,6 +261,35 @@ export function registerMoneyTools(server: McpToolServer): void {
             canonical_key: byId.get(category.canonical_category_id)?.system_key ?? null,
           })),
         },
+      );
+    }, MONEY_READ_SCOPE),
+  );
+
+  server.registerTool(
+    "list_money_category_rules",
+    {
+      title: "List money category rules",
+      description:
+        "List a person's money categorization rules (the Rules page pipeline): kind, enabled, sort order, target category, filters, and config. Use before proposing create/update/delete/apply. Requires money:read.",
+      inputSchema: z.object({ ...personSelectorSchema }),
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    withPerson(async (supabase, person) => {
+      const rules = await listMoneyCategoryRules(supabase, person.id);
+      return ok(
+        summarizeList(
+          `category rules for ${person.name}`,
+          rules.map(
+            (rule) =>
+              `#${rule.sort_order} ${rule.name}` +
+              ` [${rule.rule_kind}${rule.enabled ? "" : ", off"}]` +
+              (rule.target_category_id ? ` → ${rule.target_category_id}` : "") +
+              ` id ${rule.id}`,
+          ),
+          rules.length,
+          100,
+        ),
+        { person, rules },
       );
     }, MONEY_READ_SCOPE),
   );
