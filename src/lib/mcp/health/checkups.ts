@@ -302,16 +302,31 @@ export async function reviewCheckupProposals(
   };
 }
 
+export interface AddProposedCheckupsOptions {
+  /**
+   * Owner notes for a single-item create draft. When set (including empty → null),
+   * written on the insert; when omitted, the usual Claude attribution string is used.
+   */
+  notes?: string | null;
+  /**
+   * Reminder lead days for a single-item create draft. When set (including `[]`),
+   * written on the insert so confirm does not need a post-insert update.
+   */
+  reminder_days_before?: number[];
+}
+
 /** Write the checkups the owner added from the card; `next_due_at` is the insert trigger's. */
 export async function addProposedCheckups(
   supabase: SupabaseClient<Database>,
   personId: string,
   review: CheckupProposalReview,
+  options?: AddProposedCheckupsOptions,
 ): Promise<Array<{ id: string; title: string; next_due_at: string | null }>> {
   if (review.accepted.length === 0) return [];
   const source = review.evidence
     ? `Добавлено из Claude по записи «${review.evidence.title}»${review.evidence.record_date ? ` от ${review.evidence.record_date}` : ""}.`
     : "Добавлено из Claude.";
+  const ownerNotes = options?.notes?.trim() ? options.notes.trim() : null;
   const rows = review.accepted.map(({ input, condition_name }) => ({
     person_id: personId,
     title: input.title.trim(),
@@ -325,7 +340,10 @@ export async function addProposedCheckups(
       input.condition_id && condition_name
         ? [{ type: "condition", id: input.condition_id, label: condition_name }]
         : [],
-    notes: source,
+    notes: ownerNotes ?? source,
+    ...(options?.reminder_days_before !== undefined
+      ? { reminder_days_before: options.reminder_days_before }
+      : {}),
   }));
   const { data, error } = await supabase
     .from("checkup_items")
@@ -424,7 +442,7 @@ export async function latestCompletionDay(
   return doneAt ? String(doneAt).slice(0, 10) : null;
 }
 
-async function completionCount(
+export async function completionCount(
   supabase: SupabaseClient<Database>,
   checkupId: string,
 ): Promise<number> {
