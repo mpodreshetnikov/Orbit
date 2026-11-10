@@ -20,6 +20,7 @@ import {
   buildCreateRuleDraft,
   buildDeleteRuleDraft,
   buildUpdateRuleDraft,
+  MCP_MONEY_RULE_KINDS,
   ruleDraftSummaryText,
   type RuleApplyInput,
   type RuleCreateInput,
@@ -35,13 +36,8 @@ import { MONEY_READ_SCOPE, MONEY_WRITE_SCOPE } from "../tools/scopes";
 import { MCP_APP_MIME_TYPE } from "./probe";
 import { CATEGORY_DRAFT_HTML } from "./category-draft-page";
 
-const RULE_KINDS = [
-  "direct",
-  "mcc_map",
-  "source_category_map",
-  "llm_categorization",
-  "fallback_uncategorized",
-] as const;
+/** Matches DB `money_rule_kind` — no `source_category_map` (not in enum). */
+const RULE_KINDS = MCP_MONEY_RULE_KINDS;
 const RULE_MATCH_MODES = ["all", "any"] as const;
 const RULE_SCOPE_FILTERS = [
   "all_line_items",
@@ -214,8 +210,20 @@ const ruleApplyDraftSchema = z.object({
   transaction_id: uuidSchema.optional(),
   from: z.string().optional().describe("YYYY-MM-DD inclusive start (with to)."),
   to: z.string().optional().describe("YYYY-MM-DD inclusive end (with from)."),
-  rule_ids: z.array(uuidSchema).nullable().optional(),
-  force_overwrite_locked: z.boolean().optional(),
+  // Advertised only so old clients get a clear reject: apply RPCs cannot subset / force-preview.
+  rule_ids: z
+    .array(uuidSchema)
+    .nullable()
+    .optional()
+    .describe(
+      "Unsupported over MCP — omit. Apply RPCs always run all enabled rules; a subset would not match confirm.",
+    ),
+  force_overwrite_locked: z
+    .boolean()
+    .optional()
+    .describe(
+      "Unsupported when true over MCP — omit or false. Preview RPC always uses force=false.",
+    ),
 });
 
 export const confirmCategoryDraftInputSchema = z.discriminatedUnion("mode", [
@@ -452,7 +460,7 @@ export function registerCategoryDraftApp(
     {
       title: "Propose applying category rules",
       description:
-        "Propose replaying the Rules page categorization pipeline on existing line items, with a preview of how many would change and sample before→after. Target exactly one of: line_item_ids, transaction_id, or from+to (YYYY-MM-DD). Uses money_preview_category_rule_pipeline (SQL). Confirm runs money_apply_category_rule_pipeline* — LLM rules are skipped by SQL (same as Rules page without the money-categorize edge); the draft warns when enabled LLM rules are in scope. Showing the preview confirms nothing.",
+        "Propose replaying the Rules page categorization pipeline on existing line items, with a preview of how many would change and sample before→after. Target exactly one of: line_item_ids, transaction_id, or from+to (YYYY-MM-DD). Uses money_preview_category_rule_pipeline (SQL). Confirm runs money_apply_category_rule_pipeline* with the same constraints: all enabled rules, force_overwrite_locked=false (rule_ids subset and force=true are rejected so preview matches confirm). LLM rules are skipped by SQL; the draft warns when enabled LLM rules are in scope. Showing the preview confirms nothing.",
       inputSchema: z.object({
         ...personSelectorSchema,
         ...ruleApplyDraftSchema.shape,

@@ -16,6 +16,12 @@ const category = vi.hoisted(() => ({
   ),
 }));
 const rules = vi.hoisted(() => ({
+  MCP_MONEY_RULE_KINDS: [
+    "direct",
+    "mcc_map",
+    "llm_categorization",
+    "fallback_uncategorized",
+  ] as const,
   buildCreateRuleDraft: vi.fn(),
   buildUpdateRuleDraft: vi.fn(),
   buildDeleteRuleDraft: vi.fn(),

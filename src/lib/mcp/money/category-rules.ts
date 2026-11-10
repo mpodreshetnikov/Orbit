@@ -1,7 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "@/types/database";
 import {
-  MONEY_CATEGORY_RULE_KINDS,
   MONEY_CATEGORY_RULE_MATCH_MODES,
   MONEY_CATEGORY_RULE_SCOPE_FILTERS,
   type MoneyCategoryRule,
@@ -20,9 +19,22 @@ import { rowToMoneyCategoryRule } from "@/types/money-rules";
  * LLM rules (`llm_categorization`) are skipped by those RPCs (they need the
  * money-categorize edge). MCP never invents a second pipeline — if enabled LLM rules
  * are in scope, the draft summary warns that they will not run.
+ *
+ * Preview/confirm parity: apply RPCs hardcode `p_rule_ids=NULL` and preview hardcodes
+ * `force_overwrite_locked=false`, so MCP rejects `rule_ids` and `force_overwrite_locked=true`.
  */
 
 type Client = SupabaseClient<Database>;
+
+/** DB `money_rule_kind` enum — do not advertise kinds the insert will reject. */
+export const MCP_MONEY_RULE_KINDS = [
+  "direct",
+  "mcc_map",
+  "llm_categorization",
+  "fallback_uncategorized",
+] as const satisfies readonly MoneyCategoryRuleKind[];
+
+export type McpMoneyRuleKind = (typeof MCP_MONEY_RULE_KINDS)[number];
 
 export type RuleDraftMode = "rule_create" | "rule_update" | "rule_delete" | "rule_apply";
 
@@ -31,7 +43,7 @@ export interface RuleCreateInput {
   description?: string | null;
   enabled?: boolean;
   sort_order?: number;
-  rule_kind: MoneyCategoryRuleKind;
+  rule_kind: McpMoneyRuleKind;
   target_category_id?: string | null;
   match_mode?: MoneyCategoryRuleMatchMode;
   scope_filter?: MoneyCategoryRuleScopeFilter;
@@ -46,7 +58,7 @@ export interface RuleUpdateInput {
   description?: string | null;
   enabled?: boolean;
   sort_order?: number;
-  rule_kind?: MoneyCategoryRuleKind;
+  rule_kind?: McpMoneyRuleKind;
   target_category_id?: string | null;
   match_mode?: MoneyCategoryRuleMatchMode;
   scope_filter?: MoneyCategoryRuleScopeFilter;
@@ -65,8 +77,15 @@ export interface RuleApplyInput {
   transaction_id?: string;
   from?: string;
   to?: string;
-  /** Optional subset of rules (SQL RPC `p_rule_ids` on preview; apply uses enabled set / all). */
+  /**
+   * Not supported over MCP: preview can subset via `p_rule_ids`, but apply RPCs always
+   * pass NULL (all enabled). Rejected when non-empty so preview matches confirm.
+   */
   rule_ids?: string[] | null;
+  /**
+   * Not supported over MCP: preview RPC hardcodes force=false while apply can force.
+   * Rejected when true so preview matches confirm.
+   */
   force_overwrite_locked?: boolean;
 }
 
@@ -90,8 +109,8 @@ function nextUtcDateString(isoDate: string): string {
   return next.toISOString().slice(0, 10);
 }
 
-function isRuleKind(value: string): value is MoneyCategoryRuleKind {
-  return (MONEY_CATEGORY_RULE_KINDS as readonly string[]).includes(value);
+function isRuleKind(value: string): value is McpMoneyRuleKind {
+  return (MCP_MONEY_RULE_KINDS as readonly string[]).includes(value);
 }
 
 function isMatchMode(value: string): value is MoneyCategoryRuleMatchMode {
@@ -162,6 +181,34 @@ async function countEnabledLlmRules(
   return count ?? 0;
 }
 
+function formatFilterPredicate(filter: unknown): string {
+  if (!filter || typeof filter !== "object") return String(filter);
+  const row = filter as MoneyCategoryRuleFilter;
+  const field = row.field || "?";
+  const operator = row.operator || "?";
+  if (row.values && row.values.length > 0) {
+    return `${field} ${operator} [${row.values.join(", ")}]`;
+  }
+  if (row.min != null || row.max != null) {
+    return `${field} ${operator} ${row.min ?? "…"}…${row.max ?? "…"}`;
+  }
+  if (row.value === undefined || row.value === null) {
+    return `${field} ${operator}`;
+  }
+  return `${field} ${operator} ${JSON.stringify(row.value)}`;
+}
+
+function formatConfigLines(config: Record<string, unknown> | undefined): string[] {
+  if (!config || Object.keys(config).length === 0) return [];
+  return Object.entries(config).map(([key, value]) => {
+    const rendered =
+      typeof value === "string" || typeof value === "number" || typeof value === "boolean"
+        ? String(value)
+        : JSON.stringify(value);
+    return `config.${key}: ${rendered}`;
+  });
+}
+
 function summarizeRule(rule: {
   name: string;
   rule_kind: string;
@@ -172,7 +219,9 @@ function summarizeRule(rule: {
   stop_processing: boolean;
   target_category_id?: string | null;
   filters?: unknown[];
+  config?: Record<string, unknown>;
 }): string[] {
+  const filters = Array.isArray(rule.filters) ? rule.filters : [];
   const lines = [
     `вид: ${rule.rule_kind}`,
     `порядок: ${rule.sort_order}`,
@@ -180,11 +229,22 @@ function summarizeRule(rule: {
     `scope: ${rule.scope_filter}`,
     `match: ${rule.match_mode}`,
     rule.stop_processing ? "stop_processing: да" : "stop_processing: нет",
-    `фильтров: ${Array.isArray(rule.filters) ? rule.filters.length : 0}`,
   ];
   if (rule.target_category_id) {
     lines.push(`target_category_id: ${rule.target_category_id}`);
   }
+  if (filters.length === 0) {
+    lines.push("фильтры: (нет)");
+  } else {
+    lines.push(`фильтры (${filters.length}):`);
+    for (const filter of filters.slice(0, 12)) {
+      lines.push(`  ${formatFilterPredicate(filter)}`);
+    }
+    if (filters.length > 12) {
+      lines.push(`  …и ещё ${filters.length - 12}`);
+    }
+  }
+  lines.push(...formatConfigLines(rule.config));
   return lines;
 }
 
@@ -196,7 +256,7 @@ function validateCreateShape(
   if (!isRuleKind(input.rule_kind)) {
     return {
       ok: false,
-      error: `Unknown rule_kind. Use one of: ${MONEY_CATEGORY_RULE_KINDS.join(", ")}.`,
+      error: `Unknown or unsupported rule_kind over MCP. Use one of: ${MCP_MONEY_RULE_KINDS.join(", ")}.`,
     };
   }
   const match_mode = input.match_mode ?? "all";
@@ -256,6 +316,7 @@ export async function buildCreateRuleDraft(
       stop_processing: normalized.stop_processing ?? false,
       target_category_id: normalized.target_category_id,
       filters: normalized.filters,
+      config: normalized.config,
     }),
   ];
   if (targetLabel) summary_lines.push(`категория: ${targetLabel}`);
@@ -294,7 +355,7 @@ export async function buildUpdateRuleDraft(
   if (input.rule_kind !== undefined && !isRuleKind(input.rule_kind)) {
     return {
       ok: false,
-      error: `Unknown rule_kind. Use one of: ${MONEY_CATEGORY_RULE_KINDS.join(", ")}.`,
+      error: `Unknown or unsupported rule_kind over MCP. Use one of: ${MCP_MONEY_RULE_KINDS.join(", ")}.`,
     };
   }
   if (input.match_mode !== undefined && !isMatchMode(input.match_mode)) {
@@ -304,7 +365,13 @@ export async function buildUpdateRuleDraft(
     return { ok: false, error: "Invalid scope_filter." };
   }
 
-  const nextKind = input.rule_kind ?? existing.rule_kind;
+  const nextKind = (input.rule_kind ?? existing.rule_kind) as string;
+  if (!isRuleKind(nextKind)) {
+    return {
+      ok: false,
+      error: `Unsupported rule_kind over MCP. Use one of: ${MCP_MONEY_RULE_KINDS.join(", ")}.`,
+    };
+  }
   const nextTarget =
     input.target_category_id !== undefined ? input.target_category_id : existing.target_category_id;
   if (nextKind === "direct" && !nextTarget) {
@@ -327,6 +394,8 @@ export async function buildUpdateRuleDraft(
     stop_processing: input.stop_processing ?? existing.stop_processing,
   };
 
+  const beforeFilters = (existing.filters ?? []).map(formatFilterPredicate);
+  const afterFilters = (normalized.filters ?? []).map(formatFilterPredicate);
   const summary_lines = [
     `было: ${existing.name} (${existing.rule_kind}, ${existing.enabled ? "on" : "off"}, #${existing.sort_order})`,
     `станет: ${normalized.name} (${normalized.rule_kind}, ${normalized.enabled ? "on" : "off"}, #${normalized.sort_order})`,
@@ -340,8 +409,15 @@ export async function buildUpdateRuleDraft(
       stop_processing: normalized.stop_processing!,
       target_category_id: normalized.target_category_id,
       filters: normalized.filters,
+      config: normalized.config,
     }).slice(2),
   ];
+  if (JSON.stringify(beforeFilters) !== JSON.stringify(afterFilters)) {
+    summary_lines.push(
+      `фильтры было: ${beforeFilters.length ? beforeFilters.join("; ") : "(нет)"}`,
+      `фильтры станет: ${afterFilters.length ? afterFilters.join("; ") : "(нет)"}`,
+    );
+  }
   if (normalized.rule_kind === "llm_categorization") {
     summary_lines.push("LLM-правило: SQL preview/apply его пропускает (нужен money-categorize).");
   }
@@ -532,14 +608,32 @@ export async function buildApplyRulesDraft(
   person: { id: string; name: string },
   input: RuleApplyInput,
 ): Promise<{ ok: true; draft: RuleDraftView } | { ok: false; error: string }> {
+  // Apply RPCs hardcode p_rule_ids=NULL; preview must not advertise a subset it cannot apply.
+  if (input.rule_ids != null && input.rule_ids.length > 0) {
+    return {
+      ok: false,
+      error:
+        "rule_ids is not supported over MCP: money_apply_category_rule_pipeline* always runs all enabled rules (p_rule_ids=NULL), so a subset preview would not match confirm. Omit rule_ids.",
+    };
+  }
+  // Preview RPC hardcodes force_overwrite_locked=false; refuse force so preview matches apply.
+  if (input.force_overwrite_locked === true) {
+    return {
+      ok: false,
+      error:
+        "force_overwrite_locked=true is not supported over MCP: money_preview_category_rule_pipeline always previews with force=false, so confirm would change more than the draft shows. Omit force_overwrite_locked or set false.",
+    };
+  }
+
   const resolved = await resolveApplyLineIds(supabase, person.id, input);
   if (!resolved.ok) return resolved;
 
-  const llmCount = await countEnabledLlmRules(supabase, person.id, input.rule_ids);
+  const llmCount = await countEnabledLlmRules(supabase, person.id, null);
   const previewIds = resolved.lineIds.slice(0, PREVIEW_LINE_CAP);
   const runs: PreviewRun[] = [];
   for (const lineId of previewIds) {
-    runs.push(await previewOneLine(supabase, person.id, lineId, input.rule_ids));
+    // Always preview with null rule_ids — same as apply RPC.
+    runs.push(await previewOneLine(supabase, person.id, lineId, null));
   }
   const wouldChange = runs.filter((run) => run.changed);
   const truncated = resolved.lineIds.length > previewIds.length;
@@ -571,8 +665,7 @@ export async function buildApplyRulesDraft(
     ...(input.line_item_ids?.length ? { line_item_ids: [...new Set(input.line_item_ids)] } : {}),
     ...(input.transaction_id ? { transaction_id: input.transaction_id } : {}),
     ...(input.from && input.to ? { from: input.from, to: input.to } : {}),
-    rule_ids: input.rule_ids ?? null,
-    force_overwrite_locked: input.force_overwrite_locked ?? false,
+    force_overwrite_locked: false,
   };
 
   const summary_lines = [
@@ -580,13 +673,9 @@ export async function buildApplyRulesDraft(
     `превью: ${previewIds.length} строк` +
       (truncated ? ` (из ${resolved.lineIds.length}; остальные не в превью)` : ""),
     `изменится: ${wouldChange.length} из ${previewIds.length} в превью`,
-    normalized.force_overwrite_locked
-      ? "force_overwrite_locked: да (перезапишет ручные)"
-      : "force_overwrite_locked: нет",
+    "force_overwrite_locked: нет (preview и apply совпадают; force через MCP недоступен)",
+    "правила: все enabled (rule_ids subset через MCP недоступен — apply RPC всегда NULL)",
   ];
-  if (input.rule_ids?.length) {
-    summary_lines.push(`только rule_ids: ${input.rule_ids.length}`);
-  }
   if (llmCount > 0) {
     summary_lines.push(
       `внимание: ${llmCount} включённых LLM-правил(а) SQL RPC пропускает — они не применятся через MCP (нужен money-categorize edge, как на Rules page).`,
@@ -621,7 +710,6 @@ export async function applyRuleDraft(
     const built = await buildCreateRuleDraft(supabase, person, input as RuleCreateInput);
     if (!built.ok) return built;
     const create = built.draft.input as RuleCreateInput;
-    // DB enum in generated types lags `source_category_map`; same cast as Rules page hooks.
     type RuleInsert = Database["public"]["Tables"]["money_category_rules"]["Insert"];
     const { data, error } = await supabase
       .from("money_category_rules")
@@ -691,6 +779,7 @@ export async function applyRuleDraft(
   const built = await buildApplyRulesDraft(supabase, person, input as RuleApplyInput);
   if (!built.ok) return built;
   const apply = built.draft.input as RuleApplyInput;
+  // Confirm reuses the same preview/apply constraints (rule_ids / force rejected above).
 
   // Same RPCs as Rules page non-LLM path. When LLM rules are enabled the web UI
   // routes through money-categorize; MCP keeps the SQL path and warned on propose.
@@ -700,7 +789,7 @@ export async function applyRuleDraft(
       {
         p_transaction_id: apply.transaction_id,
         p_person_id: person.id,
-        p_force_overwrite_locked: apply.force_overwrite_locked ?? false,
+        p_force_overwrite_locked: false,
       },
     );
     if (error) return { ok: false, error: error.message };
@@ -721,7 +810,7 @@ export async function applyRuleDraft(
         p_person_id: person.id,
         p_from: apply.from,
         p_to: apply.to,
-        p_force_overwrite_locked: apply.force_overwrite_locked ?? false,
+        p_force_overwrite_locked: false,
       },
     );
     if (error) return { ok: false, error: error.message };
@@ -739,7 +828,7 @@ export async function applyRuleDraft(
   const { data, error } = await supabase.rpc("money_apply_category_rule_pipeline", {
     p_line_item_ids: lineIds,
     p_person_id: person.id,
-    p_force_overwrite_locked: apply.force_overwrite_locked ?? false,
+    p_force_overwrite_locked: false,
     p_trigger_source: "manual_replay",
   });
   if (error) return { ok: false, error: error.message };

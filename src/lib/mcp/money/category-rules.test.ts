@@ -103,6 +103,49 @@ describe("rule CRUD drafts", () => {
     expect(built.ok).toBe(false);
   });
 
+  it("refuses source_category_map (not in DB money_rule_kind)", async () => {
+    const built = await buildCreateRuleDraft(mockClient({}), PERSON, {
+      name: "Mapped",
+      // @ts-expect-error intentional unsupported kind
+      rule_kind: "source_category_map",
+    });
+    expect(built.ok).toBe(false);
+    if (built.ok) return;
+    expect(built.error).toMatch(/unsupported rule_kind|Unknown or unsupported/i);
+  });
+
+  it("summarizes filter predicates and config on create", async () => {
+    const orderCreated = vi.fn().mockResolvedValue({ data: [], error: null });
+    const orderSort = vi.fn(() => ({ order: orderCreated }));
+    const eqPerson = vi.fn(() => ({ order: orderSort }));
+    const selectRules = vi.fn(() => ({ eq: eqPerson }));
+    const maybeSingle = vi.fn().mockResolvedValue({
+      data: { name_ru: "Еда", name_en: "Food", slug: "food" },
+      error: null,
+    });
+    const from = vi.fn((table: string) => {
+      if (table === "money_category_rules") return { select: selectRules };
+      if (table === "money_categories") {
+        return { select: vi.fn(() => ({ eq: vi.fn(() => ({ maybeSingle })) })) };
+      }
+      throw new Error(table);
+    });
+
+    const built = await buildCreateRuleDraft(mockClient({ from }), PERSON, {
+      name: "Coffee",
+      rule_kind: "direct",
+      target_category_id: CAT_ID,
+      filters: [{ field: "merchant_name", operator: "contains", value: "COFFEE" }],
+      config: { note: "seed" },
+    });
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    const text = built.draft.summary_lines.join("\n");
+    expect(text).toContain("merchant_name contains");
+    expect(text).toContain("COFFEE");
+    expect(text).toContain("config.note: seed");
+  });
+
   it("buildUpdateRuleDraft / delete require ownership", async () => {
     const maybeSingle = vi.fn().mockResolvedValue({ data: null, error: null });
     const eqPerson = vi.fn(() => ({ maybeSingle }));
@@ -158,6 +201,37 @@ describe("rule apply preview", () => {
     expect(built.ok).toBe(false);
     if (built.ok) return;
     expect(built.error).toMatch(/exactly one/i);
+  });
+
+  it("rejects rule_ids so preview cannot subset what apply cannot (P1)", async () => {
+    const built = await buildApplyRulesDraft(mockClient({}), PERSON, {
+      line_item_ids: [LINE_ID],
+      rule_ids: [RULE_ID],
+    });
+    expect(built.ok).toBe(false);
+    if (built.ok) return;
+    expect(built.error).toMatch(/rule_ids is not supported/i);
+    expect(built.error).toMatch(/p_rule_ids=NULL|all enabled/i);
+  });
+
+  it("rejects force_overwrite_locked=true because preview hardcodes force=false (P2)", async () => {
+    const built = await buildApplyRulesDraft(mockClient({}), PERSON, {
+      line_item_ids: [LINE_ID],
+      force_overwrite_locked: true,
+    });
+    expect(built.ok).toBe(false);
+    if (built.ok) return;
+    expect(built.error).toMatch(/force_overwrite_locked=true is not supported/i);
+  });
+
+  it("confirm apply also rejects rule_ids (preview/confirm parity)", async () => {
+    const applied = await applyRuleDraft(mockClient({}), PERSON, "rule_apply", {
+      line_item_ids: [LINE_ID],
+      rule_ids: [RULE_ID],
+    });
+    expect(applied.ok).toBe(false);
+    if (applied.ok) return;
+    expect(applied.error).toMatch(/rule_ids is not supported/i);
   });
 
   it("previews line changes via money_preview_category_rule_pipeline", async () => {
