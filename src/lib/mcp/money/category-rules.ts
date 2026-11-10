@@ -306,9 +306,7 @@ export async function buildUpdateRuleDraft(
 
   const nextKind = input.rule_kind ?? existing.rule_kind;
   const nextTarget =
-    input.target_category_id !== undefined
-      ? input.target_category_id
-      : existing.target_category_id;
+    input.target_category_id !== undefined ? input.target_category_id : existing.target_category_id;
   if (nextKind === "direct" && !nextTarget) {
     return { ok: false, error: "direct rules need target_category_id." };
   }
@@ -345,9 +343,7 @@ export async function buildUpdateRuleDraft(
     }).slice(2),
   ];
   if (normalized.rule_kind === "llm_categorization") {
-    summary_lines.push(
-      "LLM-правило: SQL preview/apply его пропускает (нужен money-categorize).",
-    );
+    summary_lines.push("LLM-правило: SQL preview/apply его пропускает (нужен money-categorize).");
   }
 
   return {
@@ -572,9 +568,7 @@ export async function buildApplyRulesDraft(
   });
 
   const normalized: RuleApplyInput = {
-    ...(input.line_item_ids?.length
-      ? { line_item_ids: [...new Set(input.line_item_ids)] }
-      : {}),
+    ...(input.line_item_ids?.length ? { line_item_ids: [...new Set(input.line_item_ids)] } : {}),
     ...(input.transaction_id ? { transaction_id: input.transaction_id } : {}),
     ...(input.from && input.to ? { from: input.from, to: input.to } : {}),
     rule_ids: input.rule_ids ?? null,

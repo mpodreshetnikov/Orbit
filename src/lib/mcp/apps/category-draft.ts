@@ -107,10 +107,9 @@ export function categoryDraftTextFallbackInstructions(view: DraftCardView): stri
 }
 
 function proposeResultText(draft: DraftCardView): string {
-  const summary =
-    draft.mode.startsWith("rule_")
-      ? ruleDraftSummaryText(draft as RuleDraftView)
-      : categoryDraftSummaryText(draft as CategoryDraftView);
+  const summary = draft.mode.startsWith("rule_")
+    ? ruleDraftSummaryText(draft as RuleDraftView)
+    : categoryDraftSummaryText(draft as CategoryDraftView);
   return [
     summary,
     "If the card does not show, use the text fallback below.",
