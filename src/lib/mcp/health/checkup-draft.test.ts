@@ -51,12 +51,13 @@ describe("buildCreateCheckupDraft", () => {
     }
   });
 
-  it("previews and persists explicit empty/null create reminders (not DB default)", async () => {
+  it("puts empty reminders and owner notes on the initial create insert (no post-update)", async () => {
     const empty = {
       title: "УЗИ",
       category: "imaging" as const,
       schedule: { type: "one_off" as const, due_at: "2026-12-01" },
       why: "без напоминаний",
+      notes: "взять направление",
       reminder_days_before: [] as number[],
     };
     const stub = createSupabaseStub({
@@ -65,11 +66,9 @@ describe("buildCreateCheckupDraft", () => {
         { data: [] },
         { data: [] },
         { data: [{ id: "new-1", title: "УЗИ", next_due_at: "2026-12-01" }] },
-        { data: null },
         { data: [] },
         { data: [] },
         { data: [{ id: "new-2", title: "ОАК", next_due_at: "2026-12-01" }] },
-        { data: null },
       ],
     });
     const built = await buildCreateCheckupDraft(stub.client, PERSON, empty);
@@ -79,7 +78,14 @@ describe("buildCreateCheckupDraft", () => {
       expect(built.draft.input.reminder_days_before).toEqual([]);
     }
     expect((await applyCheckupDraft(stub.client, PERSON, "create", empty)).ok).toBe(true);
-    expect(stub.argsFor("checkup_items", "update")[0][0]).toEqual({ reminder_days_before: [] });
+    expect(stub.argsFor("checkup_items", "insert")[0][0]).toEqual([
+      expect.objectContaining({
+        title: "УЗИ",
+        notes: "взять направление",
+        reminder_days_before: [],
+      }),
+    ]);
+    expect(stub.argsFor("checkup_items", "update")).toEqual([]);
 
     expect(
       (
@@ -92,7 +98,10 @@ describe("buildCreateCheckupDraft", () => {
         })
       ).ok,
     ).toBe(true);
-    expect(stub.argsFor("checkup_items", "update")[1][0]).toEqual({ reminder_days_before: [] });
+    expect(stub.argsFor("checkup_items", "insert")[1][0]).toEqual([
+      expect.objectContaining({ title: "ОАК", reminder_days_before: [] }),
+    ]);
+    expect(stub.argsFor("checkup_items", "update")).toEqual([]);
   });
 });
 
@@ -228,6 +237,55 @@ describe("buildEditCheckupDraft / applyCheckupDraft", () => {
     if (due.ok) {
       expect(due.draft.first_due_label).toMatch(/сентября 2026|1 сентября/);
       expect(due.draft.first_due_label).not.toMatch(/июня 2026|20 июня/);
+    }
+  });
+
+  it("target next_due walks from anchor, not last completion", async () => {
+    // Anchor 2026-01-01, every 3 months, done 2026-08-20 → DB stores 2026-10-01 (not Nov 20).
+    const current = item({
+      schedule: {
+        type: "interval",
+        every: 6,
+        unit: "month",
+        anchor_date: "2026-01-01",
+        next_due_from: "target",
+      },
+      next_due_at: "2026-07-01",
+    });
+    const stub = createSupabaseStub({
+      checkup_items: [{ data: current }, { data: { why_text: null, notes: null } }],
+      checkup_completions: [{ data: { done_at: "2026-08-20" } }],
+    });
+    const built = await buildEditCheckupDraft(stub.client, PERSON, {
+      checkup_id: "c-1",
+      schedule: { type: "interval", every: 3, unit: "month", next_due_from: "target" },
+    });
+    expect(built.ok).toBe(true);
+    if (built.ok) {
+      expect(built.draft.first_due_label).toMatch(/1 октября 2026|октября 2026/);
+      expect(built.draft.first_due_label).not.toMatch(/ноября 2026|20 ноября/);
+    }
+  });
+
+  it("one-off due change without completions previews active (DB trigger override)", async () => {
+    const current = item({
+      status: "paused",
+      schedule: { type: "one_off", due_at: "2026-01-01" },
+      next_due_at: "2026-01-01",
+    });
+    const stub = createSupabaseStub({
+      checkup_items: [{ data: current }, { data: { why_text: null, notes: null } }],
+      checkup_completions: [{ count: 0 }],
+    });
+    const built = await buildEditCheckupDraft(stub.client, PERSON, {
+      checkup_id: "c-1",
+      schedule: { type: "one_off", due_at: "2026-12-15" },
+      status: "paused",
+    });
+    expect(built.ok).toBe(true);
+    if (built.ok) {
+      expect(built.draft.status_label).toBe("активен");
+      expect(built.draft.first_due_label).toMatch(/15 декабря 2026|декабря 2026/);
     }
   });
 });

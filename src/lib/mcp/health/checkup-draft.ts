@@ -118,16 +118,41 @@ function remindersLabel(days: number[] | null | undefined): string {
 }
 
 /**
- * Status the card should show for an edit — same reactivation rule as `applyCheckupDraft`
- * (interval write on a completed item becomes active).
+ * Status the card should show for an edit — same DB outcomes as confirm:
+ * - interval write on completed → active (apply reactivation)
+ * - one-off schedule write → active with 0 completions / completed with ≥1
+ *   (`checkup_recompute_next_due_for_item` overrides any requested status)
  */
-function effectiveEditStatus(
+async function effectiveEditStatus(
+  supabase: Client,
   current: CheckupItemSnapshot,
   input: CheckupEditDraftInput,
-): CheckupItemStatus {
+): Promise<CheckupItemStatus> {
+  if (input.schedule?.type === "one_off") {
+    const prior = await completionCount(supabase, current.id);
+    return prior >= 1 ? "completed" : "active";
+  }
   const requested = (input.status ?? current.status) as CheckupItemStatus;
   if (input.schedule?.type === "interval" && requested === "completed") return "active";
   return requested;
+}
+
+/**
+ * Mirror `checkup_recompute_next_due_for_item` target branch: walk occurrences from
+ * `anchor_date` until the first after `latestDone`, then one more interval.
+ */
+function nextDueFromTargetAnchor(
+  every: number,
+  unit: "week" | "month" | "year",
+  anchor: string,
+  latestDone: string,
+): string {
+  let base = anchor;
+  for (;;) {
+    const next = addInterval(base, every, unit);
+    if (next > latestDone) return next;
+    base = next;
+  }
 }
 
 /**
@@ -157,6 +182,13 @@ async function effectiveEditNextDueAt(
     typeof column.anchor_date === "string" && column.anchor_date.length > 0
       ? column.anchor_date
       : null;
+  const nextDueFrom =
+    typeof column.next_due_from === "string" ? column.next_due_from : "completion";
+
+  if (nextDueFrom === "target" && anchor && latestDone) {
+    return nextDueFromTargetAnchor(interval.every, interval.unit, anchor, latestDone);
+  }
+
   const base = latestDone ?? anchor ?? todayUtc();
   return addInterval(base, interval.every, interval.unit);
 }
@@ -337,7 +369,7 @@ export async function buildEditCheckupDraft(
     input.schedule !== undefined
       ? scheduleColumnFromWrite(input.schedule, current.schedule)
       : (current.schedule as ProposedCheckup["schedule"]);
-  const status = effectiveEditStatus(current, input);
+  const status = await effectiveEditStatus(supabase, current, input);
   const reminders =
     input.reminder_days_before !== undefined
       ? (normalizeReminderDays(input.reminder_days_before) ?? [])
@@ -417,33 +449,19 @@ export async function applyCheckupDraft(
       input.evidence_record_id ?? null,
       todayUtc(),
     );
-    const added = await addProposedCheckups(supabase, person.id, review);
+    const reminders = normalizeReminderDays(input.reminder_days_before);
+    // Notes + reminders go on the insert — a post-insert update that fails would leave
+    // an active row and make Confirm unretryable (duplicate title).
+    const added = await addProposedCheckups(supabase, person.id, review, {
+      // null/empty → attribution string inside addProposedCheckups; non-empty → owner text.
+      notes: input.notes?.trim() ? input.notes.trim() : null,
+      ...(reminders !== undefined ? { reminder_days_before: reminders } : {}),
+    });
     if (added.length === 0) {
       const reason = review.refused[0]?.reason ?? "nothing scheduled";
       return { ok: false, error: reason };
     }
     const row = added[0]!;
-    const reminders = normalizeReminderDays(input.reminder_days_before);
-    // Persist whenever the draft set the field — including [] / null → empty, so the
-    // column does not keep the insert default [7].
-    if (reminders !== undefined) {
-      const { error } = await supabase
-        .from("checkup_items")
-        .update({ reminder_days_before: reminders })
-        .eq("id", row.id);
-      if (error) {
-        return { ok: false, error: `Scheduled but failed to set reminders: ${error.message}` };
-      }
-    }
-    if (input.notes?.trim()) {
-      const { error } = await supabase
-        .from("checkup_items")
-        .update({ notes: input.notes.trim() })
-        .eq("id", row.id);
-      if (error) {
-        return { ok: false, error: `Scheduled but failed to set notes: ${error.message}` };
-      }
-    }
     return { ok: true, checkup_id: row.id, title: row.title };
   }
 
