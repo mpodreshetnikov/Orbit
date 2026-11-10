@@ -216,6 +216,29 @@ export async function buildRenameCategoryDraft(
     parent_id: saved.columns.parent_id,
   };
 
+  const oldParent = existing.parent_id ? findCategory(rows, existing.parent_id) : null;
+  const newParent = normalized.parent_id ? findCategory(rows, normalized.parent_id) : null;
+  const oldCanonical = findCategory(rows, existing.canonical_category_id);
+  const newCanonical = findCategory(rows, normalized.canonical_category_id!);
+  const summary_lines = [
+    `было: ${existing.name_ru} / ${existing.name_en} (${existing.slug})`,
+    `станет: ${normalized.name_ru} / ${normalized.name_en} (${normalized.slug})`,
+  ];
+  if ((existing.parent_id ?? null) !== (normalized.parent_id ?? null)) {
+    summary_lines.push(
+      `родитель: ${oldParent ? labelOf(oldParent) : "(корень ветки)"} → ${
+        newParent ? labelOf(newParent) : "(корень ветки)"
+      }`,
+    );
+  }
+  if (existing.canonical_category_id !== normalized.canonical_category_id) {
+    summary_lines.push(
+      `ветка: ${oldCanonical ? labelOf(oldCanonical) : existing.canonical_category_id} → ${
+        newCanonical ? labelOf(newCanonical) : normalized.canonical_category_id
+      }`,
+    );
+  }
+
   return {
     ok: true,
     draft: {
@@ -223,10 +246,7 @@ export async function buildRenameCategoryDraft(
       person_id: person.id,
       person_name: person.name,
       title: `Переименовать «${labelOf(existing)}»`,
-      summary_lines: [
-        `было: ${existing.name_ru} / ${existing.name_en} (${existing.slug})`,
-        `станет: ${normalized.name_ru} / ${normalized.name_en} (${normalized.slug})`,
-      ],
+      summary_lines,
       input: normalized,
     },
   };

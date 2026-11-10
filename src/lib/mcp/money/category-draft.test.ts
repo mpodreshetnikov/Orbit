@@ -245,6 +245,29 @@ describe("category-draft money", () => {
     expect(built.error).toMatch(/Canonical/i);
   });
 
+  it("shows parent and canonical moves in the rename summary", async () => {
+    const sibling = {
+      ...CUSTOM,
+      id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      name_en: "Tea",
+      name_ru: "Чай",
+      slug: "tea",
+      depth: 1,
+    };
+    const built = await buildRenameCategoryDraft(
+      createClient({ categories: [CANON, CUSTOM, sibling] }),
+      PERSON,
+      {
+        category_id: CUSTOM.id,
+        parent_id: sibling.id,
+      },
+    );
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(built.draft.summary_lines.some((line) => line.includes("родитель"))).toBe(true);
+    expect(built.draft.summary_lines.join("\n")).toMatch(/Чай/);
+  });
+
   it("refuses delete when line items still use the category", async () => {
     const built = await buildDeleteCategoryDraft(createClient({ lineCount: 3 }), PERSON, {
       category_id: CUSTOM.id,

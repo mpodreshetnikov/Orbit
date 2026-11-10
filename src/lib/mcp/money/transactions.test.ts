@@ -112,8 +112,22 @@ const feedRow = {
   receipt_request_key: null,
   raw_payload: { operation: { mcc: "5411", merchant: { name: "ВкусВилл" } } },
   line_items: [
-    { title: "Кофе зерновой", amount: -890, quantity: 1, unit: "шт", category_id: "coffee" },
-    { title: "Молоко", amount: -400, quantity: 2, unit: "шт", category_id: null },
+    {
+      id: "li-1",
+      title: "Кофе зерновой",
+      amount: -890,
+      quantity: 1,
+      unit: "шт",
+      category_id: "coffee",
+    },
+    {
+      id: "li-2",
+      title: "Молоко",
+      amount: -400,
+      quantity: 2,
+      unit: "шт",
+      category_id: null,
+    },
   ],
   line_item_titles: ["Кофе зерновой", "Молоко"],
   line_item_count: 2,
@@ -181,11 +195,12 @@ describe("listMoneyTransactions", () => {
     });
     expect(transaction.line_items).toEqual([
       expect.objectContaining({
+        id: "li-1",
         title: "Кофе зерновой",
         amount: -890,
         category: { id: "coffee", name: "Кофе", canonical_key: "food" },
       }),
-      expect.objectContaining({ title: "Молоко", category: null }),
+      expect.objectContaining({ id: "li-2", title: "Молоко", category: null }),
     ]);
     expect(transaction).not.toHaveProperty("bank_operation");
     expect(JSON.stringify(transaction)).not.toContain("1778");

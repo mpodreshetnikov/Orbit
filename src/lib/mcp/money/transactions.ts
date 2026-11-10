@@ -132,6 +132,8 @@ export interface MoneyFeedQuery {
 }
 
 export interface MoneyLineItemView {
+  /** Line id from the feed — needed for propose_line_recategorize. */
+  id: string | null;
   title: string;
   amount: number;
   quantity: number | null;
@@ -189,6 +191,7 @@ function categoryView(
 function lineItemsOf(row: FeedRow, byId: Map<string, MoneyCategory>): MoneyLineItemView[] {
   const raw = Array.isArray(row.line_items) ? (row.line_items as Record<string, unknown>[]) : [];
   return raw.map((item) => ({
+    id: typeof item.id === "string" ? item.id : null,
     title: String(item.title ?? ""),
     amount: Number(item.amount),
     quantity: item.quantity == null ? null : Number(item.quantity),

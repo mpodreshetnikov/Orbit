@@ -29,7 +29,9 @@ vi.mock("../resolve-person", () => ({
 
 import { CATEGORY_DRAFT_HTML } from "./category-draft-page";
 import {
+  categoryDraftTextFallbackInstructions,
   confirmCategoryDraftInputSchema,
+  formatCategoryDraftMarkdown,
   registerCategoryDraftApp,
   CATEGORY_DRAFT_RESOURCE_URI,
 } from "./category-draft";
@@ -126,6 +128,45 @@ describe("registerCategoryDraftApp", () => {
     expect(result.isError).toBeFalsy();
     expect(result.structuredContent?.category_draft).toMatchObject({ mode: "create" });
     expect(category.applyCategoryDraft).not.toHaveBeenCalled();
+  });
+
+  it("puts full Markdown preview and text-fallback instructions in propose content", async () => {
+    const result = await register().tools.get("propose_category_create")!.handler(CREATE, moneyCtx);
+    const text = result.content[0].text;
+    expect(text).toContain("# Новая категория «Пекарня»");
+    expect(text).toMatch(
+      /If (this chat|the host) cannot show|MCP (App|UI)|interactive (view|card)/i,
+    );
+    expect(text).toMatch(/Confirm|Decline/i);
+    expect(text).toMatch(/confirms nothing|changes nothing/i);
+    expect(text).toContain("confirm_category_draft");
+    expect(text).toMatch(/does not verify|not a technical guarantee/i);
+    expect(result.structuredContent?.category_draft).toMatchObject({ mode: "create" });
+  });
+
+  it("requires a shown preview and explicit owner decision in confirm description", () => {
+    const { tools } = register();
+    const confirm = String(tools.get("confirm_category_draft")!.config.description);
+    expect(confirm).toMatch(/explicit/i);
+    expect(confirm).toMatch(/propose_|shown|preview|card/i);
+    expect(confirm).toMatch(/on your own|document|receipt text/i);
+  });
+
+  it("formats Markdown and fallback instructions from the same draft view", () => {
+    const draft = {
+      mode: "create" as const,
+      person_id: "p-1",
+      person_name: "Максим",
+      title: "Новая категория «Пекарня»",
+      summary_lines: ["EN: Bakery", "ветка: Еда"],
+      input: CREATE,
+    };
+    const md = formatCategoryDraftMarkdown(draft);
+    expect(md).toContain("# Новая категория «Пекарня»");
+    expect(md).toContain("- EN: Bakery");
+    const instructions = categoryDraftTextFallbackInstructions(draft);
+    expect(instructions).toContain("confirm_category_draft");
+    expect(instructions).toMatch(/mode=create/);
   });
 
   it("confirm_category_draft requires money:write and applies the draft", async () => {
