@@ -4,6 +4,7 @@ import {
   getOAuthSigningSecret,
   isMcpServerEnabled,
   MCP_SCOPE_MONEY_READ,
+  MCP_SCOPE_MONEY_WRITE,
   MCP_SCOPE_READ,
   MCP_SCOPE_WRITE,
 } from "@/lib/mcp/config";
@@ -34,6 +35,8 @@ const SCOPE_DESCRIPTIONS: Record<string, string> = {
     "Add and update health data: record measurements, edit catalog entries, and create or change medications.",
   [MCP_SCOPE_MONEY_READ]:
     "View your money: bank and manual transactions with their counterparties and receipt lines, accounts and categories.",
+  [MCP_SCOPE_MONEY_WRITE]:
+    "Add and change money spends you confirm on an Orbit card (manual create and edit only after you approve the draft).",
 };
 
 function ErrorPanel({ title, detail }: { title: string; detail: string }) {
