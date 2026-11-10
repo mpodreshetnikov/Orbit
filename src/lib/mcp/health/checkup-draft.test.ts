@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { applyCheckupDraft, buildCreateCheckupDraft, buildEditCheckupDraft } from "./checkup-draft";
 import { createSupabaseStub } from "./test-support";
 
@@ -318,6 +318,39 @@ describe("buildEditCheckupDraft / applyCheckupDraft", () => {
     });
     expect(archived.ok).toBe(true);
     if (archived.ok) expect(archived.draft.status_label).toBe("в архиве");
+  });
+
+  it("explicit next_due_from: completion on schedule without that key recomputes next_due", async () => {
+    // Stored interval has no next_due_from key. Explicit "completion" adds the key;
+    // jsonb IS DISTINCT FROM fires recompute (today + interval when no anchor/completions).
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-10T12:00:00Z"));
+    try {
+      const current = item({
+        schedule: { type: "interval", every: 6, unit: "month" },
+        next_due_at: "2026-06-20",
+      });
+      const stub = createSupabaseStub({
+        checkup_items: [{ data: current }, { data: { why_text: null, notes: null } }],
+        checkup_completions: [{ data: null }],
+      });
+      const built = await buildEditCheckupDraft(stub.client, PERSON, {
+        checkup_id: "c-1",
+        schedule: {
+          type: "interval",
+          every: 6,
+          unit: "month",
+          next_due_from: "completion",
+        },
+      });
+      expect(built.ok).toBe(true);
+      if (built.ok) {
+        expect(built.draft.first_due_label).toMatch(/10 мая 2027|мая 2027/);
+        expect(built.draft.first_due_label).not.toMatch(/20 июня 2026|июня 2026/);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

@@ -117,9 +117,21 @@ function remindersLabel(days: number[] | null | undefined): string {
   return days.map((d) => `${d}д`).join(", ");
 }
 
+/** Stable stringify so key order does not fake a jsonb distinctness mismatch. */
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  const obj = value as Record<string, unknown>;
+  return `{${Object.keys(obj)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableJson(obj[key])}`)
+    .join(",")}}`;
+}
+
 /**
  * Whether the normalized proposed schedule differs from the stored column —
  * same gate as `checkup_item_after_update` (`OLD.schedule IS DISTINCT FROM NEW.schedule`).
+ * Compare the actual JSON shape (key presence included): omitted ≠ explicit default.
  */
 function scheduleWouldChange(
   input: CheckupScheduleWrite | undefined,
@@ -127,20 +139,7 @@ function scheduleWouldChange(
 ): boolean {
   if (input === undefined) return false;
   const proposed = scheduleColumnFromWrite(input, currentSchedule);
-  const prev =
-    currentSchedule && typeof currentSchedule === "object"
-      ? (currentSchedule as Record<string, unknown>)
-      : {};
-  if (proposed.type !== prev.type) return true;
-  if (proposed.type === "one_off") {
-    return String(proposed.due_at ?? "") !== String(prev.due_at ?? "");
-  }
-  return (
-    proposed.every !== prev.every ||
-    proposed.unit !== prev.unit ||
-    String(proposed.anchor_date ?? "") !== String(prev.anchor_date ?? "") ||
-    String(proposed.next_due_from ?? "completion") !== String(prev.next_due_from ?? "completion")
-  );
+  return stableJson(proposed) !== stableJson(currentSchedule ?? null);
 }
 
 /**
