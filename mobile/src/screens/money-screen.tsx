@@ -9,16 +9,15 @@ import {
   ArrowDownLeft,
   ArrowRightLeft,
   ArrowUpRight,
-  ChartPie,
   ReceiptText,
   RotateCcw,
   Scale,
   type LucideIcon,
 } from "lucide-react-native";
 import { useEffect, useMemo, useState } from "react";
-import { Pressable, RefreshControl, SectionList, View } from "react-native";
+import { Pressable, RefreshControl, SectionList, StyleSheet, View } from "react-native";
 import { Chip } from "@/components/form";
-import { Button, Card, Icon, Placeholder, Text } from "@/components/ui";
+import { Button, Icon, Placeholder, Text } from "@/components/ui";
 import { t } from "@/lib/i18n";
 import {
   useMoneyAccounts,
@@ -27,7 +26,7 @@ import {
   useMoneyFeedSummary,
   usePerson,
 } from "@/lib/queries";
-import { radius, space, usePalette, type Palette } from "@/theme";
+import { space, usePalette, type Palette } from "@/theme";
 
 /** The web feed's icon and tone for each kind of transaction. */
 const TYPE_LOOK: Record<MoneyTransactionType, [LucideIcon, keyof Palette]> = {
@@ -77,10 +76,23 @@ export function byDay(items: MoneyTransactionFeedItem[]) {
   return days;
 }
 
+/** Category, comment and line titles on one muted line so the row stays short. */
+export function rowMeta(item: MoneyTransactionFeedItem, categoryName: Map<string, string>): string {
+  const categories =
+    item.category_ids
+      .slice(0, 2)
+      .map((id) => categoryName.get(id) ?? id)
+      .join(", ") || t("money.categoryUnassigned");
+  const comment = preferredComment(item.comment, item.source_comment);
+  const titles = item.line_item_titles.map((title) => title.trim()).filter(Boolean);
+  return [categories, comment, titles.length > 0 ? titles.slice(0, 3).join(", ") : null]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 /**
- * "Деньги" — the web transactions page: every transaction of the person, newest first and by day,
- * searched from the bar and narrowed to money in or out, with how many match and their sums. More
- * load as the list nears its end. A row opens its transaction; reports and import sit above the feed.
+ * "Деньги" — dense transaction feed first: filters and a one-line sum, then rows by day. Reports
+ * and file import stay reachable as compact links above the list, not as tiles.
  */
 export default function MoneyScreen() {
   const palette = usePalette();
@@ -140,37 +152,41 @@ export default function MoneyScreen() {
     );
   }
 
-  const total = (label: string, values: string[], tone: keyof Palette) => (
-    <View style={{ flex: 1, gap: 2 }}>
-      <Text size="xs" tone="mutedForeground">
-        {label}
-      </Text>
-      {values.map((value) => (
-        <Text key={value} weight="semibold" tone={tone}>
-          {value}
-        </Text>
-      ))}
-    </View>
-  );
-
   const month = new Date().toLocaleDateString("ru", { month: "long" });
   const top = (
-    <View style={{ gap: space.md, marginBottom: space.sm }}>
-      <View style={{ flexDirection: "row", gap: space.sm }}>
-        <Tile
-          label={t("money.reports")}
-          icon={ChartPie}
-          detail={month}
+    <View style={{ gap: space.sm, marginBottom: space.xs }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: space.md }}>
+        <Pressable
+          accessibilityRole="link"
+          accessibilityLabel={t("money.reports")}
           onPress={() => router.push("/money/reports" as Href)}
-        />
-      </View>
-      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}>
-        <Button
-          compact
-          variant="secondary"
-          label={t("money.import")}
+          hitSlop={space.sm}
+          style={({ pressed }) => ({
+            opacity: pressed ? 0.6 : 1,
+            flexDirection: "row",
+            alignItems: "center",
+            gap: space.xs,
+            flexShrink: 1,
+          })}
+        >
+          <Text size="sm" weight="medium" tone="primary">
+            {t("money.reports")}
+          </Text>
+          <Text size="sm" tone="mutedForeground" numberOfLines={1}>
+            {month}
+          </Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="link"
+          accessibilityLabel={t("money.import")}
           onPress={() => router.push("/money/import" as Href)}
-        />
+          hitSlop={space.sm}
+          style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1, marginLeft: "auto" })}
+        >
+          <Text size="sm" weight="medium" tone="primary">
+            {t("money.import")}
+          </Text>
+        </Pressable>
       </View>
       <View style={{ flexDirection: "row", gap: space.sm }}>
         {SIGNS.map((sign) => (
@@ -182,31 +198,41 @@ export default function MoneyScreen() {
           />
         ))}
       </View>
-      <Card style={{ padding: space.md, flexDirection: "row", gap: space.md }}>
-        {summary.error ? (
-          <Text size="sm" tone="mutedForeground" style={{ flex: 1 }}>
-            {`${t("money.summaryUnavailable")}: ${summary.error.message}`}
+      {summary.error ? (
+        <Text size="xs" tone="mutedForeground">
+          {`${t("money.summaryUnavailable")}: ${summary.error.message}`}
+        </Text>
+      ) : (
+        <View
+          style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: space.xs }}
+        >
+          <Text size="xs" tone="mutedForeground">
+            {t("money.summaryMatches")}
           </Text>
-        ) : (
-          <>
-            {total(
-              t("money.summaryMatches"),
-              [String(summary.data?.totalCount ?? 0)],
-              "foreground",
-            )}
-            {total(
-              t("money.summaryPositive"),
-              byCurrency.map((one) => formatMoney(one.positiveAmount, one.currency, "ru-RU")),
-              "success",
-            )}
-            {total(
-              t("money.summaryNegative"),
-              byCurrency.map((one) => formatMoney(one.negativeAmount, one.currency, "ru-RU")),
-              "destructive",
-            )}
-          </>
-        )}
-      </Card>
+          <Text size="xs" weight="medium">
+            {String(summary.data?.totalCount ?? 0)}
+          </Text>
+          {byCurrency.map((one) => (
+            <View
+              key={one.currency}
+              style={{ flexDirection: "row", alignItems: "center", gap: space.xs }}
+            >
+              <Text size="xs" tone="mutedForeground">
+                ·
+              </Text>
+              <Text size="xs" tone="success" tabular>
+                {formatMoney(one.positiveAmount, one.currency, "ru-RU")}
+              </Text>
+              <Text size="xs" tone="mutedForeground">
+                ·
+              </Text>
+              <Text size="xs" tone="destructive" tabular>
+                {formatMoney(one.negativeAmount, one.currency, "ru-RU")}
+              </Text>
+            </View>
+          ))}
+        </View>
+      )}
     </View>
   );
 
@@ -220,7 +246,11 @@ export default function MoneyScreen() {
         contentInsetAdjustmentBehavior="automatic"
         keyboardDismissMode="on-drag"
         stickySectionHeadersEnabled={false}
-        contentContainerStyle={{ padding: space.lg, paddingBottom: space.xl * 2 }}
+        contentContainerStyle={{
+          paddingHorizontal: space.md,
+          paddingTop: space.sm,
+          paddingBottom: space.xl * 2,
+        }}
         refreshControl={
           <RefreshControl
             refreshing={feed.isRefetching}
@@ -237,12 +267,14 @@ export default function MoneyScreen() {
             size="xs"
             weight="medium"
             tone="mutedForeground"
-            style={{ marginTop: space.md, marginBottom: space.sm, marginLeft: space.xs }}
+            style={{ marginTop: space.sm, marginBottom: 2 }}
           >
             {section.title.toUpperCase()}
           </Text>
         )}
-        ItemSeparatorComponent={() => <View style={{ height: space.sm }} />}
+        ItemSeparatorComponent={() => (
+          <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: palette.border }} />
+        )}
         ListEmptyComponent={
           feed.isPending ? (
             <Placeholder busy />
@@ -276,8 +308,6 @@ export default function MoneyScreen() {
         }
         renderItem={({ item }) => {
           const [icon, tone] = TYPE_LOOK[item.transaction_type] ?? TYPE_LOOK.expense;
-          const comment = preferredComment(item.comment, item.source_comment);
-          const titles = item.line_item_titles.map((title) => title.trim()).filter(Boolean);
           const account = [accountLabel.get(item.account_id), item.money_cards?.card_label]
             .filter(Boolean)
             .join(" / ");
@@ -296,49 +326,29 @@ export default function MoneyScreen() {
               onPress={() => router.push(`/money/${item.id}` as Href)}
               style={({ pressed }) => ({
                 flexDirection: "row",
-                gap: space.md,
-                padding: space.md,
-                borderRadius: radius.lg,
-                borderWidth: 1,
-                borderColor: palette.border,
-                backgroundColor: pressed ? palette.mutedHalf : palette.card,
+                alignItems: "center",
+                gap: space.sm,
+                paddingVertical: 6,
+                backgroundColor: pressed ? palette.mutedHalf : "transparent",
               })}
             >
-              <View
-                style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: radius.md,
-                  alignItems: "center",
-                  justifyContent: "center",
-                  backgroundColor: palette.muted,
-                }}
-              >
-                <Icon icon={icon} tone={tone} />
-              </View>
-              <View style={{ flex: 1, gap: 2 }}>
-                <Text weight="semibold" numberOfLines={1}>
+              <Icon icon={icon} size={14} tone={tone} />
+              <View style={{ flex: 1, gap: 1, minWidth: 0 }}>
+                <Text size="sm" weight="semibold" numberOfLines={1}>
                   {item.merchant_name || t("money.transactionFallback")}
                 </Text>
                 <Text size="xs" tone="mutedForeground" numberOfLines={1}>
-                  {item.category_ids
-                    .slice(0, 2)
-                    .map((id) => categoryName.get(id) ?? id)
-                    .join(", ") || t("money.categoryUnassigned")}
+                  {rowMeta(item, categoryName)}
                 </Text>
-                {comment ? (
-                  <Text size="xs" numberOfLines={1}>
-                    {comment}
-                  </Text>
-                ) : null}
-                {titles.length > 0 ? (
-                  <Text size="xs" tone="mutedForeground" numberOfLines={1}>
-                    {titles.slice(0, 3).join(", ")}
-                  </Text>
-                ) : null}
               </View>
-              <View style={{ alignItems: "flex-end", gap: 2, maxWidth: 140 }}>
-                <Text weight="semibold" tone={item.amount < 0 ? "destructive" : "success"}>
+              <View style={{ alignItems: "flex-end", gap: 1, maxWidth: 128 }}>
+                <Text
+                  size="sm"
+                  weight="semibold"
+                  tone={item.amount < 0 ? "destructive" : "success"}
+                  tabular
+                  numberOfLines={1}
+                >
                   {formatMoney(item.amount, item.currency, "ru-RU")}
                 </Text>
                 <Text size="xs" tone="mutedForeground" numberOfLines={1}>
@@ -350,45 +360,5 @@ export default function MoneyScreen() {
         }}
       />
     </>
-  );
-}
-
-/** A money page as a tile: its icon, its name, and a word on what is in it once that is known. */
-function Tile({
-  label,
-  icon,
-  detail,
-  onPress,
-}: {
-  label: string;
-  icon: LucideIcon;
-  detail: string | number | undefined;
-  onPress: () => void;
-}) {
-  const palette = usePalette();
-  return (
-    <Pressable
-      accessibilityRole="link"
-      accessibilityLabel={label}
-      onPress={onPress}
-      style={({ pressed }) => ({
-        flex: 1,
-        gap: space.xs,
-        padding: space.md,
-        borderRadius: radius.lg,
-        borderWidth: 1,
-        borderColor: palette.border,
-        backgroundColor: pressed ? palette.mutedHalf : palette.card,
-        transform: [{ scale: pressed ? 0.98 : 1 }],
-      })}
-    >
-      <Icon icon={icon} size={20} tone="primary" />
-      <Text size="sm" weight="semibold" numberOfLines={1}>
-        {label}
-      </Text>
-      <Text size="xs" tone="mutedForeground" numberOfLines={1}>
-        {detail ?? " "}
-      </Text>
-    </Pressable>
   );
 }
