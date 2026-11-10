@@ -424,7 +424,7 @@ export async function latestCompletionDay(
   return doneAt ? String(doneAt).slice(0, 10) : null;
 }
 
-async function completionCount(
+export async function completionCount(
   supabase: SupabaseClient<Database>,
   checkupId: string,
 ): Promise<number> {
