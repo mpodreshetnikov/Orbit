@@ -118,21 +118,47 @@ function remindersLabel(days: number[] | null | undefined): string {
 }
 
 /**
+ * Whether the normalized proposed schedule differs from the stored column —
+ * same gate as `checkup_item_after_update` (`OLD.schedule IS DISTINCT FROM NEW.schedule`).
+ */
+function scheduleWouldChange(
+  input: CheckupScheduleWrite | undefined,
+  currentSchedule: unknown,
+): boolean {
+  if (input === undefined) return false;
+  const proposed = scheduleColumnFromWrite(input, currentSchedule);
+  const prev =
+    currentSchedule && typeof currentSchedule === "object"
+      ? (currentSchedule as Record<string, unknown>)
+      : {};
+  if (proposed.type !== prev.type) return true;
+  if (proposed.type === "one_off") {
+    return String(proposed.due_at ?? "") !== String(prev.due_at ?? "");
+  }
+  return (
+    proposed.every !== prev.every ||
+    proposed.unit !== prev.unit ||
+    String(proposed.anchor_date ?? "") !== String(prev.anchor_date ?? "") ||
+    String(proposed.next_due_from ?? "completion") !== String(prev.next_due_from ?? "completion")
+  );
+}
+
+/**
  * Status the card should show for an edit — same DB outcomes as confirm:
  * - interval write on completed → active (apply reactivation)
- * - one-off schedule write → active with 0 completions / completed with ≥1
- *   (`checkup_recompute_next_due_for_item` overrides any requested status)
+ * - one-off schedule *change* → active with 0 completions / completed with ≥1
+ *   (trigger only runs when schedule IS DISTINCT FROM current)
  */
 async function effectiveEditStatus(
   supabase: Client,
   current: CheckupItemSnapshot,
   input: CheckupEditDraftInput,
 ): Promise<CheckupItemStatus> {
-  if (input.schedule?.type === "one_off") {
+  const requested = (input.status ?? current.status) as CheckupItemStatus;
+  if (input.schedule?.type === "one_off" && scheduleWouldChange(input.schedule, current.schedule)) {
     const prior = await completionCount(supabase, current.id);
     return prior >= 1 ? "completed" : "active";
   }
-  const requested = (input.status ?? current.status) as CheckupItemStatus;
   if (input.schedule?.type === "interval" && requested === "completed") return "active";
   return requested;
 }
@@ -164,19 +190,22 @@ async function effectiveEditNextDueAt(
   current: CheckupItemSnapshot,
   input: CheckupEditDraftInput,
 ): Promise<string | null> {
-  if (input.schedule === undefined) return current.next_due_at;
-  if (input.schedule.type === "one_off") return input.schedule.due_at;
+  const write = input.schedule;
+  if (!scheduleWouldChange(write, current.schedule) || write === undefined) {
+    return current.next_due_at;
+  }
+  if (write.type === "one_off") return write.due_at;
 
   const interval = {
     type: "interval" as const,
-    every: input.schedule.every,
-    unit: input.schedule.unit,
+    every: write.every,
+    unit: write.unit,
   };
-  if (input.schedule.first_due_at) {
-    return firstDueDate(interval, input.schedule.first_due_at, todayUtc());
+  if (write.first_due_at) {
+    return firstDueDate(interval, write.first_due_at, todayUtc());
   }
 
-  const column = scheduleColumnFromWrite(input.schedule, current.schedule);
+  const column = scheduleColumnFromWrite(write, current.schedule);
   const latestDone = await latestCompletionDay(supabase, current.id);
   const anchor =
     typeof column.anchor_date === "string" && column.anchor_date.length > 0

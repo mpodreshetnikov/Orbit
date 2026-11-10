@@ -288,6 +288,37 @@ describe("buildEditCheckupDraft / applyCheckupDraft", () => {
       expect(built.draft.first_due_label).toMatch(/15 декабря 2026|декабря 2026/);
     }
   });
+
+  it("unchanged one-off schedule keeps requested paused/archived (no trigger override)", async () => {
+    const current = item({
+      status: "active",
+      schedule: { type: "one_off", due_at: "2026-06-01" },
+      next_due_at: "2026-06-01",
+    });
+    const stub = createSupabaseStub({
+      checkup_items: [
+        { data: current },
+        { data: { why_text: null, notes: null } },
+        { data: current },
+        { data: { why_text: null, notes: null } },
+      ],
+    });
+    const paused = await buildEditCheckupDraft(stub.client, PERSON, {
+      checkup_id: "c-1",
+      schedule: { type: "one_off", due_at: "2026-06-01" },
+      status: "paused",
+    });
+    expect(paused.ok).toBe(true);
+    if (paused.ok) expect(paused.draft.status_label).toBe("на паузе");
+
+    const archived = await buildEditCheckupDraft(stub.client, PERSON, {
+      checkup_id: "c-1",
+      schedule: { type: "one_off", due_at: "2026-06-01" },
+      status: "archived",
+    });
+    expect(archived.ok).toBe(true);
+    if (archived.ok) expect(archived.draft.status_label).toBe("в архиве");
+  });
 });
 
 describe("checkup draft Markdown fallback", () => {
