@@ -16,7 +16,6 @@ import {
 } from "lucide-react-native";
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, RefreshControl, SectionList, StyleSheet, View } from "react-native";
-import { Chip } from "@/components/form";
 import { Button, Icon, Placeholder, Text } from "@/components/ui";
 import { t } from "@/lib/i18n";
 import {
@@ -154,8 +153,8 @@ export default function MoneyScreen() {
 
   const month = new Date().toLocaleDateString("ru", { month: "long" });
   const top = (
-    <View style={{ gap: space.sm, marginBottom: space.xs }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: space.md }}>
+    <View style={{ gap: space.xs, marginBottom: 2 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
         <Pressable
           accessibilityRole="link"
           accessibilityLabel={t("money.reports")}
@@ -165,14 +164,14 @@ export default function MoneyScreen() {
             opacity: pressed ? 0.6 : 1,
             flexDirection: "row",
             alignItems: "center",
-            gap: space.xs,
+            gap: 4,
             flexShrink: 1,
           })}
         >
-          <Text size="sm" weight="medium" tone="primary">
+          <Text size="xs" weight="medium" tone="primary">
             {t("money.reports")}
           </Text>
-          <Text size="sm" tone="mutedForeground" numberOfLines={1}>
+          <Text size="xs" tone="mutedForeground" numberOfLines={1}>
             {month}
           </Text>
         </Pressable>
@@ -183,56 +182,79 @@ export default function MoneyScreen() {
           hitSlop={space.sm}
           style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1, marginLeft: "auto" })}
         >
-          <Text size="sm" weight="medium" tone="primary">
+          <Text size="xs" weight="medium" tone="primary">
             {t("money.import")}
           </Text>
         </Pressable>
       </View>
-      <View style={{ flexDirection: "row", gap: space.sm }}>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: space.xs }}>
         {SIGNS.map((sign) => (
-          <Chip
+          <Pressable
             key={sign}
-            label={signLabel(sign)}
-            selected={amountSign === sign}
+            accessibilityRole="button"
+            accessibilityState={{ selected: amountSign === sign }}
             onPress={() => setAmountSign(sign)}
-          />
-        ))}
-      </View>
-      {summary.error ? (
-        <Text size="xs" tone="mutedForeground">
-          {`${t("money.summaryUnavailable")}: ${summary.error.message}`}
-        </Text>
-      ) : (
-        <View
-          style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: space.xs }}
-        >
-          <Text size="xs" tone="mutedForeground">
-            {t("money.summaryMatches")}
-          </Text>
-          <Text size="xs" weight="medium">
-            {String(summary.data?.totalCount ?? 0)}
-          </Text>
-          {byCurrency.map((one) => (
-            <View
-              key={one.currency}
-              style={{ flexDirection: "row", alignItems: "center", gap: space.xs }}
+            style={{
+              paddingHorizontal: space.sm,
+              paddingVertical: 3,
+              borderRadius: 999,
+              borderWidth: 1,
+              borderColor: amountSign === sign ? palette.primary : palette.border,
+              backgroundColor: amountSign === sign ? palette.primary : "transparent",
+            }}
+          >
+            <Text
+              size="xs"
+              weight="medium"
+              tone={amountSign === sign ? "primaryForeground" : "foreground"}
             >
-              <Text size="xs" tone="mutedForeground">
-                ·
-              </Text>
-              <Text size="xs" tone="success" tabular>
-                {formatMoney(one.positiveAmount, one.currency, "ru-RU")}
-              </Text>
-              <Text size="xs" tone="mutedForeground">
-                ·
-              </Text>
-              <Text size="xs" tone="destructive" tabular>
-                {formatMoney(one.negativeAmount, one.currency, "ru-RU")}
-              </Text>
-            </View>
-          ))}
-        </View>
-      )}
+              {signLabel(sign)}
+            </Text>
+          </Pressable>
+        ))}
+        {summary.error ? (
+          <Text size="xs" tone="mutedForeground" style={{ flex: 1 }}>
+            {`${t("money.summaryUnavailable")}: ${summary.error.message}`}
+          </Text>
+        ) : (
+          <View
+            style={{
+              flexDirection: "row",
+              flexWrap: "wrap",
+              alignItems: "center",
+              gap: 4,
+              flex: 1,
+              minWidth: 120,
+            }}
+          >
+            <Text size="xs" tone="mutedForeground">
+              {t("money.summaryMatches")}
+            </Text>
+            <Text size="xs" weight="medium">
+              {String(summary.data?.totalCount ?? 0)}
+            </Text>
+            {byCurrency.map((one) => (
+              <View
+                key={one.currency}
+                style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
+              >
+                <Text size="xs" tone="mutedForeground">
+                  ·
+                </Text>
+                <Text size="xs" tone="success" tabular>
+                  {formatMoney(one.positiveAmount, one.currency, "ru-RU")}
+                </Text>
+                <Text size="xs" tone="mutedForeground">
+                  ·
+                </Text>
+                <Text size="xs" tone="destructive" tabular>
+                  {formatMoney(one.negativeAmount, one.currency, "ru-RU")}
+                </Text>
+              </View>
+            ))}
+          </View>
+        )}
+      </View>
     </View>
   );
 
@@ -248,7 +270,7 @@ export default function MoneyScreen() {
         stickySectionHeadersEnabled={false}
         contentContainerStyle={{
           paddingHorizontal: space.md,
-          paddingTop: space.sm,
+          paddingTop: space.xs,
           paddingBottom: space.xl * 2,
         }}
         refreshControl={
@@ -267,7 +289,7 @@ export default function MoneyScreen() {
             size="xs"
             weight="medium"
             tone="mutedForeground"
-            style={{ marginTop: space.sm, marginBottom: 2 }}
+            style={{ marginTop: space.xs, marginBottom: 0 }}
           >
             {section.title.toUpperCase()}
           </Text>
@@ -328,12 +350,12 @@ export default function MoneyScreen() {
                 flexDirection: "row",
                 alignItems: "center",
                 gap: space.sm,
-                paddingVertical: 6,
+                paddingVertical: 4,
                 backgroundColor: pressed ? palette.mutedHalf : "transparent",
               })}
             >
-              <Icon icon={icon} size={14} tone={tone} />
-              <View style={{ flex: 1, gap: 1, minWidth: 0 }}>
+              <Icon icon={icon} size={12} tone={tone} />
+              <View style={{ flex: 1, minWidth: 0 }}>
                 <Text size="sm" weight="semibold" numberOfLines={1}>
                   {item.merchant_name || t("money.transactionFallback")}
                 </Text>
@@ -341,7 +363,7 @@ export default function MoneyScreen() {
                   {rowMeta(item, categoryName)}
                 </Text>
               </View>
-              <View style={{ alignItems: "flex-end", gap: 1, maxWidth: 128 }}>
+              <View style={{ alignItems: "flex-end", maxWidth: 128 }}>
                 <Text
                   size="sm"
                   weight="semibold"
