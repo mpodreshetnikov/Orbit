@@ -17,11 +17,17 @@ export const MCP_SCOPE_WRITE = "health:write";
  * must not start reading bank transactions because the server gained the tools to.
  */
 export const MCP_SCOPE_MONEY_READ = "money:read";
-export const MCP_DEFAULT_SCOPE = `${MCP_SCOPE_READ} ${MCP_SCOPE_WRITE} ${MCP_SCOPE_MONEY_READ}`;
+/**
+ * Separate from health:write and from money:read (T-261109-23p): a connection that can list the
+ * ledger must not create or edit spends until the owner grants this explicitly.
+ */
+export const MCP_SCOPE_MONEY_WRITE = "money:write";
+export const MCP_DEFAULT_SCOPE = `${MCP_SCOPE_READ} ${MCP_SCOPE_WRITE} ${MCP_SCOPE_MONEY_READ} ${MCP_SCOPE_MONEY_WRITE}`;
 export const MCP_SUPPORTED_SCOPES = [
   MCP_SCOPE_READ,
   MCP_SCOPE_WRITE,
   MCP_SCOPE_MONEY_READ,
+  MCP_SCOPE_MONEY_WRITE,
 ] as const;
 
 /** Authorization codes are exchanged within seconds; a short window limits interception value. */

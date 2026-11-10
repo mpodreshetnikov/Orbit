@@ -103,6 +103,7 @@ BEGIN;
 \i functions/money_get_category_rule_debug.sql
 \i functions/get_money_merchant_default_categories.sql
 \i functions/money_list_transactions_feed.sql
+\i functions/money_search_line_items.sql
 \i functions/money_transaction_feed_summary.sql
 \i functions/money_update_transaction_with_lines.sql
 \i functions/money_rollback_import_batch.sql
