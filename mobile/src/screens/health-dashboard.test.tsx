@@ -303,6 +303,71 @@ describe("the health dashboard", () => {
     expect(screen.queryByText("Нет чек-апов")).toBeNull();
   });
 
+  it("keeps mark-done beside a long checkup title and shows several compact rows", async () => {
+    db.tables.checkup_items = [
+      {
+        id: "long",
+        person_id: PERSON.id,
+        title: "Очень длинный ежегодный осмотр с уточнением специализации",
+        category: "visit",
+        schedule: { type: "interval", every: 1, unit: "year" },
+        next_due_at: "2026-09-15",
+        status: "active",
+        reminder_days_before: [7],
+        planned_on: null,
+        why_text: null,
+        why_links: [],
+        notes: null,
+        created_at: "2026-01-01T09:00:00Z",
+        updated_at: "2026-01-01T09:00:00Z",
+      },
+      {
+        id: "blood2",
+        person_id: PERSON.id,
+        title: "Анализ крови",
+        category: "lab",
+        schedule: { type: "interval", every: 1, unit: "year" },
+        next_due_at: "2026-10-01",
+        status: "active",
+        reminder_days_before: [7],
+        planned_on: null,
+        why_text: null,
+        why_links: [],
+        notes: null,
+        created_at: "2026-01-02T09:00:00Z",
+        updated_at: "2026-01-02T09:00:00Z",
+      },
+      {
+        id: "flu2",
+        person_id: PERSON.id,
+        title: "Прививка от гриппа",
+        category: "vaccination",
+        schedule: { type: "interval", every: 1, unit: "year" },
+        next_due_at: "2026-10-20",
+        status: "active",
+        reminder_days_before: [7],
+        planned_on: null,
+        why_text: null,
+        why_links: [],
+        notes: null,
+        created_at: "2026-01-03T09:00:00Z",
+        updated_at: "2026-01-03T09:00:00Z",
+      },
+    ];
+    await renderScreens(routes, "/health");
+    expect(
+      await screen.findByText("Очень длинный ежегодный осмотр с уточнением специализации"),
+    ).toBeOnTheScreen();
+    expect(screen.getByText("Анализ крови")).toBeOnTheScreen();
+    expect(screen.getByText("Прививка от гриппа")).toBeOnTheScreen();
+    expect(screen.getAllByText("Отметить выполненным")).toHaveLength(3);
+    expect(
+      screen.getByLabelText(
+        "Отметить выполненным: Очень длинный ежегодный осмотр с уточнением специализации",
+      ),
+    ).toBeOnTheScreen();
+  });
+
   it("passes the document search into the records list", async () => {
     db.tables.medical_records.push({
       id: "r-mri",

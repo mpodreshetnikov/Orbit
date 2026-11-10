@@ -306,7 +306,7 @@ function CheckupsCompact() {
   const todayIso = isoDay(new Date());
 
   return (
-    <View style={{ gap: space.sm }}>
+    <View style={{ gap: space.xs }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
         <Pressable
           accessibilityRole="link"
@@ -344,7 +344,7 @@ function CheckupsCompact() {
       ) : checkups.isPending ? (
         <ActivityIndicator color={palette.mutedForeground} />
       ) : preview.length === 0 ? (
-        <Card style={{ padding: space.md }}>
+        <Card style={{ padding: space.sm }}>
           <Text size="sm" tone="mutedForeground">
             {items.length === 0 ? t("checkups.noItems") : t("today.noCheckups")}
           </Text>
@@ -364,6 +364,7 @@ function CheckupsCompact() {
   );
 }
 
+/** One-line title + meta with mark-done on the right — denser than a stacked action row. */
 function CheckupPreviewRow({
   item,
   todayIso,
@@ -379,50 +380,49 @@ function CheckupPreviewRow({
   const late = checkupLateness(item, todayIso);
   const overdue = late.byDue || late.byPlan;
   const day = late.byPlan && !late.byDue ? item.planned_on : item.next_due_at;
+  const meta = `${categoryLabel(item.category)}${day ? ` · ${formatDay(day)}` : ""}`;
   return (
     <View
       style={{
-        borderRadius: radius.lg,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: space.sm,
+        borderRadius: radius.md,
         borderWidth: 1,
         borderColor: overdue ? palette.warning : palette.border,
         backgroundColor: palette.card,
-        overflow: "hidden",
+        paddingVertical: space.sm,
+        paddingHorizontal: space.md,
       }}
     >
       <Pressable
         accessibilityRole="link"
+        accessibilityLabel={`${item.title}. ${meta}`}
         onPress={onOpen}
         style={({ pressed }) => ({
-          gap: 2,
-          padding: space.md,
-          backgroundColor: pressed ? palette.mutedHalf : "transparent",
+          flex: 1,
+          minWidth: 0,
+          gap: 1,
+          opacity: pressed ? 0.7 : 1,
         })}
       >
         <Text weight="medium" numberOfLines={1}>
           {item.title}
         </Text>
         <Text size="xs" tone="mutedForeground" numberOfLines={1}>
-          {categoryLabel(item.category)}
-          {day ? ` · ${formatDay(day)}` : ""}
+          {meta}
         </Text>
       </Pressable>
       {item.status === "active" ? (
-        <View
-          style={{
-            flexDirection: "row",
-            justifyContent: "flex-end",
-            paddingHorizontal: space.md,
-            paddingBottom: space.md,
-          }}
-        >
-          <Button
-            compact
-            variant="outline"
-            icon={CheckCircle2}
-            label={t("checkups.markComplete")}
-            onPress={onComplete}
-          />
-        </View>
+        <Button
+          compact
+          variant="outline"
+          icon={CheckCircle2}
+          label={t("checkups.markComplete")}
+          accessibilityLabel={`${t("checkups.markComplete")}: ${item.title}`}
+          onPress={onComplete}
+          style={{ flexShrink: 0, maxWidth: "48%" }}
+        />
       ) : null}
     </View>
   );
