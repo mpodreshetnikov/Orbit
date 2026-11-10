@@ -362,7 +362,9 @@ describe("the health dashboard", () => {
     expect(screen.getByText("Прививка от гриппа")).toBeOnTheScreen();
     expect(screen.getAllByText("Отметить выполненным")).toHaveLength(3);
     expect(
-      screen.getByLabelText("Отметить выполненным: Очень длинный ежегодный осмотр с уточнением специализации"),
+      screen.getByLabelText(
+        "Отметить выполненным: Очень длинный ежегодный осмотр с уточнением специализации",
+      ),
     ).toBeOnTheScreen();
   });
 
