@@ -193,6 +193,12 @@ describe("the check", () => {
     expect(result.ok).toBe(false);
     expect(result.message).toContain("REFUSED");
     expect(result.message).toMatch(/agent-hooks|pre-push|cursor-hooks-bridge/);
+    // Operator-facing fix: exact script + where to put it + doc (Maxim / env owner).
+    expect(result.message).toContain(
+      "bash /agent/repos/Orbit/scripts/cloud/configure-cursor-agent-hooks.sh",
+    );
+    expect(result.message).toMatch(/Install AND Start/);
+    expect(result.message).toContain("docs/AGENT_ENVIRONMENT.md");
   });
 
   it("passes a Cursor cloud session with hooks.json and agent-hooks git chain", () => {

@@ -3,6 +3,17 @@
 What a cloud environment that runs agents on Orbit must carry, why, and how a session proves it does.
 An agent session that fails the check below changes nothing in this repository.
 
+## New developer checklist
+
+| Surface                                            | Out of the box after cloning Orbit                                                                                                           | Manual once                                                                                                                                                                                       |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code **local** (open the Orbit checkout)    | Project hooks from [`.claude/settings.json`](../.claude/settings.json)                                                                       | `just git-hooks-install` so commit/push run [`.githooks`](../.githooks)                                                                                                                           |
+| Claude Code **cloud**                              | Needs the Claude block below in the cloud environment Setup / install script                                                                 | Paste that block (or keep the Orbit project's Claude env that already has it)                                                                                                                     |
+| Cursor Cloud (shared Orbit env or a personal copy) | After this repository's Cursor bridge is on the branch the env checks out: [`.cursor/hooks.json`](../.cursor/hooks.json) loads automatically | Owner of the Cursor environment must add `bash /agent/repos/Orbit/scripts/cloud/configure-cursor-agent-hooks.sh` to **Install and Start** (see Cursor Cloud setup). Agents cannot change that UI. |
+| Cursor **local / desktop**                         | [`.cursor/hooks.json`](../.cursor/hooks.json) loads from the project                                                                         | `just git-hooks-install` for git gates; caveman/`sessionStart` works on desktop (not on managed Cloud)                                                                                            |
+
+Prove any cloud session with `node scripts/just/agent-env-check.cjs` — `REFUSED` names the missing piece and the script to add.
+
 ## Why
 
 Orbit's rules for agents are partly mechanical: the task-claim check reports an edit no in-progress

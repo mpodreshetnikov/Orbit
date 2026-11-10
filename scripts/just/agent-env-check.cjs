@@ -158,6 +158,48 @@ function checkClaude({ home, repoRoot, exists }) {
   };
 }
 
+/**
+ * Refusal text for Cursor Cloud: name the exact script, where to add it, and the doc.
+ * Keep this aligned with the "Cursor Cloud setup" section of docs/AGENT_ENVIRONMENT.md.
+ */
+function cursorRefusalMessage({ missing, gitProblem }) {
+  const parts = [];
+  if (missing.length > 0) {
+    parts.push(
+      `.cursor/hooks.json does not route ${missing.join(", ")} through scripts/just/${CURSOR_BRIDGE}`,
+    );
+  }
+  if (gitProblem) {
+    parts.push(gitProblem);
+  }
+  const fixLines = [];
+  if (missing.length > 0) {
+    fixLines.push(
+      `Ensure this session's Orbit checkout includes .cursor/hooks.json that runs ` +
+        `scripts/just/${CURSOR_BRIDGE} on beforeShellExecution, postToolUse, and postToolUseFailure ` +
+        `(shipped with this repository; see ${DOC} § Cursor Cloud setup).`,
+    );
+  }
+  if (gitProblem) {
+    fixLines.push(
+      `Add this exact line to the Cursor Cloud environment Install AND Start scripts ` +
+        `(Cursor Dashboard → Cloud Agents → this environment → Install / Start), after Cursor has ` +
+        `created ~/.cursor/agent-hooks/<id>/:\n` +
+        `  bash /agent/repos/Orbit/scripts/cloud/configure-cursor-agent-hooks.sh\n` +
+        `(from an Orbit checkout: bash scripts/cloud/configure-cursor-agent-hooks.sh). ` +
+        `Then start a new session. Full steps: ${DOC} § Cursor Cloud setup.`,
+    );
+  }
+  return (
+    `agent-env-check: REFUSED. This Cursor cloud session is missing Orbit's safety gates: ` +
+    `${parts.join("; ")}. The task-claim / size / git push gates are silent, so no change to this ` +
+    `repository may be made in this session. Stop.\n` +
+    fixLines.join("\n") +
+    `\nDo not rewrite ~/.cursor/agent-hooks by hand to paper over a missing environment setup — ` +
+    `the environment scripts must call configure-cursor-agent-hooks.sh so the next session gets it too.`
+  );
+}
+
 function checkCursor({ home, repoRoot, exists }) {
   const cursorSettings = readJson(path.join(repoRoot, ".cursor", "hooks.json"));
   const missing = missingCursorEvents(cursorSettings, repoRoot, exists);
@@ -169,23 +211,9 @@ function checkCursor({ home, repoRoot, exists }) {
         "agent-env-check: this repository's Cursor hooks and agent-hooks git chain reach this session.",
     };
   }
-  const parts = [];
-  if (missing.length > 0) {
-    parts.push(
-      `.cursor/hooks.json does not route ${missing.join(", ")} through scripts/just/${CURSOR_BRIDGE}`,
-    );
-  }
-  if (gitProblem) {
-    parts.push(gitProblem);
-  }
   return {
     ok: false,
-    message:
-      `agent-env-check: REFUSED. This Cursor cloud session is missing Orbit's safety gates: ` +
-      `${parts.join("; ")}. The task-claim / size / git push gates are silent, so no change to this ` +
-      `repository may be made in this session. Stop, and ask the person to apply the Cursor block in ` +
-      `${DOC} (hooks.json + cursor-agent-git-hooks), then start a new session. Do not rewrite ` +
-      `~/.cursor/agent-hooks by hand to paper over a missing environment setup.`,
+    message: cursorRefusalMessage({ missing, gitProblem }),
   };
 }
 
@@ -218,6 +246,7 @@ module.exports = {
   CURSOR_REQUIRED_EVENTS,
   bridgePathIn,
   check,
+  cursorRefusalMessage,
   escapeRegExp,
   isClaudeCloud,
   isCursorCloud,

@@ -224,6 +224,13 @@ just dev                     # phase 2 — schema, seed, and the dev stack
 
 `just dev` is long-running and holds the foreground; tear it down with `just dev stop`.
 
+**Agent / cloud hooks.** Local Claude Code and Cursor pick up project hook configs from the
+checkout; still run `just git-hooks-install` so git commit/push gates fire. Claude Cloud and Cursor
+Cloud need a one-time environment setup (Claude: `~/.claude/settings.json` bridge block; Cursor:
+`configure-cursor-agent-hooks.sh` in Install + Start). Canonical steps and the
+`node scripts/just/agent-env-check.cjs` refusal text:
+[`docs/AGENT_ENVIRONMENT.md`](./docs/AGENT_ENVIRONMENT.md).
+
 The full environment variable reference — including the MCP connector and observability toggles —
 is in [`docs/SETUP.md`](./docs/SETUP.md).
 
