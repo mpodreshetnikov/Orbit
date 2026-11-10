@@ -34,7 +34,7 @@ name: Документы
 # Hero sits at the top of the ScrollView. direction UP is required (DOWN times out past
 # the footer); centerElement must stay off — Maestro cannot centre a top-pinned control
 # and fails with «No visible element found» even when the label is already on screen
-# (Mobile recordings 42753953959 / Документы @ 0db4e42).
+# (Mobile recordings 42753953959 / Документы @ 0db4e42; 42841373658 / #254).
 - scrollUntilVisible:
     element: "Все документы"
     direction: UP

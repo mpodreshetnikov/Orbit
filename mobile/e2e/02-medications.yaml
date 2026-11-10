@@ -4,18 +4,35 @@ appId: host.exp.Exponent
 name: Лекарства
 ---
 - runFlow: setup/fresh.yaml
-- openLink: exp://127.0.0.1:8081
+# Deep-link like 03/04: a bare root open + tab tap after relaunch can land before the client
+# settles and leave «Сегодня» up (Mobile recordings 42823469817 — «Курсы» never appeared).
+- openLink: exp://127.0.0.1:8081/--/medications
 - tapOn:
     text: "Open"
     optional: true
 - extendedWaitUntil:
-    visible: "Лекарства"
+    visible: "Курсы"
     timeout: 60000
-- tapOn: "Лекарства"
-# The tab opens on the day's doses; the courses are the switch's other half.
+    optional: true
+# Tunnel / cold-tab stall: relaunch until the segmented switch is up.
+- repeat:
+    times: 4
+    while:
+      notVisible: "Курсы"
+    commands:
+      - runFlow: setup/fresh.yaml
+      - openLink: exp://127.0.0.1:8081/--/medications
+      - tapOn:
+          text: "Open"
+          optional: true
+      - extendedWaitUntil:
+          visible: "Курсы"
+          timeout: 60000
+          optional: true
 - extendedWaitUntil:
     visible: "Курсы"
-    timeout: 30000
+    timeout: 60000
+# The tab opens on the day's doses; the courses are the switch's other half.
 - takeScreenshot: meds-00-doses
 - tapOn: "Курсы"
 # Same tunnel stall as 01-today: Курсы paints its filters with an empty loading list. Relaunch
@@ -34,17 +51,13 @@ name: Лекарства
             notVisible: "Vitamin D3.*"
           commands:
             - runFlow: setup/fresh.yaml
-            - openLink: exp://127.0.0.1:8081
+            - openLink: exp://127.0.0.1:8081/--/medications
             - tapOn:
                 text: "Open"
                 optional: true
             - extendedWaitUntil:
-                visible: "Лекарства"
-                timeout: 60000
-            - tapOn: "Лекарства"
-            - extendedWaitUntil:
                 visible: "Курсы"
-                timeout: 30000
+                timeout: 60000
             - tapOn: "Курсы"
 - extendedWaitUntil:
     visible: "Vitamin D3.*"

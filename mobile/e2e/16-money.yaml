@@ -1,5 +1,5 @@
-# The money tab: the seeded transactions by day with their sums, one line per currency, then only
-# the money that came in.
+# The money tab: dense seeded feed (8+ rows target on iPhone), one-line sums, reports/import as
+# compact links — then only the money that came in.
 appId: host.exp.Exponent
 name: Деньги
 ---
@@ -11,6 +11,13 @@ name: Деньги
 - extendedWaitUntil:
     visible: "Совпадений"
     timeout: 60000
+# Compact secondary chrome stays reachable without eating the list.
+- extendedWaitUntil:
+    visible: "Отчеты"
+    timeout: 10000
+- extendedWaitUntil:
+    visible: "Импорт"
+    timeout: 10000
 # The sums' heading shows before the feed arrives: wait for a seeded transaction too. A row reads as
 # one element, the merchant first.
 - extendedWaitUntil:
