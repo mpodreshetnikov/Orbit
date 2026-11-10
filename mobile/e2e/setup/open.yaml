@@ -33,15 +33,16 @@ name: Open the client
     text: "Close"
     optional: true
 # A quick tunnel can still fail TLS from the simulator for a while after it answers the Mac, and the
-# app's sign-in then stops on «Добро пожаловать» with the error. A relaunch signs in again.
+# app's sign-in then stops on «Добро пожаловать» with the error (Mobile recordings 42759161893).
+# Relaunch + dismiss the Expo tour again; give the tunnel more rounds before giving up.
 - repeat:
-    times: 6
+    times: 10
     while:
       notVisible: "Сегодня"
     commands:
       - extendedWaitUntil:
           visible: "Сегодня"
-          timeout: 30000
+          timeout: 45000
           optional: true
       - runFlow:
           when:
@@ -52,9 +53,22 @@ name: Open the client
             - tapOn:
                 text: "Open"
                 optional: true
+            - tapOn:
+                text: "Try again"
+                optional: true
+            - extendedWaitUntil:
+                visible: "Сегодня|Continue|Добро пожаловать"
+                timeout: 60000
+                optional: true
+            - tapOn:
+                text: "Continue"
+                optional: true
+            - tapOn:
+                text: "Close"
+                optional: true
 - extendedWaitUntil:
     visible: "Сегодня"
-    timeout: 60000
+    timeout: 120000
 # Expo Go floats its tools button over the top right corner, exactly where the navigation bar keeps
 # its own buttons ("Действия: …", the gear), and hides them from Maestro too. Drag it down beside
 # the tab bar, out of their way, for every flow after this one.

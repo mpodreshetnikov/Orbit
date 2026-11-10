@@ -269,9 +269,24 @@ jobs:
           major=$(( server > floor ? server : floor ))
           echo "database pinned to ${server}, snapshot flags need ${floor}: installing client ${major}"
           sudo install -d /usr/share/postgresql-common/pgdg
-          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
-            https://www.postgresql.org/media/keys/ACCC4CF8.asc
-          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+          # postgresql.org apt-key fetch flakes with curl:(56) on GHA (Orbit#248: cda7946, e9be639).
+          # Retry here — gh run rerun is 403 for this integration, and empty commits skip QG.
+          key=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+          ok=0
+          for attempt in 1 2 3 4 5; do
+            if sudo curl -fsSL --retry 2 --retry-delay 2 --retry-all-errors \
+              -o "$key" https://www.postgresql.org/media/keys/ACCC4CF8.asc; then
+              ok=1
+              break
+            fi
+            echo "postgresql.org apt key fetch attempt ${attempt} failed; retrying..."
+            sleep $((attempt * 3))
+          done
+          if [[ "$ok" -ne 1 ]]; then
+            echo "::error::failed to fetch postgresql.org apt key after 5 attempts"
+            exit 56
+          fi
+          echo "deb [signed-by=${key}] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
             | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends "postgresql-client-${major}"

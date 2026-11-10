@@ -52,6 +52,7 @@ describe("registerHealthTools", () => {
         "get_measurement_history",
         "get_medical_record",
         "get_medication",
+        "get_notification_settings",
         "get_observation_history",
         "get_person",
         "get_upload_links",
@@ -61,12 +62,16 @@ describe("registerHealthTools", () => {
         "list_measurements",
         "list_medication_doses",
         "list_medications",
+        "get_money_spending_report",
+        "get_money_transaction_details",
         "list_money_accounts",
         "list_money_categories",
         "list_money_transactions",
+        "search_money_line_items",
         "list_pending_records",
         "list_persons",
         "log_dose",
+        "mark_checkup_done",
         "search_catalog_entries",
         "add_catalog_synonyms",
         "create_catalog_entries",
@@ -78,7 +83,9 @@ describe("registerHealthTools", () => {
         "remove_medical_record",
         "search_medical_records",
         "search_observations",
+        "update_notification_settings",
         "upsert_catalog_entry",
+        "update_checkup_schedule",
         "update_medication",
       ].sort(),
     );
@@ -118,9 +125,12 @@ describe("registerHealthTools", () => {
     "get_upload_links",
     "ingest_medical_document",
     "log_dose",
+    "mark_checkup_done",
     "propose_reconciliation",
     "remove_medical_record",
+    "update_checkup_schedule",
     "update_medication",
+    "update_notification_settings",
     "upsert_catalog_entry",
   ];
 
@@ -204,7 +214,10 @@ describe("registerHealthTools", () => {
       "list_checkups",
       "list_medications",
       "list_money_transactions",
+      "get_money_transaction_details",
+      "search_money_line_items",
       "list_money_accounts",
+      "get_money_spending_report",
     ];
 
     for (const name of personScoped) {
