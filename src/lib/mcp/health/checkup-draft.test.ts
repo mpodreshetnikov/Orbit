@@ -4,6 +4,21 @@ import { createSupabaseStub } from "./test-support";
 
 const PERSON = { id: "p-1", name: "Максим" };
 
+function item(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "c-1",
+    person_id: "p-1",
+    title: "Blood panel",
+    category: "lab",
+    status: "active",
+    schedule: { type: "interval", every: 6, unit: "month" },
+    next_due_at: "2026-06-20",
+    planned_on: null,
+    reminder_days_before: [7],
+    ...overrides,
+  };
+}
+
 describe("buildCreateCheckupDraft", () => {
   it("refuses a title that already exists", async () => {
     const stub = createSupabaseStub({
@@ -19,10 +34,8 @@ describe("buildCreateCheckupDraft", () => {
     if (!built.ok) expect(built.error).toMatch(/already scheduled/);
   });
 
-  it("builds a create draft with first due label", async () => {
-    const stub = createSupabaseStub({
-      checkup_items: [{ data: [] }],
-    });
+  it("builds a create draft; omitted reminders preview DB default [7]", async () => {
+    const stub = createSupabaseStub({ checkup_items: [{ data: [] }] });
     const built = await buildCreateCheckupDraft(stub.client, PERSON, {
       title: "УЗИ",
       category: "imaging",
@@ -32,104 +45,78 @@ describe("buildCreateCheckupDraft", () => {
     });
     expect(built.ok).toBe(true);
     if (built.ok) {
-      expect(built.draft.mode).toBe("create");
-      expect(built.draft.title).toBe("УЗИ");
+      expect(built.draft).toMatchObject({ mode: "create", title: "УЗИ", reminders_label: "7д" });
       expect(built.draft.input).toMatchObject({ title: "УЗИ", category: "imaging" });
-      // Omitted reminders → preview the DB default [7], leave input omitted.
-      expect(built.draft.reminders_label).toBe("7д");
       expect(built.draft.input).not.toHaveProperty("reminder_days_before");
     }
   });
 
-  it("previews and persists an explicit empty reminder list on create", async () => {
+  it("previews and persists explicit empty/null create reminders (not DB default)", async () => {
+    const empty = {
+      title: "УЗИ",
+      category: "imaging" as const,
+      schedule: { type: "one_off" as const, due_at: "2026-12-01" },
+      why: "без напоминаний",
+      reminder_days_before: [] as number[],
+    };
     const stub = createSupabaseStub({
       checkup_items: [
-        { data: [] }, // build: review
-        { data: [] }, // apply→build: review
-        { data: [] }, // apply→review again
-        { data: [{ id: "new-1", title: "УЗИ", next_due_at: "2026-12-01" }] }, // insert
-        { data: null }, // reminder update
+        { data: [] },
+        { data: [] },
+        { data: [] },
+        { data: [{ id: "new-1", title: "УЗИ", next_due_at: "2026-12-01" }] },
+        { data: null },
+        { data: [] },
+        { data: [] },
+        { data: [{ id: "new-2", title: "ОАК", next_due_at: "2026-12-01" }] },
+        { data: null },
       ],
     });
-    const built = await buildCreateCheckupDraft(stub.client, PERSON, {
-      title: "УЗИ",
-      category: "imaging",
-      schedule: { type: "one_off", due_at: "2026-12-01" },
-      why: "без напоминаний",
-      reminder_days_before: [],
-    });
+    const built = await buildCreateCheckupDraft(stub.client, PERSON, empty);
     expect(built.ok).toBe(true);
     if (built.ok) {
       expect(built.draft.reminders_label).toBe("нет");
       expect(built.draft.input.reminder_days_before).toEqual([]);
     }
+    expect((await applyCheckupDraft(stub.client, PERSON, "create", empty)).ok).toBe(true);
+    expect(stub.argsFor("checkup_items", "update")[0][0]).toEqual({ reminder_days_before: [] });
 
-    const applied = await applyCheckupDraft(stub.client, PERSON, "create", {
-      title: "УЗИ",
-      category: "imaging",
-      schedule: { type: "one_off", due_at: "2026-12-01" },
-      why: "без напоминаний",
-      reminder_days_before: [],
-    });
-    expect(applied.ok).toBe(true);
-    expect(stub.argsFor("checkup_items", "update")[0][0]).toEqual({
-      reminder_days_before: [],
-    });
-  });
-
-  it("persists null reminders as an empty array on create (not the DB default)", async () => {
-    const stub = createSupabaseStub({
-      checkup_items: [
-        { data: [] }, // apply→build review
-        { data: [] }, // apply→review
-        { data: [{ id: "new-1", title: "ОАК", next_due_at: "2026-12-01" }] }, // insert
-        { data: null }, // reminder update
-      ],
-    });
-    const applied = await applyCheckupDraft(stub.client, PERSON, "create", {
-      title: "ОАК",
-      category: "lab",
-      schedule: { type: "one_off", due_at: "2026-12-01" },
-      why: "clear",
-      reminder_days_before: null,
-    });
-    expect(applied.ok).toBe(true);
-    expect(stub.argsFor("checkup_items", "update")[0][0]).toEqual({
-      reminder_days_before: [],
-    });
+    expect(
+      (
+        await applyCheckupDraft(stub.client, PERSON, "create", {
+          title: "ОАК",
+          category: "lab",
+          schedule: { type: "one_off", due_at: "2026-12-01" },
+          why: "clear",
+          reminder_days_before: null,
+        })
+      ).ok,
+    ).toBe(true);
+    expect(stub.argsFor("checkup_items", "update")[1][0]).toEqual({ reminder_days_before: [] });
   });
 });
 
 describe("buildEditCheckupDraft / applyCheckupDraft", () => {
   it("edits title and status on an existing checkup", async () => {
-    const current = {
-      id: "c-1",
-      person_id: "p-1",
-      title: "Blood panel",
-      category: "lab",
-      status: "active",
-      schedule: { type: "interval", every: 6, unit: "month" },
-      next_due_at: "2026-06-20",
-      planned_on: null,
-      reminder_days_before: [7],
-    };
+    const current = item();
     const stub = createSupabaseStub({
       checkup_items: [
-        { data: current }, // load for build
-        { data: { why_text: "контроль", notes: null } }, // detail
-        { data: current }, // load for apply
-        { data: null }, // update
-        { data: { ...current, title: "Панель крови", status: "paused" } }, // reload
+        { data: current },
+        { data: { why_text: "контроль", notes: null } },
+        { data: current },
+        { data: null },
+        { data: { ...current, title: "Панель крови", status: "paused" } },
       ],
     });
-
-    const built = await buildEditCheckupDraft(stub.client, PERSON, {
-      checkup_id: "c-1",
-      title: "Панель крови",
-      status: "paused",
-    });
-    expect(built.ok).toBe(true);
-
+    expect(
+      (
+        await buildEditCheckupDraft(stub.client, PERSON, {
+          checkup_id: "c-1",
+          title: "Панель крови",
+          status: "paused",
+        })
+      ).ok,
+    ).toBe(true);
     const applied = await applyCheckupDraft(stub.client, PERSON, "edit", {
       checkup_id: "c-1",
       title: "Панель крови",
@@ -143,27 +130,20 @@ describe("buildEditCheckupDraft / applyCheckupDraft", () => {
     });
   });
 
-  it("reactivates completed when converting schedule to interval", async () => {
-    const current = {
-      id: "c-1",
-      person_id: "p-1",
+  it("previews reactivation + proposed due; apply writes active", async () => {
+    const current = item({
       title: "One-off visit",
       category: "visit",
       status: "completed",
       schedule: { type: "one_off", due_at: "2026-01-01" },
       next_due_at: null,
-      planned_on: null,
       reminder_days_before: [],
-    };
-    const previewStub = createSupabaseStub({
-      checkup_items: [
-        { data: current }, // load
-        { data: { why_text: null, notes: null } }, // detail
-      ],
+    });
+    const preview = createSupabaseStub({
+      checkup_items: [{ data: current }, { data: { why_text: null, notes: null } }],
       checkup_completions: [{ count: 0 }],
     });
-
-    const built = await buildEditCheckupDraft(previewStub.client, PERSON, {
+    const built = await buildEditCheckupDraft(preview.client, PERSON, {
       checkup_id: "c-1",
       schedule: { type: "interval", every: 1, unit: "year", first_due_at: "2027-01-01" },
     });
@@ -175,116 +155,79 @@ describe("buildEditCheckupDraft / applyCheckupDraft", () => {
 
     const applyStub = createSupabaseStub({
       checkup_items: [
-        { data: current }, // apply→build: load
-        { data: { why_text: null, notes: null } }, // apply→build: detail
-        { data: current }, // apply: load
-        { data: null }, // update
-        { data: { ...current, status: "active" } }, // reload
+        { data: current },
+        { data: { why_text: null, notes: null } },
+        { data: current },
+        { data: null },
+        { data: { ...current, status: "active" } },
       ],
-      checkup_completions: [
-        { data: null }, // latestCompletionDay (frequency-only schedule, no first_due_at)
-      ],
+      checkup_completions: [{ data: null }],
     });
-    const applied = await applyCheckupDraft(applyStub.client, PERSON, "edit", {
-      checkup_id: "c-1",
-      schedule: { type: "interval", every: 1, unit: "year" },
-    });
-    expect(applied.ok).toBe(true);
+    expect(
+      (
+        await applyCheckupDraft(applyStub.client, PERSON, "edit", {
+          checkup_id: "c-1",
+          schedule: { type: "interval", every: 1, unit: "year" },
+        })
+      ).ok,
+    ).toBe(true);
     expect(applyStub.argsFor("checkup_items", "update")[0][0]).toMatchObject({
       status: "active",
       schedule: { type: "interval", every: 1, unit: "year" },
     });
   });
 
-  it("does not show stale why/notes when the edit explicitly clears them", async () => {
-    const current = {
-      id: "c-1",
-      person_id: "p-1",
-      title: "Blood panel",
-      category: "lab",
-      status: "active",
-      schedule: { type: "interval", every: 6, unit: "month" },
-      next_due_at: "2026-06-20",
-      planned_on: null,
-      reminder_days_before: [7],
-    };
-    const stub = createSupabaseStub({
+  it("edit preview: explicit clear vs omitted why/notes; proposed first_due not stale", async () => {
+    const current = item({
+      schedule: { type: "interval", every: 6, unit: "month", anchor_date: "2025-12-20" },
+    });
+    const clearStub = createSupabaseStub({
       checkup_items: [
         { data: current },
         { data: { why_text: "старый why", notes: "старые notes" } },
       ],
     });
-
-    const built = await buildEditCheckupDraft(stub.client, PERSON, {
+    const cleared = await buildEditCheckupDraft(clearStub.client, PERSON, {
       checkup_id: "c-1",
       why_text: null,
       notes: "",
     });
-    expect(built.ok).toBe(true);
-    if (built.ok) {
-      expect(built.draft.why).toBeNull();
-      expect(built.draft.notes).toBeNull();
-      expect(built.draft.input).toMatchObject({ why_text: null, notes: null });
+    expect(cleared.ok).toBe(true);
+    if (cleared.ok) {
+      expect(cleared.draft.why).toBeNull();
+      expect(cleared.draft.notes).toBeNull();
+      expect(cleared.draft.input).toMatchObject({ why_text: null, notes: null });
     }
-  });
 
-  it("keeps current why/notes in the preview when those fields are omitted", async () => {
-    const current = {
-      id: "c-1",
-      person_id: "p-1",
-      title: "Blood panel",
-      category: "lab",
-      status: "active",
-      schedule: { type: "interval", every: 6, unit: "month" },
-      next_due_at: "2026-06-20",
-      planned_on: null,
-      reminder_days_before: [7],
-    };
-    const stub = createSupabaseStub({
+    const keepStub = createSupabaseStub({
       checkup_items: [
         { data: current },
         { data: { why_text: "контроль", notes: "с собой направление" } },
       ],
     });
-
-    const built = await buildEditCheckupDraft(stub.client, PERSON, {
+    const kept = await buildEditCheckupDraft(keepStub.client, PERSON, {
       checkup_id: "c-1",
       title: "Панель крови",
     });
-    expect(built.ok).toBe(true);
-    if (built.ok) {
-      expect(built.draft.why).toBe("контроль");
-      expect(built.draft.notes).toBe("с собой направление");
-      expect(built.draft.input).not.toHaveProperty("why_text");
-      expect(built.draft.input).not.toHaveProperty("notes");
+    expect(kept.ok).toBe(true);
+    if (kept.ok) {
+      expect(kept.draft).toMatchObject({ why: "контроль", notes: "с собой направление" });
+      expect(kept.draft.input).not.toHaveProperty("why_text");
+      expect(kept.draft.input).not.toHaveProperty("notes");
     }
-  });
 
-  it("previews the proposed first_due_at, not the stale current next_due_at", async () => {
-    const current = {
-      id: "c-1",
-      person_id: "p-1",
-      title: "Blood panel",
-      category: "lab",
-      status: "active",
-      schedule: { type: "interval", every: 6, unit: "month", anchor_date: "2025-12-20" },
-      next_due_at: "2026-06-20",
-      planned_on: null,
-      reminder_days_before: [7],
-    };
-    const stub = createSupabaseStub({
+    const dueStub = createSupabaseStub({
       checkup_items: [{ data: current }, { data: { why_text: null, notes: null } }],
       checkup_completions: [{ count: 0 }],
     });
-
-    const built = await buildEditCheckupDraft(stub.client, PERSON, {
+    const due = await buildEditCheckupDraft(dueStub.client, PERSON, {
       checkup_id: "c-1",
       schedule: { type: "interval", every: 3, unit: "month", first_due_at: "2026-09-01" },
     });
-    expect(built.ok).toBe(true);
-    if (built.ok) {
-      expect(built.draft.first_due_label).toMatch(/сентября 2026|1 сентября/);
-      expect(built.draft.first_due_label).not.toMatch(/июня 2026|20 июня/);
+    expect(due.ok).toBe(true);
+    if (due.ok) {
+      expect(due.draft.first_due_label).toMatch(/сентября 2026|1 сентября/);
+      expect(due.draft.first_due_label).not.toMatch(/июня 2026|20 июня/);
     }
   });
 });
@@ -320,7 +263,6 @@ describe("checkup draft Markdown fallback", () => {
     expect(md).toContain("## Метаданные");
     expect(md).toContain("## Зачем");
     expect(md).not.toMatch(/\|/);
-
     const instructions = checkupDraftTextFallbackInstructions(view);
     expect(instructions).toMatch(/cannot show the MCP App/i);
     expect(instructions).toMatch(/confirm_checkup_draft/);
