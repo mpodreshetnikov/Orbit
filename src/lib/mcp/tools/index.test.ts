@@ -68,6 +68,7 @@ describe("registerHealthTools", () => {
         "list_pending_records",
         "list_persons",
         "log_dose",
+        "mark_checkup_done",
         "search_catalog_entries",
         "add_catalog_synonyms",
         "create_catalog_entries",
@@ -80,6 +81,7 @@ describe("registerHealthTools", () => {
         "search_medical_records",
         "search_observations",
         "upsert_catalog_entry",
+        "update_checkup_schedule",
         "update_medication",
       ].sort(),
     );
@@ -119,8 +121,10 @@ describe("registerHealthTools", () => {
     "get_upload_links",
     "ingest_medical_document",
     "log_dose",
+    "mark_checkup_done",
     "propose_reconciliation",
     "remove_medical_record",
+    "update_checkup_schedule",
     "update_medication",
     "upsert_catalog_entry",
   ];
