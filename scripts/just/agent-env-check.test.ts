@@ -237,12 +237,13 @@ describe("the check", () => {
   });
 
   it("refuses an unknown agent harness fail-closed (no silent pass)", () => {
-    for (const env of [
+    const cases: Record<string, string>[] = [
       { OPENCODE: "1", AGENT: "1" },
       { PI_CODING_AGENT: "true", AI_AGENT: "pi" },
       { AI_AGENT: "some-new-harness_1-0" },
       { AGENT: "1" },
-    ]) {
+    ];
+    for (const env of cases) {
       const result = check({ env, home: "/nonexistent" });
       expect(result.ok).toBe(false);
       expect(result.message).toContain("REFUSED");
