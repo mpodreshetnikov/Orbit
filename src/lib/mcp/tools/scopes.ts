@@ -1,4 +1,9 @@
-import { MCP_SCOPE_MONEY_READ, MCP_SCOPE_MONEY_WRITE, MCP_SCOPE_READ, MCP_SCOPE_WRITE } from "../config";
+import {
+  MCP_SCOPE_MONEY_READ,
+  MCP_SCOPE_MONEY_WRITE,
+  MCP_SCOPE_READ,
+  MCP_SCOPE_WRITE,
+} from "../config";
 import type { ToolOptions } from "../tool-context";
 
 /**
