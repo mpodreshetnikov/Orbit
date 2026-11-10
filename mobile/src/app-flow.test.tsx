@@ -72,8 +72,11 @@ describe("the app", () => {
     setSession(fakeSession(USER_ID));
     await renderApp("/");
     expect((await screen.findAllByText("Vitamin D3")).length).toBeGreaterThan(0);
-    // Every tab is mounted: only the money tab's feed is asked of a function.
-    expect(calls.rpc.filter((call) => !call.name.startsWith("money_"))).toEqual([]);
+    // Every tab is mounted: money's feed and the health dashboard's conditions RPC are the
+    // functions asked up front; table reads for the other health tiles are not RPCs.
+    expect(
+      calls.rpc.filter((call) => !call.name.startsWith("money_")).map((call) => call.name),
+    ).toEqual(["get_person_conditions_with_history"]);
   });
 
   it("says why the sign-in could not start", async () => {

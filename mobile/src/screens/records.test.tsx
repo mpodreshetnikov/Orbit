@@ -197,6 +197,13 @@ describe("Health tab documents", () => {
     expect(await screen.findByText("МРТ колена")).toBeOnTheScreen();
   });
 
+  it("keeps a ?q= search from the health hub", async () => {
+    await renderScreens(routes, "/health/records?q=%D0%BA%D1%80%D0%BE%D0%B2%D0%B8");
+    expect(await screen.findByText("Общий анализ крови")).toBeOnTheScreen();
+    expect(screen.queryByText("МРТ колена")).toBeNull();
+    expect(screen.queryByText("Приём терапевта")).toBeNull();
+  });
+
   it("reads every page of a long list, so an old document can be found", async () => {
     const many = Array.from({ length: 1000 }, (_, index) =>
       record(`r-${index}`, `Анализ ${index}`, { record_date: "2026-10-20" }),

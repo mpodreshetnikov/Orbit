@@ -1,5 +1,5 @@
-# Measurements: the health tab's menu, the list by category, and a value's chart and history.
-# View-only — recording and visibility editing live with the agent, not on the phone.
+# Measurements: the health dashboard secondary row, the list by category, and a value's chart and
+# history. View-only — recording and visibility editing live with the agent, not on the phone.
 appId: host.exp.Exponent
 name: Измерения
 ---
@@ -8,9 +8,14 @@ name: Измерения
 - tapOn:
     text: "Open"
     optional: true
-- extendedWaitUntil:
-    visible: "Измерения" # The card reads as its title; the description is not its own element.
-    timeout: 60000
+# Secondary charts sit under the checkup strip — scroll before asserting so a tall hub
+# (more overdue/upcoming rows) does not hide the header from the a11y tree.
+- scrollUntilVisible:
+    element: "Анализы и измерения"
+    centerElement: true
+- scrollUntilVisible:
+    element: "Измерения"
+    centerElement: true
 - takeScreenshot: measurements-01-health
 - tapOn: "Измерения"
 - extendedWaitUntil:
