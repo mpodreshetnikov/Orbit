@@ -2,15 +2,22 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 import type { CheckupCategory, CheckupItemStatus } from "@/types/checkup";
 import {
+  addInterval,
   addProposedCheckups,
   completionCount,
+  firstDueDate,
+  latestCompletionDay,
   loadCheckupItem,
   normalizeReminderDays,
   reviewCheckupProposals,
   scheduleColumnFromWrite,
+  type CheckupItemSnapshot,
   type CheckupScheduleWrite,
   type ProposedCheckup,
 } from "./checkups";
+
+/** DB default for `checkup_items.reminder_days_before` when the insert omits the column. */
+const CREATE_DEFAULT_REMINDERS = [7];
 
 type Client = SupabaseClient<Database>;
 
@@ -103,6 +110,55 @@ function scheduleWords(schedule: ProposedCheckup["schedule"] | CheckupScheduleWr
   if (schedule.type === "one_off") return `однократно · ${schedule.due_at}`;
   const unitRu = schedule.unit === "week" ? "нед." : schedule.unit === "month" ? "мес." : "г.";
   return `раз в ${schedule.every} ${unitRu}`;
+}
+
+function remindersLabel(days: number[] | null | undefined): string {
+  if (!days || days.length === 0) return "нет";
+  return days.map((d) => `${d}д`).join(", ");
+}
+
+/**
+ * Status the card should show for an edit — same reactivation rule as `applyCheckupDraft`
+ * (interval write on a completed item becomes active).
+ */
+function effectiveEditStatus(
+  current: CheckupItemSnapshot,
+  input: CheckupEditDraftInput,
+): CheckupItemStatus {
+  const requested = (input.status ?? current.status) as CheckupItemStatus;
+  if (input.schedule?.type === "interval" && requested === "completed") return "active";
+  return requested;
+}
+
+/**
+ * Next-due day the schedule write will leave after DB recompute — not the stale
+ * `current.next_due_at` when the draft changes first_due / one-off / frequency.
+ */
+async function effectiveEditNextDueAt(
+  supabase: Client,
+  current: CheckupItemSnapshot,
+  input: CheckupEditDraftInput,
+): Promise<string | null> {
+  if (input.schedule === undefined) return current.next_due_at;
+  if (input.schedule.type === "one_off") return input.schedule.due_at;
+
+  const interval = {
+    type: "interval" as const,
+    every: input.schedule.every,
+    unit: input.schedule.unit,
+  };
+  if (input.schedule.first_due_at) {
+    return firstDueDate(interval, input.schedule.first_due_at, todayUtc());
+  }
+
+  const column = scheduleColumnFromWrite(input.schedule, current.schedule);
+  const latestDone = await latestCompletionDay(supabase, current.id);
+  const anchor =
+    typeof column.anchor_date === "string" && column.anchor_date.length > 0
+      ? column.anchor_date
+      : null;
+  const base = latestDone ?? anchor ?? todayUtc();
+  return addInterval(base, interval.every, interval.unit);
 }
 
 export function checkupDraftSummaryText(draft: CheckupDraftView): string {
@@ -214,12 +270,18 @@ export async function buildCreateCheckupDraft(
   const accepted = review.accepted[0]!;
   const reminders = normalizeReminderDays(input.reminder_days_before);
   const draftInput: CheckupCreateDraftInput = {
-    ...input,
     title: input.title.trim(),
+    category: input.category,
+    schedule: input.schedule,
+    first_due_at: input.first_due_at,
     why: input.why.trim(),
+    condition_id: input.condition_id,
     notes: input.notes?.trim() ? input.notes.trim() : null,
-    reminder_days_before: reminders === undefined ? undefined : reminders,
+    evidence_record_id: input.evidence_record_id,
+    ...(reminders !== undefined ? { reminder_days_before: reminders } : {}),
   };
+  // Omitted → DB default [7] after insert; explicit []/null → empty array on confirm.
+  const previewReminders = reminders === undefined ? CREATE_DEFAULT_REMINDERS : reminders;
   return {
     ok: true,
     draft: {
@@ -233,8 +295,7 @@ export async function buildCreateCheckupDraft(
       first_due_label: russianDate(accepted.first_due_at),
       status_label: STATUS_LABELS.active,
       planned_on_label: null,
-      reminders_label:
-        reminders && reminders.length > 0 ? reminders.map((d) => `${d}д`).join(", ") : null,
+      reminders_label: remindersLabel(previewReminders),
       why: draftInput.why,
       notes: draftInput.notes ?? null,
       condition_name: accepted.condition_name,
@@ -276,29 +337,33 @@ export async function buildEditCheckupDraft(
     input.schedule !== undefined
       ? scheduleColumnFromWrite(input.schedule, current.schedule)
       : (current.schedule as ProposedCheckup["schedule"]);
-  const status = input.status ?? (current.status as CheckupItemStatus);
+  const status = effectiveEditStatus(current, input);
   const reminders =
     input.reminder_days_before !== undefined
       ? (normalizeReminderDays(input.reminder_days_before) ?? [])
       : current.reminder_days_before;
   const plannedOn = input.planned_on !== undefined ? input.planned_on : current.planned_on;
-  const whyText = input.why_text !== undefined ? input.why_text?.trim() || null : null;
-  const notes = input.notes !== undefined ? input.notes?.trim() || null : null;
+  const nextDueAt = await effectiveEditNextDueAt(supabase, current, input);
 
-  // Pull why/notes from DB when not in the edit payload so the card shows current values.
+  // Pull why/notes from DB when omitted so the card shows current values. Explicit
+  // null/"" must preview as cleared — same outcome as apply — not the stale row text.
   const { data: detail } = await supabase
     .from("checkup_items")
     .select("why_text, notes")
     .eq("id", current.id)
     .maybeSingle();
   const detailRow = detail as { why_text: string | null; notes: string | null } | null;
+  const whyText =
+    input.why_text !== undefined ? input.why_text?.trim() || null : (detailRow?.why_text ?? null);
+  const notes =
+    input.notes !== undefined ? input.notes?.trim() || null : (detailRow?.notes ?? null);
 
   const draftInput: CheckupEditDraftInput = {
     checkup_id: current.id,
     ...(input.title !== undefined ? { title } : {}),
     ...(input.category !== undefined ? { category } : {}),
     ...(input.schedule !== undefined ? { schedule: input.schedule } : {}),
-    ...(input.status !== undefined ? { status } : {}),
+    ...(input.status !== undefined ? { status: input.status } : {}),
     ...(input.reminder_days_before !== undefined ? { reminder_days_before: reminders } : {}),
     ...(input.planned_on !== undefined ? { planned_on: plannedOn } : {}),
     ...(input.why_text !== undefined ? { why_text: whyText } : {}),
@@ -315,13 +380,12 @@ export async function buildEditCheckupDraft(
       title,
       category_label: CATEGORY_LABELS[category],
       schedule_label: scheduleWords(schedule as ProposedCheckup["schedule"]),
-      first_due_label: russianDate(current.next_due_at),
+      first_due_label: russianDate(nextDueAt),
       status_label: STATUS_LABELS[status],
       planned_on_label: russianDate(plannedOn),
-      reminders_label:
-        reminders && reminders.length > 0 ? reminders.map((d) => `${d}д`).join(", ") : "нет",
-      why: whyText ?? detailRow?.why_text ?? null,
-      notes: notes ?? detailRow?.notes ?? null,
+      reminders_label: remindersLabel(reminders),
+      why: whyText,
+      notes,
       condition_name: null,
       input: draftInput,
     },
@@ -360,7 +424,9 @@ export async function applyCheckupDraft(
     }
     const row = added[0]!;
     const reminders = normalizeReminderDays(input.reminder_days_before);
-    if (reminders && reminders.length > 0) {
+    // Persist whenever the draft set the field — including [] / null → empty, so the
+    // column does not keep the insert default [7].
+    if (reminders !== undefined) {
       const { error } = await supabase
         .from("checkup_items")
         .update({ reminder_days_before: reminders })
