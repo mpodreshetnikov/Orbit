@@ -5,6 +5,7 @@ import {
   buildCreateRuleDraft,
   buildDeleteRuleDraft,
   buildUpdateRuleDraft,
+  invalidRegexFilterMessage,
   listMoneyCategoryRules,
 } from "./category-rules";
 
@@ -114,6 +115,47 @@ describe("rule CRUD drafts", () => {
     expect(built.error).toMatch(/unsupported rule_kind|Unknown or unsupported/i);
   });
 
+  it("rejects invalid regex filters on create (same as ruleFormProblem)", async () => {
+    expect(
+      invalidRegexFilterMessage([
+        { field: "merchant_name", operator: "regex", value: "(unclosed" },
+      ]),
+    ).toMatch(/Invalid regex/i);
+
+    const built = await buildCreateRuleDraft(mockClient({}), PERSON, {
+      name: "Broken",
+      rule_kind: "mcc_map",
+      filters: [{ field: "merchant_name", operator: "regex", value: "(unclosed" }],
+    });
+    expect(built.ok).toBe(false);
+    if (built.ok) return;
+    expect(built.error).toMatch(/Invalid regex/i);
+  });
+
+  it("rejects invalid regex filters on update/confirm path", async () => {
+    const maybeSingle = vi.fn().mockResolvedValue({ data: ruleRow(), error: null });
+    const eqPerson = vi.fn(() => ({ maybeSingle }));
+    const eqId = vi.fn(() => ({ eq: eqPerson }));
+    const select = vi.fn(() => ({ eq: eqId }));
+    const from = vi.fn(() => ({ select }));
+
+    const built = await buildUpdateRuleDraft(mockClient({ from }), PERSON, {
+      rule_id: RULE_ID,
+      filters: [{ field: "title", operator: "regex", value: "[a-" }],
+    });
+    expect(built.ok).toBe(false);
+    if (built.ok) return;
+    expect(built.error).toMatch(/Invalid regex/i);
+
+    const confirmed = await applyRuleDraft(mockClient({ from }), PERSON, "rule_update", {
+      rule_id: RULE_ID,
+      filters: [{ field: "title", operator: "regex", value: "[a-" }],
+    });
+    expect(confirmed.ok).toBe(false);
+    if (confirmed.ok) return;
+    expect(confirmed.error).toMatch(/Invalid regex/i);
+  });
+
   it("summarizes filter predicates and config on create", async () => {
     const orderCreated = vi.fn().mockResolvedValue({ data: [], error: null });
     const orderSort = vi.fn(() => ({ order: orderCreated }));
@@ -201,6 +243,111 @@ describe("rule apply preview", () => {
     expect(built.ok).toBe(false);
     if (built.ok) return;
     expect(built.error).toMatch(/exactly one/i);
+  });
+
+  it("paginates date-range scope past PostgREST max_rows so total matches apply", async () => {
+    const pageSize = 1000;
+    const txPage1 = Array.from({ length: pageSize }, (_, i) => ({
+      id: `aaaaaaaa-aaaa-4aaa-8aaa-${String(i).padStart(12, "0")}`,
+    }));
+    const txPage2 = Array.from({ length: 50 }, (_, i) => ({
+      id: `bbbbbbbb-bbbb-4bbb-8bbb-${String(i).padStart(12, "0")}`,
+    }));
+    let txRangeCalls = 0;
+    const txRanges: Array<{ from: number; to: number }> = [];
+
+    const llmCount = vi.fn().mockResolvedValue({ count: 0, error: null });
+    const from = vi.fn((table: string) => {
+      if (table === "money_transactions") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              gte: vi.fn(() => ({
+                lt: vi.fn(() => ({
+                  order: vi.fn(() => ({
+                    range: vi.fn(async (fromIdx: number, toIdx: number) => {
+                      txRangeCalls += 1;
+                      txRanges.push({ from: fromIdx, to: toIdx });
+                      if (fromIdx === 0) return { data: txPage1, error: null };
+                      if (fromIdx === pageSize) return { data: txPage2, error: null };
+                      return { data: [], error: null };
+                    }),
+                  })),
+                })),
+              })),
+            })),
+          })),
+        };
+      }
+      if (table === "money_line_items") {
+        return {
+          select: vi.fn(() => ({
+            in: vi.fn((_col: string, chunk: string[]) => ({
+              order: vi.fn(() => ({
+                range: vi.fn(async (fromIdx: number, toIdx: number) => {
+                  if (fromIdx > 0) return { data: [], error: null };
+                  // One line per tx in this chunk page.
+                  const data = chunk
+                    .slice(0, Math.min(chunk.length, toIdx - fromIdx + 1))
+                    .map((txId) => ({ id: txId.replace(/^./, "c") }));
+                  return { data, error: null };
+                }),
+              })),
+            })),
+          })),
+        };
+      }
+      if (table === "money_category_rules") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                eq: llmCount,
+                in: llmCount,
+              })),
+            })),
+          })),
+        };
+      }
+      if (table === "money_categories") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              maybeSingle: vi.fn().mockResolvedValue({
+                data: { name_ru: "Еда", name_en: "Food", slug: "food" },
+                error: null,
+              }),
+            })),
+          })),
+        };
+      }
+      throw new Error(table);
+    });
+
+    const rpc = vi
+      .fn()
+      .mockImplementation(async (_name: string, args: Record<string, unknown>) => ({
+        data: {
+          line_item_id: args.p_line_item_id,
+          line_item_title: "x",
+          merchant_name: null,
+          starting_category_id: null,
+          final_category_id: CAT_ID,
+        },
+        error: null,
+      }));
+
+    const built = await buildApplyRulesDraft(mockClient({ from, rpc }), PERSON, {
+      from: "2026-01-01",
+      to: "2026-01-31",
+    });
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(txRangeCalls).toBeGreaterThanOrEqual(2);
+    expect(txRanges[0]).toEqual({ from: 0, to: 999 });
+    expect(built.draft.summary_lines.join("\n")).toMatch(/1050 line item/);
+    expect(built.draft.summary_lines.join("\n")).toMatch(/превью: 40 строк/);
+    expect(built.draft.summary_lines.join("\n")).toMatch(/из 1050/);
   });
 
   it("rejects rule_ids so preview cannot subset what apply cannot (P1)", async () => {

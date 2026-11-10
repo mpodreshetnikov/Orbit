@@ -101,6 +101,8 @@ export interface RuleDraftView {
 }
 
 const PREVIEW_LINE_CAP = 40;
+/** PostgREST `max_rows` in supabase/config.toml — unpaged selects silently truncate here. */
+const POSTGREST_PAGE = 1000;
 
 /** YYYY-MM-DD + 1 calendar day in UTC (for half-open posted_at preview windows). */
 function nextUtcDateString(isoDate: string): string {
@@ -119,6 +121,44 @@ function isMatchMode(value: string): value is MoneyCategoryRuleMatchMode {
 
 function isScopeFilter(value: string): value is MoneyCategoryRuleScopeFilter {
   return (MONEY_CATEGORY_RULE_SCOPE_FILTERS as readonly string[]).includes(value);
+}
+
+/**
+ * Same as Rules page `ruleFormProblem` regex branch: a broken pattern must not be saved
+ * enabled into the pipeline (SQL `~` / JS RegExp would throw or mis-match).
+ */
+export function invalidRegexFilterMessage(
+  filters: MoneyCategoryRuleFilter[] | undefined,
+): string | null {
+  for (const filter of filters ?? []) {
+    if (filter.operator !== "regex") continue;
+    const pattern = typeof filter.value === "string" ? filter.value : "";
+    if (!pattern.trim()) continue;
+    try {
+      void new RegExp(pattern);
+    } catch {
+      return `Invalid regex filter on "${filter.field}": ${JSON.stringify(pattern)}`;
+    }
+  }
+  return null;
+}
+
+/** Page through a PostgREST query until a short page — avoids silent max_rows truncation. */
+async function fetchAllPaged<T>(
+  page: (
+    from: number,
+    to: number,
+  ) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<{ ok: true; rows: T[] } | { ok: false; error: string }> {
+  const rows: T[] = [];
+  for (let offset = 0; ; offset += POSTGREST_PAGE) {
+    const { data, error } = await page(offset, offset + POSTGREST_PAGE - 1);
+    if (error) return { ok: false, error: error.message };
+    const chunk = data ?? [];
+    rows.push(...chunk);
+    if (chunk.length < POSTGREST_PAGE) break;
+  }
+  return { ok: true, rows };
 }
 
 export async function listMoneyCategoryRules(
@@ -270,6 +310,8 @@ function validateCreateShape(
   if (input.rule_kind === "direct" && !input.target_category_id) {
     return { ok: false, error: "direct rules need target_category_id from list_money_categories." };
   }
+  const regexProblem = invalidRegexFilterMessage(input.filters);
+  if (regexProblem) return { ok: false, error: regexProblem };
   return {
     ok: true,
     normalized: {
@@ -393,6 +435,9 @@ export async function buildUpdateRuleDraft(
     config: input.config ?? existing.config,
     stop_processing: input.stop_processing ?? existing.stop_processing,
   };
+
+  const regexProblem = invalidRegexFilterMessage(normalized.filters);
+  if (regexProblem) return { ok: false, error: regexProblem };
 
   const beforeFilters = (existing.filters ?? []).map(formatFilterPredicate);
   const afterFilters = (normalized.filters ?? []).map(formatFilterPredicate);
@@ -519,22 +564,30 @@ async function resolveApplyLineIds(
 
   if (hasLines) {
     const ids = [...new Set(input.line_item_ids!)];
-    const { data: lines, error } = await supabase
-      .from("money_line_items")
-      .select("id, transaction_id")
-      .in("id", ids);
-    if (error) return { ok: false, error: error.message };
-    if ((lines ?? []).length !== ids.length) {
+    const found: { id: string; transaction_id: string }[] = [];
+    for (let i = 0; i < ids.length; i += POSTGREST_PAGE) {
+      const chunk = ids.slice(i, i + POSTGREST_PAGE);
+      const { data: lines, error } = await supabase
+        .from("money_line_items")
+        .select("id, transaction_id")
+        .in("id", chunk);
+      if (error) return { ok: false, error: error.message };
+      found.push(...((lines ?? []) as { id: string; transaction_id: string }[]));
+    }
+    if (found.length !== ids.length) {
       return { ok: false, error: "Some line_item_ids are missing." };
     }
-    const txIds = [...new Set((lines ?? []).map((row) => row.transaction_id))];
-    const { data: txs, error: txError } = await supabase
-      .from("money_transactions")
-      .select("id, payer_person_id")
-      .in("id", txIds);
-    if (txError) return { ok: false, error: txError.message };
-    if ((txs ?? []).some((tx) => tx.payer_person_id !== personId)) {
-      return { ok: false, error: "Some line_item_ids belong to another person." };
+    const txIds = [...new Set(found.map((row) => row.transaction_id))];
+    for (let i = 0; i < txIds.length; i += POSTGREST_PAGE) {
+      const chunk = txIds.slice(i, i + POSTGREST_PAGE);
+      const { data: txs, error: txError } = await supabase
+        .from("money_transactions")
+        .select("id, payer_person_id")
+        .in("id", chunk);
+      if (txError) return { ok: false, error: txError.message };
+      if ((txs ?? []).some((tx) => tx.payer_person_id !== personId)) {
+        return { ok: false, error: "Some line_item_ids belong to another person." };
+      }
     }
     return { ok: true, lineIds: ids, scopeLabel: `${ids.length} line item(s)` };
   }
@@ -550,12 +603,16 @@ async function resolveApplyLineIds(
     if (tx.payer_person_id !== personId) {
       return { ok: false, error: "That transaction belongs to a different person." };
     }
-    const { data: lines, error } = await supabase
-      .from("money_line_items")
-      .select("id")
-      .eq("transaction_id", tx.id);
-    if (error) return { ok: false, error: error.message };
-    const ids = (lines ?? []).map((row) => row.id);
+    const lines = await fetchAllPaged<{ id: string }>((from, to) =>
+      supabase
+        .from("money_line_items")
+        .select("id")
+        .eq("transaction_id", tx.id)
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
+    if (!lines.ok) return lines;
+    const ids = lines.rows.map((row) => row.id);
     if (ids.length === 0) {
       return { ok: false, error: "Transaction has no line items." };
     }
@@ -573,16 +630,21 @@ async function resolveApplyLineIds(
   }
   if (from > to) return { ok: false, error: "from must be on or before to." };
 
-  // Approximate the SQL RPC's posted_at::date window for preview sampling (confirm uses the RPC).
+  // Match SQL RPC posted_at::date window for sampling; confirm uses the date-range RPC.
+  // Paginate past PostgREST max_rows so scopeLabel total matches what apply will touch.
   const toExclusive = nextUtcDateString(to);
-  const { data: txs, error: txError } = await supabase
-    .from("money_transactions")
-    .select("id")
-    .eq("payer_person_id", personId)
-    .gte("posted_at", `${from}T00:00:00.000Z`)
-    .lt("posted_at", `${toExclusive}T00:00:00.000Z`);
-  if (txError) return { ok: false, error: txError.message };
-  const txIds = (txs ?? []).map((row) => row.id);
+  const txs = await fetchAllPaged<{ id: string }>((offsetFrom, offsetTo) =>
+    supabase
+      .from("money_transactions")
+      .select("id")
+      .eq("payer_person_id", personId)
+      .gte("posted_at", `${from}T00:00:00.000Z`)
+      .lt("posted_at", `${toExclusive}T00:00:00.000Z`)
+      .order("id", { ascending: true })
+      .range(offsetFrom, offsetTo),
+  );
+  if (!txs.ok) return txs;
+  const txIds = txs.rows.map((row) => row.id);
   if (txIds.length === 0) {
     return {
       ok: true,
@@ -590,12 +652,21 @@ async function resolveApplyLineIds(
       scopeLabel: `posted_at ${from}…${to} (0 line item(s))`,
     };
   }
-  const { data: lines, error } = await supabase
-    .from("money_line_items")
-    .select("id")
-    .in("transaction_id", txIds);
-  if (error) return { ok: false, error: error.message };
-  const ids = (lines ?? []).map((row) => row.id);
+
+  const ids: string[] = [];
+  for (let i = 0; i < txIds.length; i += POSTGREST_PAGE) {
+    const chunk = txIds.slice(i, i + POSTGREST_PAGE);
+    const lines = await fetchAllPaged<{ id: string }>((offsetFrom, offsetTo) =>
+      supabase
+        .from("money_line_items")
+        .select("id")
+        .in("transaction_id", chunk)
+        .order("id", { ascending: true })
+        .range(offsetFrom, offsetTo),
+    );
+    if (!lines.ok) return lines;
+    ids.push(...lines.rows.map((row) => row.id));
+  }
   return {
     ok: true,
     lineIds: ids,
