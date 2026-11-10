@@ -118,7 +118,13 @@
     "noRecordsDescription": "Загрузите первую медицинскую запись, чтобы начать.",
     "documents": "Документы",
     "allDocuments": "Все документы",
-    "noDocuments": "Документов пока нет. Их добавляют через Claude или в веб-версии."
+    "noDocuments": "Документов пока нет. Их добавляют через Claude или в веб-версии.",
+    "searchDocuments": "Поиск документов",
+    "openConditions": "{count, plural, one {# открытый} few {# открытых} many {# открытых} other {# открытых}}",
+    "activeFindings": "{count, plural, one {# активная} few {# активные} many {# активных} other {# активных}}",
+    "overdueCheckups": "{count, plural, one {# просрочен} few {# просрочены} many {# просрочено} other {# просрочено}}",
+    "allCheckups": "Все",
+    "secondaryCharts": "Анализы и измерения"
   },
   "money": {
     "title": "Деньги",

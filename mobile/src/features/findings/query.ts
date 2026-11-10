@@ -1,13 +1,12 @@
 import type { FindingSummary } from "@orbit-types/finding";
 import {
   FINDING_LIST_SELECT,
-  resolvedFindingRow,
   summarizeFindings,
   type FindingListRow,
 } from "@orbit-types/finding-summary";
 import { supabase } from "@/lib/supabase";
 
-/** A record a finding can be marked resolved on. */
+/** A record a finding's evidence picker can attach to. */
 export interface RecordChoice {
   id: string;
   title: string;
@@ -43,14 +42,4 @@ export async function fetchActiveRecords(personId: string): Promise<RecordChoice
       .order("record_date", { ascending: false }),
   );
   return rows as RecordChoice[];
-}
-
-export async function markFindingResolved(
-  personId: string,
-  recordId: string,
-  finding: FindingSummary,
-) {
-  check(
-    await supabase.from("record_findings").insert(resolvedFindingRow(personId, recordId, finding)),
-  );
 }

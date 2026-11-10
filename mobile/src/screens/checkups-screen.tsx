@@ -13,7 +13,6 @@ import {
   CalendarPlus,
   CheckCircle2,
   Clock,
-  Plus,
   type LucideIcon,
 } from "lucide-react-native";
 import { useState } from "react";
@@ -45,7 +44,7 @@ export function CheckupStatusBadge({ status }: { status: CheckupItemStatus }) {
 /**
  * The person's checkups — the web checkups page: overdue first, then this week's, later ones and
  * the rest, or one of those alone from the chips, narrowed by category and by the search bar. Each
- * card opens the checkup, and an active one is marked done or planned for a day from the card.
+ * card opens the checkup, and an active one is marked done from the card.
  */
 export default function CheckupsScreen() {
   const palette = usePalette();
@@ -95,16 +94,6 @@ export default function CheckupsScreen() {
     <Stack.Screen
       options={{
         title: t("checkups.navTitle"),
-        headerRight: () => (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={t("checkups.add")}
-            hitSlop={space.sm}
-            onPress={() => router.push("/health/checkups/form" as Href)}
-          >
-            <Icon icon={Plus} size={22} tone="foreground" />
-          </Pressable>
-        ),
         headerSearchBarOptions: {
           placeholder: t("common.search"),
           hideWhenScrolling: false,
@@ -222,7 +211,6 @@ export default function CheckupsScreen() {
             item={item}
             onPress={() => router.push(`/health/checkups/${item.id}` as Href)}
             onComplete={() => router.push(`/health/checkups/complete?id=${item.id}` as Href)}
-            onPlan={() => router.push(`/health/checkups/plan?id=${item.id}` as Href)}
           />
         )}
       />
@@ -235,12 +223,10 @@ function CheckupCard({
   item,
   onPress,
   onComplete,
-  onPlan,
 }: {
   item: CheckupItem;
   onPress: () => void;
   onComplete: () => void;
-  onPlan: () => void;
 }) {
   const palette = usePalette();
   const late = checkupLateness(item, isoDay(new Date()));
@@ -303,15 +289,6 @@ function CheckupCard({
             label={t("checkups.markComplete")}
             onPress={onComplete}
           />
-          {item.next_due_at ? (
-            <Button
-              compact
-              variant="outline"
-              icon={CalendarPlus}
-              label={t("checkups.plan")}
-              onPress={onPlan}
-            />
-          ) : null}
         </View>
       ) : null}
     </View>

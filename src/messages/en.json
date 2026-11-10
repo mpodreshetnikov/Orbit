@@ -118,7 +118,13 @@
     "noRecordsDescription": "Upload your first medical record to get started.",
     "documents": "Documents",
     "allDocuments": "All documents",
-    "noDocuments": "No documents yet. They are added through Claude or on the web."
+    "noDocuments": "No documents yet. They are added through Claude or on the web.",
+    "searchDocuments": "Search documents",
+    "openConditions": "{count, plural, one {# open} other {# open}}",
+    "activeFindings": "{count, plural, one {# active} other {# active}}",
+    "overdueCheckups": "{count, plural, one {# overdue} other {# overdue}}",
+    "allCheckups": "All",
+    "secondaryCharts": "Labs and measurements"
   },
   "money": {
     "title": "Money",

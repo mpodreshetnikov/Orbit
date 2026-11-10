@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
-import { fireEvent, screen, waitFor } from "@testing-library/react-native";
-import { ActionSheetIOS, Alert } from "react-native";
+import { fireEvent, screen } from "@testing-library/react-native";
 import FindingScreen from "@/screens/finding-screen";
 import FindingsScreen from "@/screens/findings-screen";
 import HealthScreen from "@/screens/health-screen";
@@ -139,46 +138,13 @@ describe("a finding's history", () => {
     expect(dates).toEqual(["10.02.2026", "10.01.2025"]);
   });
 
-  it("marks a finding resolved on a record picked from the sheet", async () => {
+  it("shows a finding without a resolve control", async () => {
     await renderScreens(routes, "/health/findings/cyst%3A%3Akidney_left");
-    const offered: string[][] = [];
-    jest
-      .spyOn(ActionSheetIOS, "showActionSheetWithOptions")
-      .mockImplementationOnce((options, callback) => {
-        offered.push(options.options);
-        callback(1);
-      });
-    await fireEvent.press(await screen.findByText("Отметить как устранённую"));
-
-    expect(offered[0]).toEqual(["УЗИ · 10.02.2026", "Осмотр", "Отмена"]);
-    await waitFor(() =>
-      expect(db.tables.record_findings.at(-1)).toMatchObject({
-        record_id: "rec-2",
-        finding_code: "cyst",
-        site_code: "kidney_left",
-        resolution_status: "resolved",
-        laterality: "left",
-      }),
-    );
+    expect(await screen.findByText("Последний размер")).toBeOnTheScreen();
+    expect(screen.queryByText("Отметить как устранённую")).toBeNull();
   });
 
-  it("says when marking it fails, and does nothing on cancel", async () => {
-    await renderScreens(routes, "/health/findings/cyst%3A%3Akidney_left");
-    const alert = jest.spyOn(Alert, "alert");
-    const sheet = jest.spyOn(ActionSheetIOS, "showActionSheetWithOptions");
-    sheet.mockImplementationOnce((_options, callback) => callback(2));
-    await fireEvent.press(await screen.findByText("Отметить как устранённую"));
-    expect(db.tables.record_findings).toHaveLength(4);
-
-    fail("record_findings");
-    sheet.mockImplementationOnce((_options, callback) => callback(0));
-    await fireEvent.press(screen.getByText("Отметить как устранённую"));
-    await waitFor(() =>
-      expect(alert).toHaveBeenCalledWith("Что-то пошло не так", "record_findings is unavailable"),
-    );
-  });
-
-  it("shows a resolved finding without the button to resolve it", async () => {
+  it("shows a resolved finding without a resolve control", async () => {
     await renderScreens(routes, "/health/findings/polyp%3A%3Aunknown");
     expect(await screen.findByText("Н/Д")).toBeOnTheScreen();
     expect(screen.getAllByText("Устранена")).toHaveLength(2);
@@ -199,15 +165,6 @@ describe("a finding's history", () => {
     expect(await screen.findByText("persons is unavailable")).toBeOnTheScreen();
     await fireEvent.press(screen.getByText("Повторить"));
     expect(await screen.findByText("Последний размер")).toBeOnTheScreen();
-  });
-
-  it("offers no resolving while the records cannot be read, and retries them", async () => {
-    failOnce("medical_records");
-    await renderScreens(routes, "/health/findings/cyst%3A%3Akidney_left");
-    expect(await screen.findByText("medical_records is unavailable")).toBeOnTheScreen();
-    expect(screen.queryByText("Отметить как устранённую")).toBeNull();
-    await fireEvent.press(screen.getByText("Повторить"));
-    expect(await screen.findByText("Отметить как устранённую")).toBeOnTheScreen();
   });
 
   it("says when the finding is not there", async () => {
