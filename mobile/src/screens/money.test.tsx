@@ -121,6 +121,19 @@ describe("the money tab", () => {
     expect(screen.queryByText("Счета")).toBeNull();
   });
 
+  it("keeps match totals as their own nodes under the sign filters", async () => {
+    await renderScreens(routes, "/money");
+    expect(await screen.findByText("Совпадений")).toBeOnTheScreen();
+    expect(screen.getByText("Все")).toBeOnTheScreen();
+    expect(screen.getByText("Расходы")).toBeOnTheScreen();
+    expect(screen.getByText("Доходы")).toBeOnTheScreen();
+    // Positive and negative stay separate Text nodes (full-width wrapped row), not one
+    // non-wrapping currency group beside the three chips — Codex P2 on #260.
+    expect(await screen.findByText("3")).toBeOnTheScreen();
+    expect(screen.getAllByText(/^50\s000,00\s₽$/)).toHaveLength(2);
+    expect(screen.getByText(/^-470,50\s₽$/)).toBeOnTheScreen();
+  });
+
   it("lists the transactions by day with a dense meta line and accounts", async () => {
     await renderScreens(routes, "/money");
     expect(await screen.findByText("Пятёрочка")).toBeOnTheScreen();

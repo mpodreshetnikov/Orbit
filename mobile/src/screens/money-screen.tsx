@@ -212,49 +212,45 @@ export default function MoneyScreen() {
             </Text>
           </Pressable>
         ))}
-        {summary.error ? (
-          <Text size="xs" tone="mutedForeground" style={{ flex: 1 }}>
-            {`${t("money.summaryUnavailable")}: ${summary.error.message}`}
-          </Text>
-        ) : (
-          <View
-            style={{
-              flexDirection: "row",
-              flexWrap: "wrap",
-              alignItems: "center",
-              gap: 4,
-              flex: 1,
-              minWidth: 120,
-            }}
-          >
-            <Text size="xs" tone="mutedForeground">
-              {t("money.summaryMatches")}
-            </Text>
-            <Text size="xs" weight="medium">
-              {String(summary.data?.totalCount ?? 0)}
-            </Text>
-            {byCurrency.map((one) => (
-              <View
-                key={one.currency}
-                style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
-              >
-                <Text size="xs" tone="mutedForeground">
-                  ·
-                </Text>
-                <Text size="xs" tone="success" tabular>
-                  {formatMoney(one.positiveAmount, one.currency, "ru-RU")}
-                </Text>
-                <Text size="xs" tone="mutedForeground">
-                  ·
-                </Text>
-                <Text size="xs" tone="destructive" tabular>
-                  {formatMoney(one.negativeAmount, one.currency, "ru-RU")}
-                </Text>
-              </View>
-            ))}
-          </View>
-        )}
       </View>
+      {/* Full-width under the filters: each total wraps on its own so a narrow iPhone never
+          clips `50 000,00 ₽ · −12 000,00 ₽` beside the three chips (Codex P2 on #260). */}
+      {summary.error ? (
+        <Text size="xs" tone="mutedForeground">
+          {`${t("money.summaryUnavailable")}: ${summary.error.message}`}
+        </Text>
+      ) : (
+        <View
+          style={{
+            flexDirection: "row",
+            flexWrap: "wrap",
+            alignItems: "center",
+            columnGap: 4,
+            rowGap: 2,
+          }}
+        >
+          <Text size="xs" tone="mutedForeground">
+            {t("money.summaryMatches")}
+          </Text>
+          <Text size="xs" weight="medium">
+            {String(summary.data?.totalCount ?? 0)}
+          </Text>
+          {byCurrency.flatMap((one) => [
+            <Text key={`${one.currency}-sep-pos`} size="xs" tone="mutedForeground">
+              ·
+            </Text>,
+            <Text key={`${one.currency}-pos`} size="xs" tone="success" tabular>
+              {formatMoney(one.positiveAmount, one.currency, "ru-RU")}
+            </Text>,
+            <Text key={`${one.currency}-sep-neg`} size="xs" tone="mutedForeground">
+              ·
+            </Text>,
+            <Text key={`${one.currency}-neg`} size="xs" tone="destructive" tabular>
+              {formatMoney(one.negativeAmount, one.currency, "ru-RU")}
+            </Text>,
+          ])}
+        </View>
+      )}
     </View>
   );
 
