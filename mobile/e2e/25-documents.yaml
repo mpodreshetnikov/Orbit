@@ -20,6 +20,9 @@ name: Документы
 # Compact hub rows keep mark-done on the first screen; a11y label is
 # «Отметить выполненным: <title>» (Maestro matches the whole string — use a prefix).
 - assertVisible: "Отметить выполненным: .*"
+# Documents CTA is still on the first screen with denser checkup rows — assert before
+# we scroll it away.
+- assertVisible: "Все документы"
 - takeScreenshot: documents-01-checkups-compact
 # Secondary charts sit below the checkup strip; after earlier flows mutate due dates the
 # hub grows and this header leaves the first screen / a11y tree until scrolled.
@@ -28,11 +31,13 @@ name: Документы
     centerElement: true
 - assertVisible: "Анализы и измерения"
 - takeScreenshot: documents-01-health
-# Hero is above secondary charts; default DOWN would keep scrolling past the footer and time out.
+# Hero sits at the top of the ScrollView. direction UP is required (DOWN times out past
+# the footer); centerElement must stay off — Maestro cannot centre a top-pinned control
+# and fails with «No visible element found» even when the label is already on screen
+# (Mobile recordings 42753953959 / Документы @ 0db4e42).
 - scrollUntilVisible:
     element: "Все документы"
     direction: UP
-    centerElement: true
 - tapOn: "Все документы"
 - extendedWaitUntil:
     visible: "Все типы"
