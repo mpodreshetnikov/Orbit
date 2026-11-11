@@ -66,6 +66,7 @@ describe("registerHealthTools", () => {
         "get_money_transaction_details",
         "list_money_accounts",
         "list_money_categories",
+        "list_money_category_rules",
         "list_money_transactions",
         "search_money_line_items",
         "list_pending_records",
@@ -217,6 +218,7 @@ describe("registerHealthTools", () => {
       "get_money_transaction_details",
       "search_money_line_items",
       "list_money_accounts",
+      "list_money_category_rules",
       "get_money_spending_report",
     ];
 

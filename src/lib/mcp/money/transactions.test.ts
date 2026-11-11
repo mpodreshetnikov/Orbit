@@ -116,8 +116,22 @@ const feedRow = {
   receipt_request_key: null,
   raw_payload: { operation: { mcc: "5411", merchant: { name: "ВкусВилл" } } },
   line_items: [
-    { title: "Кофе зерновой", amount: -890, quantity: 1, unit: "шт", category_id: "coffee" },
-    { title: "Молоко", amount: -400, quantity: 2, unit: "шт", category_id: null },
+    {
+      id: "li-1",
+      title: "Кофе зерновой",
+      amount: -890,
+      quantity: 1,
+      unit: "шт",
+      category_id: "coffee",
+    },
+    {
+      id: "li-2",
+      title: "Молоко",
+      amount: -400,
+      quantity: 2,
+      unit: "шт",
+      category_id: null,
+    },
   ],
   line_item_titles: ["Кофе зерновой", "Молоко"],
   line_item_count: 2,
@@ -146,6 +160,7 @@ describe("toCompactTransaction", () => {
       cashback: null,
       line_items: [
         {
+          id: "li-coffee",
           title: "Кофе",
           amount: -890,
           quantity: 1,
@@ -155,6 +170,7 @@ describe("toCompactTransaction", () => {
           assignment_method: null,
         },
         {
+          id: "li-milk",
           title: "Молоко",
           amount: -400,
           quantity: 1,
@@ -164,6 +180,7 @@ describe("toCompactTransaction", () => {
           assignment_method: null,
         },
         {
+          id: null,
           title: "Без категории",
           amount: -1,
           quantity: null,
@@ -259,11 +276,12 @@ describe("listMoneyTransactions", () => {
     });
     expect(transaction.line_items).toEqual([
       expect.objectContaining({
+        id: "li-1",
         title: "Кофе зерновой",
         amount: -890,
         category: { id: "coffee", name: "Кофе", canonical_key: "food" },
       }),
-      expect.objectContaining({ title: "Молоко", category: null }),
+      expect.objectContaining({ id: "li-2", title: "Молоко", category: null }),
     ]);
     expect(transaction).not.toHaveProperty("bank_operation");
     expect(JSON.stringify(transaction)).not.toContain("1778");
@@ -434,6 +452,7 @@ describe("getMoneyTransactionDetails", () => {
     expect(stub.argsFor("money_transactions", "in")[0]).toEqual(["id", ["t-1", "t-2"]]);
     expect(details.map((row) => row.id)).toEqual(["t-1", "t-2"]);
     expect(details[1].line_items[0]).toMatchObject({
+      id: "l-1",
       title: "Хлеб",
       category: { id: "food", name: "Еда", canonical_key: "food" },
     });
@@ -463,7 +482,13 @@ describe("searchMoneyLineItems", () => {
               account_label: "Tinkoff Black",
               account_kind: "debit",
               matching_line_items: [
-                { title: "МОЛОКО 3.2%", amount: -150, category_id: null, line_status: "final" },
+                {
+                  id: "li-milk",
+                  title: "МОЛОКО 3.2%",
+                  amount: -150,
+                  category_id: null,
+                  line_status: "final",
+                },
               ],
               line_item_count: 2,
               total_count: 1,
@@ -491,7 +516,7 @@ describe("searchMoneyLineItems", () => {
     expect(page.total).toBe(1);
     expect(page.transactions).toHaveLength(1);
     expect(page.transactions[0].matching_line_items).toEqual([
-      expect.objectContaining({ title: "МОЛОКО 3.2%", amount: -150 }),
+      expect.objectContaining({ id: "li-milk", title: "МОЛОКО 3.2%", amount: -150 }),
     ]);
   });
 

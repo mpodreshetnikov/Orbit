@@ -36,7 +36,7 @@ const SCOPE_DESCRIPTIONS: Record<string, string> = {
   [MCP_SCOPE_MONEY_READ]:
     "View your money: bank and manual transactions with their counterparties and receipt lines, accounts and categories.",
   [MCP_SCOPE_MONEY_WRITE]:
-    "Add and change money spends you confirm on an Orbit card (manual create and edit only after you approve the draft).",
+    "Change money data you confirm on an Orbit card: manual spends and category create/rename/delete or line recategorize, only after you approve the draft.",
 };
 
 function ErrorPanel({ title, detail }: { title: string; detail: string }) {
