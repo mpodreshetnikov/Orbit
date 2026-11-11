@@ -418,6 +418,7 @@ export async function getMoneyTransactionDetails(
         currency: row.currency,
         merchant_name: row.merchant_name,
         line_items: sorted.map((item) => ({
+          id: typeof item.id === "string" ? item.id : null,
           title: String(item.title ?? ""),
           amount: Number(item.amount),
           quantity: item.quantity == null ? null : Number(item.quantity),
@@ -504,6 +505,7 @@ export async function searchMoneyLineItems(
         merchant_name: row.merchant_name,
         account: { id: row.account_id, label: row.account_label, kind: row.account_kind },
         matching_line_items: raw.map((item) => ({
+          id: typeof item.id === "string" ? item.id : null,
           title: String(item.title ?? ""),
           amount: Number(item.amount),
           quantity: item.quantity == null ? null : Number(item.quantity),

@@ -85,6 +85,7 @@ BEGIN
       (
         SELECT jsonb_agg(
           jsonb_build_object(
+            'id', li.id,
             'title', li.title,
             'amount', li.amount,
             'quantity', li.quantity,
