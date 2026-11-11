@@ -241,7 +241,15 @@ function spawnHook(hook, raw, input, repoRoot, env) {
 function run(raw, input, repoRoot = REPO_ROOT, env = process.env) {
   const event = input.hook_event_name;
   if (typeof event !== "string" || !event) return { code: 0 };
-  if (env.CLAUDE_PROJECT_DIR && samePath(env.CLAUDE_PROJECT_DIR, repoRoot)) return { code: 0 };
+  // Cursor sets CLAUDE_PROJECT_DIR to the project root; the Cursor adapter forces a run so the
+  // same hooks still fire when Claude Code itself did not already execute them (T-261106-kp8).
+  if (
+    env.PROJECT_HOOKS_BRIDGE_FORCE !== "1" &&
+    env.CLAUDE_PROJECT_DIR &&
+    samePath(env.CLAUDE_PROJECT_DIR, repoRoot)
+  ) {
+    return { code: 0 };
+  }
 
   let settings;
   try {

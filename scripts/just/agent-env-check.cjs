@@ -1,33 +1,47 @@
 #!/usr/bin/env node
 
 /**
- * Whether this repository's Claude Code hooks reach the session that runs it, and a refusal when
- * they do not.
+ * Whether this repository's agent hooks reach the session that runs it, and a refusal when they
+ * do not.
  *
- * A cloud session holding several repositories starts above the clones and loads no hooks from this
- * repository's `.claude/settings.json`. Every check those hooks carry -- the task-claim gate first --
- * is then silent, and nothing says so (T-260902-jxe). They reach such a session only through
- * `project-hooks-bridge.cjs` registered in the container's `~/.claude/settings.json`, which the
- * environment's setup script writes (docs/AGENT_ENVIRONMENT.md). This check confirms that
- * registration covers every event this repository registers a hook on, and that the bridge it
- * names exists.
+ * Supported agent surfaces (each has a recipe in docs/AGENT_ENVIRONMENT.md):
  *
- * It applies to cloud sessions (`CLAUDE_CODE_REMOTE=true`). A local session started in this
- * checkout loads `.claude/settings.json` itself; one started elsewhere is the person's own setup,
- * and the check says so without refusing.
+ * - Claude Code cloud (`CLAUDE_CODE_REMOTE=true`): a multi-repo session starts above the clones and
+ *   loads no hooks from `.claude/settings.json`. They reach the session only through
+ *   `project-hooks-bridge.cjs` registered in `~/.claude/settings.json`.
+ * - Cursor Cloud (`CURSOR_AGENT=1` or `CURSOR_CODE_REMOTE=true`): the session loads
+ *   `.cursor/hooks.json`. That file must route the safety events through
+ *   `cursor-hooks-bridge.cjs`, and Cursor's `~/.cursor/agent-hooks/...` dispatcher must chain this
+ *   repository's `.githooks` (T-261106-kp8). Claude Code's setup alone does not cover Cursor.
+ * - Codex (`CODEX_THREAD_ID` / `CODEX_CI` / `CODEX_SANDBOX` / `CODEX_SESSION_ID`): routes the same
+ *   Claude-shaped events through `project-hooks-bridge.cjs` from `~/.codex/hooks.json` (and/or a
+ *   trusted project `.codex/hooks.json`).
  *
- * Exit 1 is a refusal: CLAUDE.md tells an agent to stop and hand the person the fix, and
- * `tasks-claim` refuses to claim anything, so no work in this repository can be started properly
- * without it.
+ * Any other detected agent harness (OpenCode, pi, a novel `AI_AGENT=…`, bare `AGENT=1`, …) is
+ * fail-closed: REFUSED. Orbit does not silently pass an unknown agent that cannot run the gates.
+ * A session with no agent markers is treated as a local human checkout and passes.
+ *
+ * Exit 1 is a refusal: CLAUDE.md / AGENTS.md tell an agent to stop, and `tasks-claim` refuses to
+ * claim anything, so no work in this repository can be started properly without it.
  */
 
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const { gitHooksProblem } = require("./cursor-agent-git-hooks.cjs");
 
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const BRIDGE = "project-hooks-bridge.cjs";
+const CURSOR_BRIDGE = "cursor-hooks-bridge.cjs";
 const DOC = "docs/AGENT_ENVIRONMENT.md";
+
+/**
+ * Cursor events that must reach the Claude-shaped bridge for the gates this repository ships.
+ * Advisories only run on context-capable events (`postToolUse` / `postToolUseFailure`);
+ * `beforeShellExecution` / `preToolUse` take the PreToolUse snapshot. Do not require
+ * `afterFileEdit` / `afterShellExecution` — those cannot deliver `additional_context`.
+ */
+const CURSOR_REQUIRED_EVENTS = ["beforeShellExecution", "postToolUse", "postToolUseFailure"];
 
 function readJson(file) {
   try {
@@ -37,11 +51,26 @@ function readJson(file) {
   }
 }
 
-/** The bridge file a hook command names, when it names one. */
-function bridgePathIn(command) {
-  if (typeof command !== "string" || !command.includes(BRIDGE)) return null;
-  const match = /(\/[^\s"';]*project-hooks-bridge\.cjs)/.exec(command);
-  return match ? match[1] : null;
+/** Escape every RegExp metacharacter so a bridge filename interpolates as a literal. */
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * The bridge file a hook command names, when it names one.
+ * Relative `./scripts/...` forms must not be mistaken for absolute `/scripts/...`.
+ */
+function bridgePathIn(command, bridgeName = BRIDGE, repoRoot = REPO_ROOT) {
+  if (typeof command !== "string" || !command.includes(bridgeName)) return null;
+  const escaped = escapeRegExp(bridgeName);
+  // Absolute UNIX path not preceded by a dot (avoids matching `./scripts/...`).
+  const abs = new RegExp(`(?:^|[^.\\w])(/[^\\s"']*${escaped})`).exec(command);
+  if (abs) return abs[1];
+  // Project-relative form: `node ./scripts/just/cursor-hooks-bridge.cjs`
+  if (command.includes(`scripts/just/${bridgeName}`)) {
+    return path.join(repoRoot, "scripts", "just", bridgeName);
+  }
+  return null;
 }
 
 /**
@@ -89,35 +118,221 @@ function unbridgeableHooks(projectSettings) {
   return found;
 }
 
+function isCursorCloud(env) {
+  return env.CURSOR_AGENT === "1" || env.CURSOR_CODE_REMOTE === "true";
+}
+
+function isClaudeCloud(env) {
+  return env.CLAUDE_CODE_REMOTE === "true";
+}
+
+/** Codex CLI / cloud: any of the harness markers documented for agent detection. */
+function isCodexAgent(env) {
+  return Boolean(
+    env.CODEX_THREAD_ID ||
+    env.CODEX_SESSION_ID ||
+    env.CODEX_CI === "1" ||
+    (typeof env.CODEX_SANDBOX === "string" && env.CODEX_SANDBOX.length > 0),
+  );
+}
+
+/**
+ * Label for a harness that is clearly an agent but not Claude cloud, Cursor, or Codex.
+ * Local Claude (`CLAUDECODE` / `AI_AGENT=claude-code_*` without `CLAUDE_CODE_REMOTE`) is not
+ * unknown: project `.claude/settings.json` loads in-checkout.
+ */
+function unknownAgentLabel(env) {
+  if (isClaudeCloud(env) || isCursorCloud(env) || isCodexAgent(env)) return null;
+  if (env.OPENCODE === "1" || env.AI_AGENT === "opencode") return "OpenCode";
+  if (env.PI_CODING_AGENT === "true" || env.AI_AGENT === "pi") return "pi";
+  if (typeof env.AI_AGENT === "string" && env.AI_AGENT.length > 0) {
+    if (env.AI_AGENT.startsWith("claude-code_")) return null;
+    return env.AI_AGENT;
+  }
+  if (env.AGENT === "1") return "AGENT";
+  return null;
+}
+
+function codexHome(home, env = {}) {
+  return typeof env.CODEX_HOME === "string" && env.CODEX_HOME.length > 0
+    ? path.resolve(env.CODEX_HOME)
+    : path.join(home, ".codex");
+}
+
+/** Merge Codex hook layers: user `~/.codex/hooks.json` plus trusted project `.codex/hooks.json`. */
+function mergeHookSettings(...layers) {
+  const hooks = {};
+  for (const layer of layers) {
+    for (const [event, groups] of Object.entries(layer?.hooks ?? {})) {
+      if (!Array.isArray(groups)) continue;
+      hooks[event] = [...(hooks[event] ?? []), ...groups];
+    }
+  }
+  return { hooks };
+}
+
+/**
+ * Cursor `.cursor/hooks.json` must name the Cursor adapter on every required event. Relative
+ * commands that mention the bridge script count when the file exists under this repository.
+ */
+function missingCursorEvents(cursorSettings, repoRoot = REPO_ROOT, exists = fs.existsSync) {
+  const hooks = cursorSettings?.hooks ?? {};
+  return CURSOR_REQUIRED_EVENTS.filter((event) => {
+    const entries = hooks[event];
+    if (!Array.isArray(entries)) return true;
+    return !entries.some((entry) => {
+      const bridge = bridgePathIn(entry?.command, CURSOR_BRIDGE, repoRoot);
+      return bridge !== null && exists(bridge);
+    });
+  });
+}
+
+function checkClaude({ home, repoRoot, exists }) {
+  const project = readJson(path.join(repoRoot, ".claude", "settings.json"));
+  const user = readJson(path.join(home, ".claude", "settings.json"));
+  const missing = missingEvents(project, user, exists);
+  if (missing.length === 0) {
+    return {
+      ok: true,
+      message: "agent-env-check: this repository's Claude hooks reach this session.",
+    };
+  }
+  return {
+    ok: false,
+    message:
+      `agent-env-check: REFUSED. This Claude cloud session does not run this repository's hooks for ` +
+      `${missing.join(", ")}: ~/.claude/settings.json does not route ${missing.length === 1 ? "it" : "them"} ` +
+      `through scripts/just/${BRIDGE}. The task-claim gate and every other hook here are silent, so ` +
+      `no change to this repository may be made in this session. Stop, and ask the person to add the ` +
+      `Claude block in ${DOC} to the cloud environment's setup script, then start a new session. Do not ` +
+      `write ~/.claude/settings.json yourself to get past this: the environment, not the session, ` +
+      `has to carry it.`,
+  };
+}
+
+/**
+ * Refusal text for Cursor Cloud: name the exact script, where to add it, and the doc.
+ * Keep this aligned with the "Cursor Cloud setup" section of docs/AGENT_ENVIRONMENT.md.
+ */
+function cursorRefusalMessage({ missing, gitProblem }) {
+  const parts = [];
+  if (missing.length > 0) {
+    parts.push(
+      `.cursor/hooks.json does not route ${missing.join(", ")} through scripts/just/${CURSOR_BRIDGE}`,
+    );
+  }
+  if (gitProblem) {
+    parts.push(gitProblem);
+  }
+  const fixLines = [];
+  if (missing.length > 0) {
+    fixLines.push(
+      `Ensure this session's Orbit checkout includes .cursor/hooks.json that runs ` +
+        `scripts/just/${CURSOR_BRIDGE} on beforeShellExecution, postToolUse, and postToolUseFailure ` +
+        `(shipped with this repository; see ${DOC} § Cursor Cloud setup).`,
+    );
+  }
+  if (gitProblem) {
+    fixLines.push(
+      `Add this exact line to the Cursor Cloud environment Install AND Start scripts ` +
+        `(Cursor Dashboard → Cloud Agents → this environment → Install / Start), after Cursor has ` +
+        `created ~/.cursor/agent-hooks/<id>/:\n` +
+        `  bash /agent/repos/Orbit/scripts/cloud/configure-cursor-agent-hooks.sh\n` +
+        `(from an Orbit checkout: bash scripts/cloud/configure-cursor-agent-hooks.sh). ` +
+        `Then start a new session. Full steps: ${DOC} § Cursor Cloud setup.`,
+    );
+  }
+  return (
+    `agent-env-check: REFUSED. This Cursor cloud session is missing Orbit's safety gates: ` +
+    `${parts.join("; ")}. The task-claim / size / git push gates are silent, so no change to this ` +
+    `repository may be made in this session. Stop.\n` +
+    fixLines.join("\n") +
+    `\nDo not rewrite ~/.cursor/agent-hooks by hand to paper over a missing environment setup — ` +
+    `the environment scripts must call configure-cursor-agent-hooks.sh so the next session gets it too.`
+  );
+}
+
+function checkCursor({ home, repoRoot, exists }) {
+  const cursorSettings = readJson(path.join(repoRoot, ".cursor", "hooks.json"));
+  const missing = missingCursorEvents(cursorSettings, repoRoot, exists);
+  const gitProblem = gitHooksProblem({ repoRoot, home });
+  if (missing.length === 0 && !gitProblem) {
+    return {
+      ok: true,
+      message:
+        "agent-env-check: this repository's Cursor hooks and agent-hooks git chain reach this session.",
+    };
+  }
+  return {
+    ok: false,
+    message: cursorRefusalMessage({ missing, gitProblem }),
+  };
+}
+
+/**
+ * Codex reuses the Claude event set via project-hooks-bridge. Coverage may come from user
+ * `~/.codex/hooks.json` and/or project `.codex/hooks.json` (when the project layer is trusted).
+ */
+function checkCodex({ home, repoRoot, exists, env = {} }) {
+  const project = readJson(path.join(repoRoot, ".claude", "settings.json"));
+  const user = readJson(path.join(codexHome(home, env), "hooks.json"));
+  const projectCodex = readJson(path.join(repoRoot, ".codex", "hooks.json"));
+  const missing = missingEvents(project, mergeHookSettings(user, projectCodex), exists);
+  if (missing.length === 0) {
+    return {
+      ok: true,
+      message: "agent-env-check: this repository's Codex hooks reach this session.",
+    };
+  }
+  return {
+    ok: false,
+    message:
+      `agent-env-check: REFUSED. This Codex session does not run this repository's hooks for ` +
+      `${missing.join(", ")}: ~/.codex/hooks.json (and project .codex/hooks.json) do not route ` +
+      `${missing.length === 1 ? "it" : "them"} through scripts/just/${BRIDGE}. The task-claim gate ` +
+      `and every other hook here are silent, so no change to this repository may be made in this ` +
+      `session. Stop, and ask the person to add the Codex block in ${DOC} to the environment setup ` +
+      `(or trust the shipped project .codex/hooks.json), then start a new session. Do not rewrite ` +
+      `~/.codex/hooks.json yourself only for this session: the environment has to carry it.`,
+  };
+}
+
+function checkUnknown(label) {
+  return {
+    ok: false,
+    message:
+      `agent-env-check: REFUSED. Unsupported / unknown agent harness (${label}). Orbit's safety ` +
+      `gates are fail-closed for any agent that is not a documented Claude, Cursor, or Codex recipe ` +
+      `in ${DOC}. The task-claim / size / git push gates would be silent here, so no change to this ` +
+      `repository may be made in this session. Stop. Ask the person to use Claude Code, Cursor, or ` +
+      `Codex with the matching setup in ${DOC} — do not invent a Dashboard / environment.json ` +
+      `workaround from the agent session.`,
+  };
+}
+
 function check({
   env = process.env,
   home = os.homedir(),
   repoRoot = REPO_ROOT,
   exists = fs.existsSync,
 } = {}) {
-  if (env.CLAUDE_CODE_REMOTE !== "true") {
-    return {
-      ok: true,
-      message:
-        "agent-env-check: not a cloud session; hooks load from .claude/settings.json when Claude Code starts in this checkout.",
-    };
+  if (isClaudeCloud(env)) {
+    return checkClaude({ home, repoRoot, exists });
   }
-  const project = readJson(path.join(repoRoot, ".claude", "settings.json"));
-  const user = readJson(path.join(home, ".claude", "settings.json"));
-  const missing = missingEvents(project, user, exists);
-  if (missing.length === 0) {
-    return { ok: true, message: "agent-env-check: this repository's hooks reach this session." };
+  if (isCursorCloud(env)) {
+    return checkCursor({ home, repoRoot, exists });
+  }
+  if (isCodexAgent(env)) {
+    return checkCodex({ home, repoRoot, exists, env });
+  }
+  const unknown = unknownAgentLabel(env);
+  if (unknown) {
+    return checkUnknown(unknown);
   }
   return {
-    ok: false,
+    ok: true,
     message:
-      `agent-env-check: REFUSED. This cloud session does not run this repository's hooks for ` +
-      `${missing.join(", ")}: ~/.claude/settings.json does not route ${missing.length === 1 ? "it" : "them"} ` +
-      `through scripts/just/${BRIDGE}. The task-claim gate and every other hook here are silent, so ` +
-      `no change to this repository may be made in this session. Stop, and ask the person to add the ` +
-      `block in ${DOC} to the cloud environment's setup script, then start a new session. Do not ` +
-      `write ~/.claude/settings.json yourself to get past this: the environment, not the session, ` +
-      `has to carry it.`,
+      "agent-env-check: not a cloud session; Claude hooks load from .claude/settings.json when Claude Code starts in this checkout, Cursor loads .cursor/hooks.json from the project, and Codex loads ~/.codex/hooks.json / .codex/hooks.json when configured.",
   };
 }
 
@@ -127,4 +342,18 @@ if (require.main === module) {
   process.exit(result.ok ? 0 : 1);
 }
 
-module.exports = { bridgePathIn, check, missingEvents, unbridgeableHooks };
+module.exports = {
+  CURSOR_REQUIRED_EVENTS,
+  bridgePathIn,
+  check,
+  cursorRefusalMessage,
+  escapeRegExp,
+  isClaudeCloud,
+  isCodexAgent,
+  isCursorCloud,
+  mergeHookSettings,
+  missingCursorEvents,
+  missingEvents,
+  unbridgeableHooks,
+  unknownAgentLabel,
+};

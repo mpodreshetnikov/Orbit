@@ -53,8 +53,9 @@ then checks every table and file against the original, which keeps running untou
 
 ## Running agents on it
 
-Claude Code cloud sessions that change this repository need one block in their environment's setup
-script, or they refuse to work: [`docs/AGENT_ENVIRONMENT.md`](./docs/AGENT_ENVIRONMENT.md).
+Claude Code, Cursor, and Codex sessions that change this repository need the matching setup in
+[`docs/AGENT_ENVIRONMENT.md`](./docs/AGENT_ENVIRONMENT.md), or `agent-env-check` refuses. Unknown
+agent harnesses are fail-closed. Agents must not edit the Cursor Dashboard / `environment.json`.
 
 ## When it does not work
 
