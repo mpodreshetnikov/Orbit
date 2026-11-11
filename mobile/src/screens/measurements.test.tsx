@@ -1,14 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
-import { fireEvent, screen, waitFor, within } from "@testing-library/react-native";
-import { ActionSheetIOS, Alert } from "react-native";
+import { fireEvent, screen, within } from "@testing-library/react-native";
 import { chartDomain, plot } from "@/components/charts";
 import { byCategory, formatMoment, trendPercent } from "@/features/measurements/format";
 import HealthScreen from "@/screens/health-screen";
-import MeasurementFormScreen from "@/screens/measurement-form-screen";
 import MeasurementScreen from "@/screens/measurement-screen";
-import MeasurementVisibilityScreen from "@/screens/measurement-visibility-screen";
-import MeasurementsScreen from "@/screens/measurements-screen";
-import { db, fail, failOnce, fakeSession, seed, setSession } from "../../test/fake-supabase";
+import MeasurementsScreen, { measurementsEmptyKey } from "@/screens/measurements-screen";
+import { db, fail, fakeSession, seed, setSession } from "../../test/fake-supabase";
 import { household, NOW, PERSON, USER_ID } from "../../test/fixtures";
 import { renderScreens } from "../../test/render";
 
@@ -18,8 +15,6 @@ const routes = {
   "health/index": HealthScreen,
   "health/measurements/index": MeasurementsScreen,
   "health/measurements/[code]": MeasurementScreen,
-  "health/measurements/form": MeasurementFormScreen,
-  "health/measurements/visibility": MeasurementVisibilityScreen,
 };
 
 const catalogEntry = (
@@ -73,16 +68,6 @@ function seedMeasurements(hidden: Record<string, string[]> = {}) {
     ],
     user_preferences: [{ auth_user_id: USER_ID, hidden_measurement_codes: hidden }],
   });
-}
-
-/** Answer the next action sheet with the option labelled so; keep what it offered. */
-function chooseInSheet(label: string) {
-  const offered: string[][] = [];
-  jest.spyOn(ActionSheetIOS, "showActionSheetWithOptions").mockImplementationOnce((options, cb) => {
-    offered.push(options.options);
-    cb(options.options.indexOf(label));
-  });
-  return offered;
 }
 
 beforeEach(() => {
@@ -142,8 +127,7 @@ describe("the measurements list", () => {
 
     expect(await screen.findByText("Вес")).toBeOnTheScreen();
     expect(screen.queryByText("Талия")).toBeNull();
-    await fireEvent.press(screen.getByText("Скрыто: 1"));
-    expect(await screen.findByText(/^Снимите галочку/)).toBeOnTheScreen();
+    expect(screen.getByText("Скрыто: 1")).toBeOnTheScreen();
   });
 
   it("says when everything is hidden", async () => {
@@ -152,10 +136,18 @@ describe("the measurements list", () => {
     expect(await screen.findByText("Все измерения скрыты")).toBeOnTheScreen();
   });
 
+  it("uses search-miss copy for a nonempty query, not the all-hidden warning", () => {
+    expect(measurementsEmptyKey("нет-такого")).toBe("measurements.noSearchResults");
+    expect(measurementsEmptyKey("")).toBe("measurements.allHidden");
+  });
+
   it("offers a retry when the person cannot be read", async () => {
     fail("persons");
     await renderScreens(routes, "/health/measurements");
     expect(await screen.findByText("persons is unavailable")).toBeOnTheScreen();
+    db.failing.clear();
+    await fireEvent.press(screen.getByText("Повторить"));
+    expect(await screen.findByText("Вес")).toBeOnTheScreen();
   });
 
   it("offers a retry when the measurements cannot be read", async () => {
@@ -201,6 +193,18 @@ describe("a measurement's page", () => {
     expect(screen.getByText("05.10.2026")).toBeOnTheScreen();
   });
 
+  it("marks a flat change on the list card", async () => {
+    seed({
+      ...household(),
+      measurement_catalog: [HEIGHT],
+      measurements: [entry("h1", HEIGHT, 180, 1), entry("h2", HEIGHT, 180, 10)],
+      user_preferences: [{ auth_user_id: USER_ID, hidden_measurement_codes: {} }],
+    });
+    await renderScreens(routes, "/health/measurements");
+    expect(await screen.findByText("Рост")).toBeOnTheScreen();
+    expect(screen.getByText("180")).toBeOnTheScreen();
+  });
+
   it("says when the person cannot be read rather than waiting", async () => {
     fail("persons");
     await renderScreens(routes, "/health/measurements/weight");
@@ -212,172 +216,11 @@ describe("a measurement's page", () => {
     expect(await screen.findByText("Измерений пока нет")).toBeOnTheScreen();
   });
 
-  it("deletes an entry after asking", async () => {
+  it("has no add or entry-edit controls", async () => {
     await renderScreens(routes, "/health/measurements/weight");
-    const alert = jest.spyOn(Alert, "alert");
-    chooseInSheet("Удалить");
-    await fireEvent.press(await screen.findByLabelText("15.10.2026, 08:30 80.50"));
-
-    await waitFor(() => expect(alert).toHaveBeenCalled());
-    const [title, , buttons] = alert.mock.calls[0];
-    expect(title).toBe("Удалить измерение");
-    buttons?.find((button) => button.style === "destructive")?.onPress?.();
-
-    await waitFor(() =>
-      expect(db.tables.measurements.map((row) => row.id)).toEqual(["w1", "t0", "t1", "b1"]),
-    );
-    expect(await screen.findByText("82")).toBeOnTheScreen();
-  });
-
-  it("corrects an entry in the form", async () => {
-    await renderScreens(routes, "/health/measurements/weight");
-    chooseInSheet("Редактировать");
-    await fireEvent.press(await screen.findByLabelText("01.10.2026, 08:30 82"));
-
-    const value = await screen.findByLabelText("Значение");
-    expect(value.props.value).toBe("82");
-    expect(screen.getByText("Вес")).toBeOnTheScreen();
-    await fireEvent.changeText(value, "81,2");
-    await fireEvent.changeText(screen.getByLabelText("Заметки (необязательно)"), " утром ");
-    await fireEvent.press(screen.getByText("Сохранить"));
-
-    await waitFor(() =>
-      expect(db.tables.measurements.find((row) => row.id === "w1")).toMatchObject({
-        value: 81.2,
-        notes: "утром",
-      }),
-    );
-  });
-});
-
-describe("recording a measurement", () => {
-  it("records a value of the page's type, with the last one shown for reference", async () => {
-    await renderScreens(routes, "/health/measurements/weight");
-    await fireEvent.press(await screen.findByLabelText("Добавить измерение"));
-
-    expect(await screen.findByText(/Последняя запись: 80.50 кг · 15.10.2026/)).toBeOnTheScreen();
-    await fireEvent.changeText(screen.getByLabelText("Значение"), "79.9");
-    await fireEvent(screen.getByTestId("measured-at"), "change", {
-      nativeEvent: { timestamp: new Date(2026, 9, 20, 7, 0).getTime() },
-    });
-    await fireEvent.press(screen.getByText("Сохранить"));
-
-    await waitFor(() => expect(db.tables.measurements).toHaveLength(6));
-    expect(db.tables.measurements[5]).toMatchObject({
-      person_id: PERSON.id,
-      catalog_id: WEIGHT.id,
-      created_by_user_id: USER_ID,
-      value: 79.9,
-      measured_at: new Date(2026, 9, 20, 7, 0).toISOString(),
-      notes: null,
-    });
-  });
-
-  it("picks the type from the catalogue when opened from the list", async () => {
-    await renderScreens(routes, "/health/measurements");
-    await fireEvent.press(await screen.findByLabelText("Добавить измерение"));
-    await screen.findByText("Выберите тип измерения...");
-
-    const offered = chooseInSheet("Рост, см · Основные");
-    await fireEvent.press(screen.getByLabelText(/^Тип измерения/));
-    expect(offered[0].slice(0, 3)).toEqual([
-      "Вес, кг · Основные",
-      "Рост, см · Основные",
-      "Талия, см · Тело",
-    ]);
-    expect(await screen.findByText("Нет предыдущего значения")).toBeOnTheScreen();
-    await fireEvent.changeText(screen.getByLabelText("Значение"), "182");
-    await fireEvent.press(screen.getByText("Сохранить"));
-
-    await waitFor(() =>
-      expect(db.tables.measurements.at(-1)).toMatchObject({ catalog_id: HEIGHT.id, value: 182 }),
-    );
-    // Back on the list; the fake does not join the new row's catalogue entry, so it is not drawn.
-    await waitFor(() => expect(screen.queryByLabelText("Значение")).toBeNull());
-  });
-
-  it("keeps what the person typed when the entry refetches mid-edit", async () => {
-    const { client } = await renderScreens(
-      routes,
-      "/health/measurements/form?code=weight&entry=w1",
-    );
-    const value = await screen.findByLabelText("Значение");
-    await fireEvent.changeText(value, "79");
-    db.tables.measurements = db.tables.measurements.map((row) =>
-      row.id === "w1" ? { ...row, notes: "сервер" } : row,
-    );
-    await client.invalidateQueries({ queryKey: ["measurements"] });
-    await waitFor(() =>
-      expect(JSON.stringify(client.getQueryData(["measurements", PERSON.id]))).toContain("сервер"),
-    );
-    expect(screen.getByLabelText("Значение").props.value).toBe("79");
-  });
-
-  it("says when the measurements cannot be read, and retries", async () => {
-    fail("measurements");
-    await renderScreens(routes, "/health/measurements/form?code=weight&entry=w1");
-    expect(await screen.findByText("measurements is unavailable")).toBeOnTheScreen();
-    db.failing.clear();
-    await fireEvent.press(screen.getByText("Повторить"));
-    expect((await screen.findByLabelText("Значение")).props.value).toBe("82");
-  });
-
-  it("says when the entry to correct is gone", async () => {
-    await renderScreens(routes, "/health/measurements/form?code=weight&entry=gone");
-    expect(await screen.findByText("Измерений пока нет")).toBeOnTheScreen();
-  });
-
-  it("saves nothing without a type and a value", async () => {
-    await renderScreens(routes, "/health/measurements/form");
-    await screen.findByText("Выберите тип измерения...");
-    await fireEvent.press(screen.getByText("Сохранить"));
-    expect(screen.getAllByText("Выберите тип измерения...")).toHaveLength(2);
-    expect(db.tables.measurements).toHaveLength(5);
-  });
-
-  it("stays open and buzzes when the write fails", async () => {
-    await renderScreens(routes, "/health/measurements/form?code=weight");
-    await fireEvent.changeText(await screen.findByLabelText("Значение"), "80");
-    fail("measurements");
-    await fireEvent.press(screen.getByText("Сохранить"));
-    await waitFor(() => expect(screen.getByLabelText("Значение")).toBeOnTheScreen());
-    expect(db.tables.measurements).toHaveLength(5);
-  });
-});
-
-describe("choosing measurements", () => {
-  it("hides and shows types, each change building on the last", async () => {
-    await renderScreens(routes, "/health/measurements/visibility");
-    await fireEvent(await screen.findByLabelText("Вес"), "valueChange", false);
-    // The whole row toggles, not only its switch.
-    await fireEvent.press(screen.getByText("Талия"));
-
-    await waitFor(() =>
-      expect(db.tables.user_preferences[0].hidden_measurement_codes).toEqual({
-        [PERSON.id]: ["weight", "waist"],
-      }),
-    );
-    await fireEvent(screen.getByLabelText("Вес"), "valueChange", true);
-    await waitFor(() =>
-      expect(db.tables.user_preferences[0].hidden_measurement_codes).toEqual({
-        [PERSON.id]: ["waist"],
-      }),
-    );
-  });
-
-  it("offers no switch until the stored choices have loaded", async () => {
-    fail("user_preferences");
-    await renderScreens(routes, "/health/measurements/visibility");
-    expect(await screen.findByText("user_preferences is unavailable")).toBeOnTheScreen();
-    expect(screen.queryByLabelText("Вес")).toBeNull();
-  });
-
-  it("puts the switch back when the preference cannot be saved", async () => {
-    await renderScreens(routes, "/health/measurements/visibility");
-    const weight = await screen.findByLabelText("Вес");
-    failOnce("user_preferences");
-    await fireEvent(weight, "valueChange", false);
-    await waitFor(() => expect(screen.getByLabelText("Вес").props.value).toBe(true));
+    expect(await screen.findByText("Последнее значение")).toBeOnTheScreen();
+    expect(screen.queryByLabelText("Добавить измерение")).toBeNull();
+    expect(screen.queryByText("Добавить измерение")).toBeNull();
   });
 });
 

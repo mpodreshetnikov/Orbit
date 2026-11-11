@@ -2,18 +2,24 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * Spend create/edit only via draft→confirm: propose writes nothing, confirm needs money:write.
+ * Markdown + text-fallback must work on hosts without MCP Apps (ORB-46 / #245 pattern).
  */
 const spend = vi.hoisted(() => ({
   buildCreateSpendDraft: vi.fn(),
   buildEditSpendDraft: vi.fn(),
   applySpendDraft: vi.fn(),
-  spendDraftSummaryText: vi.fn(
-    (draft: { merchant_name: string | null }) =>
-      `Showing a create spend draft for Максим on a card: "${draft.merchant_name}"`,
-  ),
 }));
 
-vi.mock("../money/spend-draft", () => spend);
+vi.mock("../money/spend-draft", async () => {
+  const actual =
+    await vi.importActual<typeof import("../money/spend-draft")>("../money/spend-draft");
+  return {
+    ...actual,
+    buildCreateSpendDraft: spend.buildCreateSpendDraft,
+    buildEditSpendDraft: spend.buildEditSpendDraft,
+    applySpendDraft: spend.applySpendDraft,
+  };
+});
 vi.mock("../supabase-user-client", () => ({
   createUserScopedSupabaseClient: vi.fn(() => ({}) as never),
 }));
@@ -27,9 +33,12 @@ vi.mock("../resolve-person", () => ({
 import { SPEND_DRAFT_HTML } from "./spend-draft-page";
 import {
   confirmSpendDraftInputSchema,
+  formatSpendDraftMarkdown,
   registerSpendDraftApp,
+  spendTextFallbackInstructions,
   SPEND_DRAFT_RESOURCE_URI,
 } from "./spend-draft";
+import type { SpendDraftView } from "../money/spend-draft";
 
 type Handler = (
   args: unknown,
@@ -59,7 +68,58 @@ const CREATE = {
   amount: -200,
   currency: "RUB",
   transaction_type: "expense" as const,
-  merchant_name: "Кофе",
+  merchant_name: "Кофейня Seed",
+  comment: "synthetic seed",
+  line_items: [
+    {
+      title: "Латте",
+      amount: -200,
+      category_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      category_locked_by_user: true,
+    },
+  ],
+};
+
+const CREATE_DRAFT: SpendDraftView = {
+  mode: "create",
+  person_id: "p-1",
+  person_name: "Seed Person",
+  transaction_id: null,
+  account_label: "Наличные Seed",
+  posted_at_label: "9 ноября 2026 г., 10:00",
+  amount_label: "-200.00 RUB",
+  type_label: "трата",
+  merchant_name: "Кофейня Seed",
+  comment: "synthetic seed",
+  lines: [{ title: "Латте", amount_label: "-200.00 RUB", category_label: "Еда" }],
+  changes: [],
+  input: CREATE,
+};
+
+const EDIT_DRAFT: SpendDraftView = {
+  mode: "edit",
+  person_id: "p-1",
+  person_name: "Seed Person",
+  transaction_id: "22222222-2222-4222-8222-222222222222",
+  account_label: "Наличные Seed",
+  posted_at_label: "9 ноября 2026 г., 10:00",
+  amount_label: "-250.00 RUB",
+  type_label: "трата",
+  merchant_name: "Кофейня Seed",
+  comment: "правка комментария",
+  lines: [{ title: "Латте", amount_label: "-250.00 RUB", category_label: "Еда" }],
+  changes: ["сумма → -250.00 RUB", "комментарий → правка комментария"],
+  input: {
+    transaction_id: "22222222-2222-4222-8222-222222222222",
+    account_id: CREATE.account_id,
+    posted_at: CREATE.posted_at,
+    amount: -250,
+    currency: "RUB",
+    transaction_type: "expense",
+    merchant_name: "Кофейня Seed",
+    comment: "правка комментария",
+    line_items: CREATE.line_items,
+  },
 };
 
 function register() {
@@ -80,32 +140,45 @@ function register() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  spend.buildCreateSpendDraft.mockResolvedValue({
-    ok: true,
-    draft: {
-      mode: "create",
-      person_id: "p-1",
-      person_name: "Максим",
-      transaction_id: null,
-      account_label: "Наличные",
-      posted_at_label: "9 ноября 2026 г., 10:00",
-      amount_label: "-200.00 RUB",
-      type_label: "трата",
-      merchant_name: "Кофе",
-      comment: null,
-      lines: [],
-      input: CREATE,
-    },
-  });
+  spend.buildCreateSpendDraft.mockResolvedValue({ ok: true, draft: CREATE_DRAFT });
+  spend.buildEditSpendDraft.mockResolvedValue({ ok: true, draft: EDIT_DRAFT });
   spend.applySpendDraft.mockResolvedValue({
     ok: true,
     transaction_id: "tx-1",
-    label: "Кофе",
+    label: "Кофейня Seed",
+  });
+});
+
+describe("formatSpendDraftMarkdown", () => {
+  it("renders a create draft as readable Markdown lists without tables", () => {
+    const md = formatSpendDraftMarkdown(CREATE_DRAFT);
+    expect(md).toContain("# Кофейня Seed");
+    expect(md).toContain("Режим: новая");
+    expect(md).toContain("Seed Person");
+    expect(md).toContain("трата");
+    expect(md).toContain("Наличные Seed");
+    expect(md).toContain("-200.00 RUB");
+    expect(md).toContain("synthetic seed");
+    expect(md).toMatch(/## Строки/);
+    expect(md).toContain("Латте");
+    expect(md).toContain("Еда");
+    expect(md).not.toMatch(/## Что меняется/);
+    expect(md).not.toMatch(/\|[-:]+\|/);
+    expect(md).not.toMatch(/^\|.+\|$/m);
+  });
+
+  it("renders an edit draft with the change list", () => {
+    const md = formatSpendDraftMarkdown(EDIT_DRAFT);
+    expect(md).toContain("Режим: правка");
+    expect(md).toContain("transaction_id: 22222222-2222-4222-8222-222222222222");
+    expect(md).toMatch(/## Что меняется/);
+    expect(md).toContain("сумма → -250.00 RUB");
+    expect(md).toContain("комментарий → правка комментария");
   });
 });
 
 describe("registerSpendDraftApp", () => {
-  it("links propose tools to the spend card and keeps confirm on the card/model", () => {
+  it("links propose tools to the spend card and keeps confirm model-callable", () => {
     const { tools, resources } = register();
     expect(resources.get("orbit-spend-draft")).toMatchObject({
       uri: SPEND_DRAFT_RESOURCE_URI,
@@ -121,14 +194,41 @@ describe("registerSpendDraftApp", () => {
     expect(tools.get("confirm_spend_draft")!.config.annotations).toMatchObject({
       readOnlyHint: false,
     });
+    expect(tools.get("confirm_spend_draft")!.config._meta).toEqual({
+      ui: { visibility: ["model", "app"] },
+    });
+    const confirm = String(tools.get("confirm_spend_draft")!.config.description);
+    expect(confirm).toMatch(/explicitly confirmed|explicit Confirm/i);
+    expect(confirm).toMatch(/Decline is not a tool|do nothing/i);
   });
 
-  it("returns the card view and writes nothing on propose", async () => {
+  it("returns Markdown preview + text-fallback and writes nothing on propose", async () => {
     const result = await register().tools.get("propose_spend")!.handler(CREATE, moneyCtx);
     expect(result.isError).toBeFalsy();
-    expect(result.content[0].text).toContain("Кофе");
+    const text = result.content[0].text;
+    expect(text).toContain("Кофейня Seed");
+    expect(text).toContain("# Кофейня Seed");
+    expect(text).toContain("Латте");
+    expect(text).toMatch(
+      /If (this chat|the host) cannot show|MCP (App|UI)|interactive (view|card)/i,
+    );
+    expect(text).toMatch(/Confirm|Decline/i);
+    expect(text).toMatch(/confirms nothing|writes nothing/i);
+    expect(text).toContain("confirm_spend_draft");
+    expect(text).toMatch(/no decline tool|do nothing/i);
     expect(result.structuredContent?.spend_draft).toMatchObject({ mode: "create" });
     expect(spend.applySpendDraft).not.toHaveBeenCalled();
+  });
+
+  it("includes edit changes in propose_spend_edit text", async () => {
+    const result = await register()
+      .tools.get("propose_spend_edit")!
+      .handler({ person_id: "p-1", transaction_id: EDIT_DRAFT.transaction_id }, moneyCtx);
+    const text = result.content[0].text;
+    expect(text).toContain("Что меняется");
+    expect(text).toContain("сумма → -250.00 RUB");
+    expect(text).toContain("confirm_spend_draft");
+    expect(spendTextFallbackInstructions(EDIT_DRAFT)).toContain(EDIT_DRAFT.transaction_id!);
   });
 
   it("needs money:read to propose", async () => {

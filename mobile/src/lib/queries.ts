@@ -8,24 +8,9 @@ import {
 } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import type { CheckupItem, CheckupItemStatus } from "@orbit-types/checkup";
-import type { checkupColumns } from "@orbit-types/checkup-form";
-import type { UpdateConditionInput } from "@orbit-types/condition";
 import { importStillSettling } from "@orbit-types/money-import-review";
 import type { RoutingChoice } from "@orbit-types/notification-routing";
-import type { FindingSummary } from "@orbit-types/finding";
-import type {
-  CreateMoneyLineItemInput,
-  CreateMoneyTransactionInput,
-  MoneyTransactionFeedFilters,
-  UpdateMoneyTransactionInput,
-} from "@orbit-types/money";
-import { toggleHiddenCode, type HiddenMeasurementCodes } from "@orbit-types/measurement-visibility";
-import type {
-  AddOneTimeToExistingPayload,
-  CreateMedRegimenInput,
-  MedRegimen,
-} from "@orbit-types/regimen";
-import type { CourseColumns } from "@orbit-types/regimen-form";
+import type { MoneyTransactionFeedFilters } from "@orbit-types/money";
 import { withStatus } from "@/features/doses/dashboard";
 import { readTodayBlocks, writeTodayBlocks, type TodayBlocks } from "@/features/today/blocks";
 import {
@@ -35,8 +20,6 @@ import {
   fetchRecordFindings,
   fetchRecordObservations,
   fetchRecords,
-  saveRecord,
-  type RecordDetails,
 } from "@/features/records/query";
 import type { DayDose, DoseStatus } from "@/features/doses/model";
 import {
@@ -58,20 +41,11 @@ import {
   unarchiveRegimen,
 } from "@/features/medications/actions";
 import { fetchRegimen, fetchRegimens } from "@/features/medications/query";
-import {
-  deleteCondition,
-  fetchCondition,
-  fetchConditions,
-  lookupIcdCode,
-  updateCondition,
-} from "@/features/conditions/query";
-import { addConditionHistory, type HistoryEntry } from "@/features/conditions/history";
+import { deleteCondition, fetchCondition, fetchConditions } from "@/features/conditions/query";
 import {
   completeCheckup,
   fetchCheckups,
   fetchCompletions,
-  planCheckup,
-  saveCheckup,
   saveCompletion,
   setCheckupStatus,
   type Completion,
@@ -83,17 +57,7 @@ import {
   fetchMoneyFeedPage,
   fetchMoneyFeedSummary,
 } from "@/features/money/query";
-import {
-  createTransaction,
-  deleteTransaction,
-  fetchMerchantCategories,
-  fetchMerchantNames,
-  fetchPersons,
-  fetchTransaction,
-  updateTransaction,
-} from "@/features/money/transactions";
-import { fetchCards, saveAccount, saveCard, type AccountColumns } from "@/features/money/accounts";
-import { saveCategory, type CategoryColumns } from "@/features/money/categories";
+import { fetchTransaction } from "@/features/money/transactions";
 import {
   fetchImportBatch,
   fetchImportBatches,
@@ -110,35 +74,9 @@ import {
   writeChosenPerson,
   type CheckupReminders,
 } from "@/features/settings";
-import {
-  fetchSelfAliases,
-  fetchSpendingReport,
-  saveSelfAlias,
-  type SpendingReportQuery,
-} from "@/features/money/reports";
-import { deleteRule, fetchRules, reorderRules, saveRule } from "@/features/money/rules";
-import {
-  fetchClinicalCatalog,
-  saveClinicalEntry,
-  type ClinicalCatalogKind,
-  type ClinicalColumns,
-} from "@/features/catalogs/query";
-import { fetchActiveRecords, fetchFindings, markFindingResolved } from "@/features/findings/query";
-import {
-  createCatalogEntry,
-  createMeasurement,
-  deleteCatalogEntry,
-  deleteMeasurement,
-  fetchHiddenCodes,
-  fetchMeasurementCatalog,
-  fetchMeasurements,
-  saveHiddenCodes,
-  updateCatalogEntry,
-  updateMeasurement,
-  type CatalogColumns,
-  type MeasurementEntry,
-} from "@/features/measurements/query";
-import { saveEditedCourse, saveNewCourse } from "@/features/medications/save";
+import { fetchSpendingReport, type SpendingReportQuery } from "@/features/money/reports";
+import { fetchActiveRecords, fetchFindings } from "@/features/findings/query";
+import { fetchHiddenCodes, fetchMeasurements } from "@/features/measurements/query";
 import { useSession } from "@/lib/session";
 
 /**
@@ -343,27 +281,6 @@ export function useSaveOverdueInterval() {
   });
 }
 
-export type CourseSave =
-  | { personId: string; submission: CreateMedRegimenInput | AddOneTimeToExistingPayload }
-  | { course: MedRegimen; columns: CourseColumns };
-
-/** Create or edit a course from its form; resolves to the course to show afterwards. */
-export function useSaveCourse() {
-  const client = useQueryClient();
-  const { session } = useSession();
-  const userId = session?.user.id as string;
-  return useMutation({
-    mutationFn: async (save: CourseSave) => {
-      if ("submission" in save) return saveNewCourse(userId, save.personId, save.submission);
-      await saveEditedCourse(userId, save.course, save.columns);
-      return save.course.id;
-    },
-    onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
-    onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
-    onSettled: () => refreshCourses(client),
-  });
-}
-
 export function useMeasurements(personId: string | undefined) {
   return useQuery({
     queryKey: ["measurements", personId],
@@ -372,118 +289,18 @@ export function useMeasurements(personId: string | undefined) {
   });
 }
 
-export function useMeasurementCatalog() {
-  return useQuery({ queryKey: ["measurement-catalog"], queryFn: fetchMeasurementCatalog });
-}
-
-export function useClinicalCatalog(kind: ClinicalCatalogKind) {
-  return useQuery({
-    queryKey: ["clinical-catalog", kind],
-    queryFn: () => fetchClinicalCatalog(kind),
-  });
-}
-
-/** Add, change or delete (`columns: null`) a finding type or body site; findings carry their names. */
-export function useSaveClinicalEntry(kind: ClinicalCatalogKind) {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, columns }: { id?: string; columns: ClinicalColumns | null }) =>
-      saveClinicalEntry(kind, id, columns),
-    onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
-    onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
-    onSettled: () => {
-      void client.invalidateQueries({ queryKey: ["clinical-catalog", kind] });
-      void client.invalidateQueries({ queryKey: ["findings"] });
-    },
-  });
-}
-
-export type CatalogSave = { columns: CatalogColumns; id?: string } | { id: string; remove: true };
-
-/**
- * Add, change or delete a catalogue entry. A person's measurements carry the entry's names, so they
- * are refetched with the catalogue.
- */
-export function useSaveCatalogEntry() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: async (save: CatalogSave) => {
-      if ("remove" in save) return deleteCatalogEntry(save.id);
-      if (save.id) return updateCatalogEntry(save.id, save.columns);
-      return createCatalogEntry(save.columns);
-    },
-    onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
-    onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
-    onSettled: () => {
-      void client.invalidateQueries({ queryKey: ["measurement-catalog"] });
-      void client.invalidateQueries({ queryKey: ["measurements"] });
-    },
-  });
-}
-
-export type MeasurementSave =
-  | { personId: string; catalogId: string; entry: MeasurementEntry }
-  | { id: string; entry: MeasurementEntry }
-  | { id: string; remove: true };
-
-/** Record, correct or delete one measurement; the person's list is refetched after. */
-export function useSaveMeasurement() {
-  const client = useQueryClient();
-  const { session } = useSession();
-  const userId = session?.user.id as string;
-  return useMutation({
-    mutationFn: async (save: MeasurementSave) => {
-      if ("remove" in save) return deleteMeasurement(save.id);
-      if ("personId" in save) {
-        return createMeasurement(userId, save.personId, save.catalogId, save.entry);
-      }
-      return updateMeasurement(save.id, save.entry);
-    },
-    onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
-    onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
-    onSettled: () => void client.invalidateQueries({ queryKey: ["measurements"] }),
-  });
-}
-
-/**
- * The types hidden from one person's list, and a toggle — the web app's `useHiddenMeasurements`.
- *
- * The preference is one jsonb blob read-modify-written whole, so each toggle builds on the cache the
- * previous toggle already changed rather than on the server's last answer, and the writes queue in
- * one scope so they reach the server in the order they were made. A failed write refetches.
- */
+/** The types hidden from one person's list (read-only — visibility edits are agent-side). */
 export function useHiddenMeasurements(personId: string | undefined) {
-  const client = useQueryClient();
   const { session } = useSession();
   const userId = session?.user.id;
-  const key = ["hidden-measurements", userId];
   const hidden = useQuery({
-    queryKey: key,
+    queryKey: ["hidden-measurements", userId],
     queryFn: () => fetchHiddenCodes(userId as string),
     enabled: Boolean(userId),
   });
-  const save = useMutation({
-    mutationFn: (next: HiddenMeasurementCodes) => saveHiddenCodes(userId as string, next),
-    scope: { id: "hidden-measurements" },
-    onError: () => {
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      void client.invalidateQueries({ queryKey: key });
-    },
-  });
   const codes = new Set(personId ? (hidden.data?.[personId] ?? []) : []);
-  // The column is written whole, so a toggle waits for the stored choices: one built on nothing
-  // would wipe the types hidden for every other person.
-  const toggle = (code: string) => {
-    const current = client.getQueryData<HiddenMeasurementCodes>(key);
-    if (!personId || !current) return;
-    const next = toggleHiddenCode(current, personId, code);
-    client.setQueryData(key, next);
-    save.mutate(next);
-  };
   return {
     codes,
-    toggle,
-    ready: hidden.data !== undefined,
     pending: hidden.isPending,
     error: hidden.error,
   };
@@ -513,18 +330,6 @@ export function useActiveRecords(personId: string | undefined) {
   });
 }
 
-/** Mark a finding gone, on a record of the person's; the findings are refetched after. */
-export function useMarkFindingResolved() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: (input: { personId: string; recordId: string; finding: FindingSummary }) =>
-      markFindingResolved(input.personId, input.recordId, input.finding),
-    onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
-    onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
-    onSettled: () => void client.invalidateQueries({ queryKey: ["findings"] }),
-  });
-}
-
 export function useConditions(personId: string | undefined) {
   return useQuery({
     queryKey: ["conditions", personId],
@@ -537,40 +342,15 @@ export function useCondition(id: string) {
   return useQuery({ queryKey: ["condition", id], queryFn: () => fetchCondition(id) });
 }
 
-/** An ICD-10 code's official names, once two characters are typed; codes never change. */
-export function useIcdLookup(code: string) {
-  return useQuery({
-    queryKey: ["icd-lookup", code],
-    queryFn: () => lookupIcdCode(code),
-    enabled: code.length >= 2,
-    staleTime: Infinity,
-  });
-}
-
-/** Edit a condition, or delete it with `remove`; the list and the condition are refetched. */
+/** Delete a condition; the list and the condition are refetched. */
 export function useSaveCondition() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (input: { id: string } & ({ values: UpdateConditionInput } | { remove: true })) =>
-      "values" in input ? updateCondition(input.id, input.values) : deleteCondition(input.id),
+    mutationFn: (input: { id: string; remove: true }) => deleteCondition(input.id),
     onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
     onSettled: (_data, _error, input) => {
       void client.invalidateQueries({ queryKey: ["conditions"] });
       void client.invalidateQueries({ queryKey: ["condition", input.id] });
-    },
-  });
-}
-
-/** Add a mention to a condition's history by hand; the condition and the list are refetched. */
-export function useAddConditionHistory() {
-  const client = useQueryClient();
-  const { session } = useSession();
-  return useMutation({
-    mutationFn: (entry: HistoryEntry) => addConditionHistory(session?.user.id as string, entry),
-    onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
-    onSettled: (_data, _error, entry) => {
-      void client.invalidateQueries({ queryKey: ["conditions"] });
-      void client.invalidateQueries({ queryKey: ["condition", entry.conditionId] });
     },
   });
 }
@@ -584,8 +364,8 @@ export function useCheckups(personId: string | undefined) {
 }
 
 /**
- * Everything done to a checkup: create or edit it, mark it done, plan it, change its status or
- * delete it, correct or delete a completion. The checkups and their completions are refetched after.
+ * Mark a checkup done, change its status, or correct/delete a completion.
+ * Create/edit/plan forms are agent-side.
  */
 export function useCheckupAction() {
   const client = useQueryClient();
@@ -593,15 +373,11 @@ export function useCheckupAction() {
     mutationFn: (
       input:
         | { item: CheckupItem; completion: Completion }
-        | { item: CheckupItem; plannedOn: string | null }
         | { item: CheckupItem; status: CheckupItemStatus | null }
-        | { completionId: string; completion: Completion | null }
-        | { personId: string; id?: string; columns: ReturnType<typeof checkupColumns> },
+        | { completionId: string; completion: Completion | null },
     ) => {
-      if ("columns" in input) return saveCheckup(input.personId, input.id, input.columns);
       if ("completionId" in input) return saveCompletion(input.completionId, input.completion);
       if ("completion" in input) return completeCheckup(input.item, input.completion);
-      if ("plannedOn" in input) return planCheckup(input.item.id, input.plannedOn);
       return setCheckupStatus(input.item.id, input.status);
     },
     onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
@@ -654,135 +430,6 @@ export function useTransaction(id: string) {
   return useQuery({ queryKey: ["money-transaction", id], queryFn: () => fetchTransaction(id) });
 }
 
-export function useMerchantCategories(personId: string | undefined) {
-  return useQuery({
-    queryKey: ["money-merchant-categories", personId],
-    queryFn: () => fetchMerchantCategories(personId!),
-    enabled: !!personId,
-  });
-}
-
-export function useMerchantNames(personId: string | undefined) {
-  return useQuery({
-    queryKey: ["money-merchant-names", personId],
-    queryFn: () => fetchMerchantNames(personId!),
-    enabled: !!personId,
-  });
-}
-
-export function usePersons() {
-  return useQuery({ queryKey: ["persons"], queryFn: fetchPersons });
-}
-
-export type TransactionSave =
-  | { transaction: CreateMoneyTransactionInput; lineItems: CreateMoneyLineItemInput[] }
-  | { id: string; updates: UpdateMoneyTransactionInput; lineItems: CreateMoneyLineItemInput[] }
-  | { id: string; remove: true };
-
-/** Add, change or delete a transaction; the feed and its sums follow. Resolves to its id. */
-export function useSaveTransaction() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: async (save: TransactionSave): Promise<string> => {
-      if ("remove" in save) {
-        await deleteTransaction(save.id);
-        return save.id;
-      }
-      if ("updates" in save) {
-        await updateTransaction(save.id, save.updates, save.lineItems);
-        return save.id;
-      }
-      return createTransaction(save.transaction, save.lineItems);
-    },
-    onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
-    onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
-    onSettled: (id) => {
-      void client.invalidateQueries({ queryKey: ["money-feed"] });
-      void client.invalidateQueries({ queryKey: ["money-feed-summary"] });
-      void client.invalidateQueries({ queryKey: ["money-merchant-names"] });
-      void client.invalidateQueries({ queryKey: ["money-spending-report"] });
-      if (id) void client.invalidateQueries({ queryKey: ["money-transaction", id] });
-    },
-  });
-}
-
-export function useMoneyCards(accountIds: string[]) {
-  const ids = [...accountIds].sort();
-  return useQuery({
-    queryKey: ["money-cards", ids],
-    queryFn: () => fetchCards(ids),
-    enabled: ids.length > 0,
-  });
-}
-
-export type AccountSave =
-  | { kind: "account"; personId: string; id?: string; columns: AccountColumns | null }
-  | {
-      kind: "card";
-      accountId: string;
-      id?: string;
-      columns: { last4: string; card_label: string | null } | null;
-    };
-
-/** Add, change or delete (`columns: null`) an account or one of its cards. */
-export function useSaveAccount() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: (save: AccountSave) =>
-      save.kind === "account"
-        ? saveAccount(save.personId, save.id, save.columns)
-        : saveCard(save.accountId, save.id, save.columns),
-    onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
-    onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
-    onSettled: () => {
-      void client.invalidateQueries({ queryKey: ["money-accounts"] });
-      void client.invalidateQueries({ queryKey: ["money-cards"] });
-    },
-  });
-}
-
-/** Add, change or delete (`columns: null`) a custom category. */
-export function useSaveCategory() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, columns }: { id?: string; columns: CategoryColumns | null }) =>
-      saveCategory(id, columns),
-    onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
-    onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
-    onSettled: () => void client.invalidateQueries({ queryKey: ["money-categories"] }),
-  });
-}
-
-export function useMoneyRules(personId: string | undefined) {
-  return useQuery({
-    queryKey: ["money-category-rules", personId],
-    queryFn: () => fetchRules(personId!),
-    enabled: !!personId,
-  });
-}
-
-export type RuleChange =
-  | { delete: string }
-  | { order: string[] }
-  | { id: string | null; payload: Parameters<typeof saveRule>[1] };
-
-/** Save a rule, delete one, or put the rules in a new order. */
-export function useChangeRules() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: (change: RuleChange) =>
-      "delete" in change
-        ? deleteRule(change.delete)
-        : "order" in change
-          ? reorderRules(change.order)
-          : saveRule(change.id, change.payload),
-    onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
-    onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
-    // Returned, so the change stays pending until the list it reordered has been read again.
-    onSettled: () => client.invalidateQueries({ queryKey: ["money-category-rules"] }),
-  });
-}
-
 /** The spending report; while a new period or filter loads, the last one stays on screen. */
 export function useSpendingReport(
   query: Omit<SpendingReportQuery, "personId"> & {
@@ -803,28 +450,6 @@ export function useSpendingReport(
     queryFn: () => fetchSpendingReport({ ...query, personId: personId! }),
     enabled: !!personId,
     placeholderData: keepPreviousData,
-  });
-}
-
-export function useSelfAliases(personId: string | undefined) {
-  return useQuery({
-    queryKey: ["money-transfer-self-aliases", personId],
-    queryFn: () => fetchSelfAliases(personId!),
-    enabled: !!personId,
-  });
-}
-
-/** Add or delete a self-transfer alias; the report changes with it. */
-export function useSaveSelfAlias() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: saveSelfAlias,
-    onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
-    onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
-    onSettled: () => {
-      void client.invalidateQueries({ queryKey: ["money-transfer-self-aliases"] });
-      void client.invalidateQueries({ queryKey: ["money-spending-report"] });
-    },
   });
 }
 
@@ -985,29 +610,4 @@ export function useRecord(id: string) {
 /** A link to open an attachment with, fetched when it is asked for. */
 export function useAttachmentLink() {
   return useMutation({ mutationFn: (storagePath: string) => attachmentLink(storagePath) });
-}
-
-/** Save a document's title, type, date and notes; the document and the list are refetched. */
-export function useSaveRecord() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, details }: { id: string; details: RecordDetails }) =>
-      saveRecord(id, details),
-    onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
-    onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
-    onSettled: (_data, _error, { id }) => {
-      void client.invalidateQueries({ queryKey: ["record", id] });
-      // A document's title and date also order and label results, findings and conditions.
-      for (const family of [
-        "records",
-        "observations",
-        "findings",
-        "active-records",
-        "condition",
-        "completions",
-      ]) {
-        void client.invalidateQueries({ queryKey: [family] });
-      }
-    },
-  });
 }

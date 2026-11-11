@@ -1,0 +1,49 @@
+{
+  "description": "Orbit safety gates for Codex via project-hooks-bridge. Trust this project layer in /hooks, or install the user ~/.codex/hooks.json block from docs/AGENT_ENVIRONMENT.md.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 600,
+            "command": "PROJECT_HOOKS_BRIDGE_FORCE=1 node ./scripts/just/project-hooks-bridge.cjs"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 600,
+            "command": "PROJECT_HOOKS_BRIDGE_FORCE=1 node ./scripts/just/project-hooks-bridge.cjs"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 600,
+            "command": "PROJECT_HOOKS_BRIDGE_FORCE=1 node ./scripts/just/project-hooks-bridge.cjs"
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 600,
+            "command": "PROJECT_HOOKS_BRIDGE_FORCE=1 node ./scripts/just/project-hooks-bridge.cjs"
+          }
+        ]
+      }
+    ]
+  }
+}

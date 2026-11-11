@@ -131,9 +131,11 @@ describe("buildCreateSpendDraft", () => {
     expect(built.draft.account_label).toBe("Наличные");
     expect(built.draft.amount_label).toBe("-350.00 RUB");
     expect(built.draft.lines[0]?.category_label).toBe("Еда");
+    expect(built.draft.changes).toEqual([]);
     // Manual category pick without an explicit lock flag must still serialize locked.
     expect(built.draft.input.line_items?.[0]?.category_locked_by_user).toBe(true);
     expect(spendDraftSummaryText(built.draft)).toContain("Кофейня");
+    expect(spendDraftSummaryText(built.draft)).toMatch(/Markdown preview|text fallback/i);
     expect(spendDraftSummaryText(built.draft)).not.toMatch(/-350|350\.00/);
   });
 
@@ -222,6 +224,8 @@ describe("buildEditSpendDraft", () => {
       assignment_method: "rule",
       assignment_rule_id: "rule-1",
     });
+    expect(built.draft.changes.some((line) => line.includes("сумма"))).toBe(true);
+    expect(built.draft.changes.some((line) => line.includes("мерчант"))).toBe(true);
   });
 
   it("refuses another person's transaction", async () => {

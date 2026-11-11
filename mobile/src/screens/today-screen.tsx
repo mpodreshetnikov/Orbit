@@ -1,7 +1,7 @@
 import type { CheckupItem } from "@orbit-types/checkup";
 import { checkupLateness, groupCheckups, isoDay } from "@orbit-types/checkup-summary";
 import { Stack, useRouter, type Href } from "expo-router";
-import { ChevronRight, Settings, Wallet } from "lucide-react-native";
+import { ChevronRight, Settings } from "lucide-react-native";
 import { useMemo, type ReactNode } from "react";
 import { Pressable, RefreshControl, ScrollView, View } from "react-native";
 import { PendingSlot } from "@/components/dose-slots";
@@ -35,16 +35,6 @@ export default function TodayScreen() {
     <Stack.Screen
       options={{
         title: t("today.title"),
-        headerLeft: () => (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={t("money.addTransaction")}
-            hitSlop={space.sm}
-            onPress={() => router.push("/today/spend" as Href)}
-          >
-            <Icon icon={Wallet} size={22} tone="foreground" />
-          </Pressable>
-        ),
         headerRight: () => (
           <Pressable
             accessibilityRole="button"

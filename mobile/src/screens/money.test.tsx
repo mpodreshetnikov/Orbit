@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
 import { act, fireEvent, renderHook, screen, waitFor } from "@testing-library/react-native";
-import { byDay, dayHeading, SEARCH_DEBOUNCE_MS, useDebounced } from "@/screens/money-screen";
+import {
+  byDay,
+  dayHeading,
+  rowMeta,
+  SEARCH_DEBOUNCE_MS,
+  useDebounced,
+} from "@/screens/money-screen";
 import MoneyScreen from "@/screens/money-screen";
 import {
   calls,
@@ -104,35 +110,44 @@ afterEach(() => {
 });
 
 describe("the money tab", () => {
-  it("leads to reports, categories and rules from tiles that say what is in them", async () => {
-    db.tables.money_category_rules = [
-      { id: "r1", person_id: PERSON.id, sort_order: 1 },
-      { id: "r2", person_id: PERSON.id, sort_order: 2 },
-    ];
+  it("leads to reports and import as compact links, not tiles", async () => {
     await renderScreens(routes, "/money");
     expect(await screen.findByLabelText("Отчеты")).toBeOnTheScreen();
+    expect(screen.getByText("Отчеты")).toBeOnTheScreen();
     expect(screen.getByText("октябрь")).toBeOnTheScreen();
-    expect(await screen.findByText("1")).toBeOnTheScreen();
-    expect(await screen.findByText("2")).toBeOnTheScreen();
-    expect(screen.getByText("Счета")).toBeOnTheScreen();
     expect(screen.getByText("Импорт")).toBeOnTheScreen();
+    expect(screen.queryByText("Категории")).toBeNull();
+    expect(screen.queryByText("Правила")).toBeNull();
+    expect(screen.queryByText("Счета")).toBeNull();
   });
 
-  it("lists the transactions by day with their categories, comments, items and accounts", async () => {
+  it("keeps match totals as their own nodes under the sign filters", async () => {
+    await renderScreens(routes, "/money");
+    expect(await screen.findByText("Совпадений")).toBeOnTheScreen();
+    expect(screen.getByText("Все")).toBeOnTheScreen();
+    expect(screen.getByText("Расходы")).toBeOnTheScreen();
+    expect(screen.getByText("Доходы")).toBeOnTheScreen();
+    // Positive and negative stay separate Text nodes (full-width wrapped row), not one
+    // non-wrapping currency group beside the three chips — Codex P2 on #260.
+    expect(await screen.findByText("3")).toBeOnTheScreen();
+    expect(screen.getAllByText(/^50\s000,00\s₽$/)).toHaveLength(2);
+    expect(screen.getByText(/^-470,50\s₽$/)).toBeOnTheScreen();
+  });
+
+  it("lists the transactions by day with a dense meta line and accounts", async () => {
     await renderScreens(routes, "/money");
     expect(await screen.findByText("Пятёрочка")).toBeOnTheScreen();
     expect(screen.getByText(dayHeading(FEED[0].posted_at).toUpperCase())).toBeOnTheScreen();
     expect(screen.getByText(dayHeading(FEED[2].posted_at).toUpperCase())).toBeOnTheScreen();
-    expect(screen.getByText("Продукты, gone")).toBeOnTheScreen();
-    expect(screen.getByText("Оплата картой")).toBeOnTheScreen();
-    expect(screen.getByText("Хлеб, Молоко")).toBeOnTheScreen();
+    expect(screen.getByText("Продукты, gone · Оплата картой · Хлеб, Молоко")).toBeOnTheScreen();
     expect(screen.getByText("Тинькофф / Зарплатная")).toBeOnTheScreen();
     expect(screen.getByText(/^-350,50\s₽$/)).toBeOnTheScreen();
     expect(screen.getByText("Ручная транзакция")).toBeOnTheScreen();
-    expect(screen.getAllByText("Без категории")).toHaveLength(2);
-    expect(screen.getByText("Себе")).toBeOnTheScreen();
+    expect(screen.getByText("Без категории")).toBeOnTheScreen();
+    expect(screen.getByText("Без категории · Себе")).toBeOnTheScreen();
     expect(screen.getByText("-")).toBeOnTheScreen();
-    expect(await screen.findByText("3")).toBeOnTheScreen();
+    expect(await screen.findByText("Совпадений")).toBeOnTheScreen();
+    expect(screen.getByText("3")).toBeOnTheScreen();
     expect(screen.getAllByText(/^50\s000,00\s₽$/)).toHaveLength(2);
   });
 
@@ -260,5 +275,23 @@ describe("useDebounced", () => {
 describe("byDay", () => {
   it("keeps one heading per day, in the feed's order", () => {
     expect(byDay(FEED as never).map((day) => day.data.length)).toEqual([2, 1]);
+  });
+});
+
+describe("rowMeta", () => {
+  it("joins category, comment and line titles on one line", () => {
+    const names = new Map([["cat-food", "Продукты"]]);
+    expect(
+      rowMeta(
+        {
+          ...FEED[0],
+          line_item_titles: ["Хлеб", " Молоко "],
+        } as never,
+        names,
+      ),
+    ).toBe("Продукты, gone · Оплата картой · Хлеб, Молоко");
+    expect(rowMeta({ ...FEED[2], line_item_titles: [] } as never, names)).toBe(
+      "Без категории · Себе",
+    );
   });
 });

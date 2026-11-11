@@ -9,29 +9,23 @@ import {
   ArrowDownLeft,
   ArrowRightLeft,
   ArrowUpRight,
-  ChartPie,
-  ListChecks,
-  Plus,
   ReceiptText,
   RotateCcw,
   Scale,
-  Tags,
   type LucideIcon,
 } from "lucide-react-native";
 import { useEffect, useMemo, useState } from "react";
-import { Pressable, RefreshControl, SectionList, View } from "react-native";
-import { Chip } from "@/components/form";
-import { Button, Card, Icon, Placeholder, Text } from "@/components/ui";
+import { Pressable, RefreshControl, SectionList, StyleSheet, View } from "react-native";
+import { Button, Icon, Placeholder, Text } from "@/components/ui";
 import { t } from "@/lib/i18n";
 import {
   useMoneyAccounts,
   useMoneyCategories,
   useMoneyFeed,
   useMoneyFeedSummary,
-  useMoneyRules,
   usePerson,
 } from "@/lib/queries";
-import { radius, space, usePalette, type Palette } from "@/theme";
+import { space, usePalette, type Palette } from "@/theme";
 
 /** The web feed's icon and tone for each kind of transaction. */
 const TYPE_LOOK: Record<MoneyTransactionType, [LucideIcon, keyof Palette]> = {
@@ -58,19 +52,6 @@ export function useDebounced<T>(value: T, ms: number): T {
   return settled;
 }
 
-/** The money pages read most, as tiles above the feed: what was spent, where it goes, and how. */
-const TILES: [string, string, LucideIcon][] = [
-  ["money.reports", "/money/reports", ChartPie],
-  ["money.categories", "/money/categories", Tags],
-  ["money.rules", "/money/rules", ListChecks],
-];
-
-/** The rest of the web money menu, a row under the tiles. */
-const SECTIONS: [string, string][] = [
-  ["money.accounts", "/money/accounts"],
-  ["money.import", "/money/import"],
-];
-
 const signLabel = (sign: MoneyAmountSignFilter) =>
   t(`money.amountSign${sign.charAt(0).toUpperCase()}${sign.slice(1)}`);
 
@@ -94,10 +75,23 @@ export function byDay(items: MoneyTransactionFeedItem[]) {
   return days;
 }
 
+/** Category, comment and line titles on one muted line so the row stays short. */
+export function rowMeta(item: MoneyTransactionFeedItem, categoryName: Map<string, string>): string {
+  const categories =
+    item.category_ids
+      .slice(0, 2)
+      .map((id) => categoryName.get(id) ?? id)
+      .join(", ") || t("money.categoryUnassigned");
+  const comment = preferredComment(item.comment, item.source_comment);
+  const titles = item.line_item_titles.map((title) => title.trim()).filter(Boolean);
+  return [categories, comment, titles.length > 0 ? titles.slice(0, 3).join(", ") : null]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 /**
- * "Деньги" — the web transactions page: every transaction of the person, newest first and by day,
- * searched from the bar and narrowed to money in or out, with how many match and their sums. More
- * load as the list nears its end. A row opens its transaction; "+" adds one.
+ * "Деньги" — dense transaction feed first: filters and a one-line sum, then rows by day. Reports
+ * and file import stay reachable as compact links above the list, not as tiles.
  */
 export default function MoneyScreen() {
   const palette = usePalette();
@@ -112,7 +106,6 @@ export default function MoneyScreen() {
   const summary = useMoneyFeedSummary(personId, filters);
   const accounts = useMoneyAccounts(personId);
   const categories = useMoneyCategories();
-  const rules = useMoneyRules(personId);
 
   const items = useMemo(() => feed.data?.pages.flatMap((page) => page.items) ?? [], [feed.data]);
   const accountLabel = new Map(accounts.data?.map((one) => [one.id, one.account_label]));
@@ -127,16 +120,6 @@ export default function MoneyScreen() {
     <Stack.Screen
       options={{
         title: t("money.title"),
-        headerRight: () => (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={t("money.addTransaction")}
-            hitSlop={space.sm}
-            onPress={() => router.push("/money/form" as Href)}
-          >
-            <Icon icon={Plus} size={24} tone="foreground" />
-          </Pressable>
-        ),
         headerSearchBarOptions: {
           placeholder: t("money.searchTransactions"),
           hideWhenScrolling: false,
@@ -168,84 +151,106 @@ export default function MoneyScreen() {
     );
   }
 
-  const total = (label: string, values: string[], tone: keyof Palette) => (
-    <View style={{ flex: 1, gap: 2 }}>
-      <Text size="xs" tone="mutedForeground">
-        {label}
-      </Text>
-      {values.map((value) => (
-        <Text key={value} weight="semibold" tone={tone}>
-          {value}
-        </Text>
-      ))}
-    </View>
-  );
-
+  const month = new Date().toLocaleDateString("ru", { month: "long" });
   const top = (
-    <View style={{ gap: space.md, marginBottom: space.sm }}>
-      <View style={{ flexDirection: "row", gap: space.sm }}>
-        {TILES.map(([label, href, icon]) => (
-          <Tile
-            key={href}
-            label={t(label)}
-            icon={icon}
-            detail={
-              href === "/money/reports"
-                ? new Date().toLocaleDateString("ru", { month: "long" })
-                : href === "/money/categories"
-                  ? categories.data?.length
-                  : rules.data?.length
-            }
-            onPress={() => router.push(href as Href)}
-          />
-        ))}
-      </View>
-      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}>
-        {SECTIONS.map(([label, href]) => (
-          <Button
-            key={href}
-            compact
-            variant="secondary"
-            label={t(label)}
-            onPress={() => router.push(href as Href)}
-          />
-        ))}
-      </View>
-      <View style={{ flexDirection: "row", gap: space.sm }}>
-        {SIGNS.map((sign) => (
-          <Chip
-            key={sign}
-            label={signLabel(sign)}
-            selected={amountSign === sign}
-            onPress={() => setAmountSign(sign)}
-          />
-        ))}
-      </View>
-      <Card style={{ padding: space.md, flexDirection: "row", gap: space.md }}>
-        {summary.error ? (
-          <Text size="sm" tone="mutedForeground" style={{ flex: 1 }}>
-            {`${t("money.summaryUnavailable")}: ${summary.error.message}`}
+    <View style={{ gap: space.xs, marginBottom: 2 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
+        <Pressable
+          accessibilityRole="link"
+          accessibilityLabel={t("money.reports")}
+          onPress={() => router.push("/money/reports" as Href)}
+          hitSlop={space.sm}
+          style={({ pressed }) => ({
+            opacity: pressed ? 0.6 : 1,
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 4,
+            flexShrink: 1,
+          })}
+        >
+          <Text size="xs" weight="medium" tone="primary">
+            {t("money.reports")}
           </Text>
-        ) : (
-          <>
-            {total(
-              t("money.summaryMatches"),
-              [String(summary.data?.totalCount ?? 0)],
-              "foreground",
-            )}
-            {total(
-              t("money.summaryPositive"),
-              byCurrency.map((one) => formatMoney(one.positiveAmount, one.currency, "ru-RU")),
-              "success",
-            )}
-            {total(
-              t("money.summaryNegative"),
-              byCurrency.map((one) => formatMoney(one.negativeAmount, one.currency, "ru-RU")),
-              "destructive",
-            )}
-          </>
-        )}
-      </Card>
+          <Text size="xs" tone="mutedForeground" numberOfLines={1}>
+            {month}
+          </Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="link"
+          accessibilityLabel={t("money.import")}
+          onPress={() => router.push("/money/import" as Href)}
+          hitSlop={space.sm}
+          style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1, marginLeft: "auto" })}
+        >
+          <Text size="xs" weight="medium" tone="primary">
+            {t("money.import")}
+          </Text>
+        </Pressable>
+      </View>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: space.xs }}>
+        {SIGNS.map((sign) => (
+          <Pressable
+            key={sign}
+            accessibilityRole="button"
+            accessibilityState={{ selected: amountSign === sign }}
+            onPress={() => setAmountSign(sign)}
+            style={{
+              paddingHorizontal: space.sm,
+              paddingVertical: 3,
+              borderRadius: 999,
+              borderWidth: 1,
+              borderColor: amountSign === sign ? palette.primary : palette.border,
+              backgroundColor: amountSign === sign ? palette.primary : "transparent",
+            }}
+          >
+            <Text
+              size="xs"
+              weight="medium"
+              tone={amountSign === sign ? "primaryForeground" : "foreground"}
+            >
+              {signLabel(sign)}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+      {/* Full-width under the filters: each total wraps on its own so a narrow iPhone never
+          clips `50 000,00 ₽ · −12 000,00 ₽` beside the three chips (Codex P2 on #260). */}
+      {summary.error ? (
+        <Text size="xs" tone="mutedForeground">
+          {`${t("money.summaryUnavailable")}: ${summary.error.message}`}
+        </Text>
+      ) : (
+        <View
+          style={{
+            flexDirection: "row",
+            flexWrap: "wrap",
+            alignItems: "center",
+            columnGap: 4,
+            rowGap: 2,
+          }}
+        >
+          <Text size="xs" tone="mutedForeground">
+            {t("money.summaryMatches")}
+          </Text>
+          <Text size="xs" weight="medium">
+            {String(summary.data?.totalCount ?? 0)}
+          </Text>
+          {byCurrency.flatMap((one) => [
+            <Text key={`${one.currency}-sep-pos`} size="xs" tone="mutedForeground">
+              ·
+            </Text>,
+            <Text key={`${one.currency}-pos`} size="xs" tone="success" tabular>
+              {formatMoney(one.positiveAmount, one.currency, "ru-RU")}
+            </Text>,
+            <Text key={`${one.currency}-sep-neg`} size="xs" tone="mutedForeground">
+              ·
+            </Text>,
+            <Text key={`${one.currency}-neg`} size="xs" tone="destructive" tabular>
+              {formatMoney(one.negativeAmount, one.currency, "ru-RU")}
+            </Text>,
+          ])}
+        </View>
+      )}
     </View>
   );
 
@@ -259,7 +264,11 @@ export default function MoneyScreen() {
         contentInsetAdjustmentBehavior="automatic"
         keyboardDismissMode="on-drag"
         stickySectionHeadersEnabled={false}
-        contentContainerStyle={{ padding: space.lg, paddingBottom: space.xl * 2 }}
+        contentContainerStyle={{
+          paddingHorizontal: space.md,
+          paddingTop: space.xs,
+          paddingBottom: space.xl * 2,
+        }}
         refreshControl={
           <RefreshControl
             refreshing={feed.isRefetching}
@@ -276,12 +285,14 @@ export default function MoneyScreen() {
             size="xs"
             weight="medium"
             tone="mutedForeground"
-            style={{ marginTop: space.md, marginBottom: space.sm, marginLeft: space.xs }}
+            style={{ marginTop: space.xs, marginBottom: 0 }}
           >
             {section.title.toUpperCase()}
           </Text>
         )}
-        ItemSeparatorComponent={() => <View style={{ height: space.sm }} />}
+        ItemSeparatorComponent={() => (
+          <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: palette.border }} />
+        )}
         ListEmptyComponent={
           feed.isPending ? (
             <Placeholder busy />
@@ -315,8 +326,6 @@ export default function MoneyScreen() {
         }
         renderItem={({ item }) => {
           const [icon, tone] = TYPE_LOOK[item.transaction_type] ?? TYPE_LOOK.expense;
-          const comment = preferredComment(item.comment, item.source_comment);
-          const titles = item.line_item_titles.map((title) => title.trim()).filter(Boolean);
           const account = [accountLabel.get(item.account_id), item.money_cards?.card_label]
             .filter(Boolean)
             .join(" / ");
@@ -335,49 +344,29 @@ export default function MoneyScreen() {
               onPress={() => router.push(`/money/${item.id}` as Href)}
               style={({ pressed }) => ({
                 flexDirection: "row",
-                gap: space.md,
-                padding: space.md,
-                borderRadius: radius.lg,
-                borderWidth: 1,
-                borderColor: palette.border,
-                backgroundColor: pressed ? palette.mutedHalf : palette.card,
+                alignItems: "center",
+                gap: space.sm,
+                paddingVertical: 4,
+                backgroundColor: pressed ? palette.mutedHalf : "transparent",
               })}
             >
-              <View
-                style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: radius.md,
-                  alignItems: "center",
-                  justifyContent: "center",
-                  backgroundColor: palette.muted,
-                }}
-              >
-                <Icon icon={icon} tone={tone} />
-              </View>
-              <View style={{ flex: 1, gap: 2 }}>
-                <Text weight="semibold" numberOfLines={1}>
+              <Icon icon={icon} size={12} tone={tone} />
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text size="sm" weight="semibold" numberOfLines={1}>
                   {item.merchant_name || t("money.transactionFallback")}
                 </Text>
                 <Text size="xs" tone="mutedForeground" numberOfLines={1}>
-                  {item.category_ids
-                    .slice(0, 2)
-                    .map((id) => categoryName.get(id) ?? id)
-                    .join(", ") || t("money.categoryUnassigned")}
+                  {rowMeta(item, categoryName)}
                 </Text>
-                {comment ? (
-                  <Text size="xs" numberOfLines={1}>
-                    {comment}
-                  </Text>
-                ) : null}
-                {titles.length > 0 ? (
-                  <Text size="xs" tone="mutedForeground" numberOfLines={1}>
-                    {titles.slice(0, 3).join(", ")}
-                  </Text>
-                ) : null}
               </View>
-              <View style={{ alignItems: "flex-end", gap: 2, maxWidth: 140 }}>
-                <Text weight="semibold" tone={item.amount < 0 ? "destructive" : "success"}>
+              <View style={{ alignItems: "flex-end", maxWidth: 128 }}>
+                <Text
+                  size="sm"
+                  weight="semibold"
+                  tone={item.amount < 0 ? "destructive" : "success"}
+                  tabular
+                  numberOfLines={1}
+                >
                   {formatMoney(item.amount, item.currency, "ru-RU")}
                 </Text>
                 <Text size="xs" tone="mutedForeground" numberOfLines={1}>
@@ -389,45 +378,5 @@ export default function MoneyScreen() {
         }}
       />
     </>
-  );
-}
-
-/** A money page as a tile: its icon, its name, and a word on what is in it once that is known. */
-function Tile({
-  label,
-  icon,
-  detail,
-  onPress,
-}: {
-  label: string;
-  icon: LucideIcon;
-  detail: string | number | undefined;
-  onPress: () => void;
-}) {
-  const palette = usePalette();
-  return (
-    <Pressable
-      accessibilityRole="link"
-      accessibilityLabel={label}
-      onPress={onPress}
-      style={({ pressed }) => ({
-        flex: 1,
-        gap: space.xs,
-        padding: space.md,
-        borderRadius: radius.lg,
-        borderWidth: 1,
-        borderColor: palette.border,
-        backgroundColor: pressed ? palette.mutedHalf : palette.card,
-        transform: [{ scale: pressed ? 0.98 : 1 }],
-      })}
-    >
-      <Icon icon={icon} size={20} tone="primary" />
-      <Text size="sm" weight="semibold" numberOfLines={1}>
-        {label}
-      </Text>
-      <Text size="xs" tone="mutedForeground" numberOfLines={1}>
-        {detail ?? " "}
-      </Text>
-    </Pressable>
   );
 }

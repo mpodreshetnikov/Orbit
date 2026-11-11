@@ -1,5 +1,6 @@
 import { createMcpHandler, withMcpAuth } from "mcp-handler";
 import { PROTECTED_RESOURCE_METADATA_PATH, isMcpServerEnabled } from "@/lib/mcp/config";
+import { registerCheckupDraftApp } from "@/lib/mcp/apps/checkup-draft";
 import { registerCheckupProposalApp } from "@/lib/mcp/apps/checkup-proposal";
 import { registerAppProbe } from "@/lib/mcp/apps/probe";
 import { registerRecordDraftApp } from "@/lib/mcp/apps/record-draft";
@@ -30,6 +31,7 @@ const handler = createMcpHandler(
     registerAppProbe(server);
     registerRecordDraftApp(server);
     registerCheckupProposalApp(server);
+    registerCheckupDraftApp(server);
     registerSpendDraftApp(server);
     registerCategoryDraftApp(server);
   },
@@ -40,9 +42,9 @@ const handler = createMcpHandler(
       "Most tools are scoped to a person (family members and pets are tracked separately).",
       "Call list_persons first when you do not know which person a request refers to, and ask the user rather than guessing.",
       "Two different things are called measurements here: `measurements` are manually recorded body metrics (weight, height, circumferences), while observations are lab values extracted from uploaded medical documents. Pick the right one for the question.",
-      "To bring in a medical document you have read yourself: create_medical_record, upload its pages (get_upload_links for fresh links when an upload fails; never a second record for the same document), get_ingest_candidates, ingest_medical_document with its reconciliation decided in the same call, then show_record_draft so the user approves or declines the draft on its card (activate_medical_record only when they agree in words instead). When an approved record turns out to close a condition or complete a checkup, propose_reconciliation, then show_record_draft so the user confirms it on the card. To schedule a follow-up a document asks for, propose_checkup; the user adds it from its card.",
-      "Money reads: list_money_transactions lists a person's ledger with the web app's filters and search, each transaction with its bank, counterparty and line items; list_money_categories and list_money_accounts name what the filters accept.",
-      "Money writes: propose_spend / propose_spend_edit and propose_category_create / rename / delete / propose_line_recategorize show a draft card; the owner confirms on the card (confirm_spend_draft or confirm_category_draft). There is no direct money mutate tool — never invent one.",
+      "To bring in a medical document you have read yourself: create_medical_record, upload its pages (get_upload_links for fresh links when an upload fails; never a second record for the same document), get_ingest_candidates, ingest_medical_document with its reconciliation decided in the same call, then show_record_draft so the user approves or declines the draft on its card (activate_medical_record only when they agree in words instead). When an approved record turns out to close a condition or complete a checkup, propose_reconciliation, then show_record_draft so the user confirms it on the card. To schedule a follow-up a document asks for, propose_checkup; the user adds it from its card. To create or edit a checkup (title, category, schedule, status, reminders, planned_on, why, notes) use propose_checkup_create / propose_checkup_edit then confirm_checkup_draft after the owner confirms on the card (or clearly in chat). To mark an existing checkup done, mark_checkup_done (backdates need a preview call then confirm=true). To change only recurrence quickly, update_checkup_schedule (preview then confirm=true).",
+      "Money reads: list_money_transactions is a wide compact ledger (no receipt lines; limit/offset, has_more) with filters for period, account, category, type, amount bounds and text/merchant search. Prefer search_money_line_items for product/line text (e.g. milk). Call get_money_transaction_details only for ids whose receipt composition you need. list_money_categories and list_money_accounts name what the filters accept.",
+      "Money writes: propose_spend or propose_spend_edit and propose_category_create / rename / delete / propose_line_recategorize show a draft card; the owner confirms on the card (confirm_spend_draft or confirm_category_draft). There is no direct create/update money tool — never invent one.",
     ].join(" "),
   },
 );

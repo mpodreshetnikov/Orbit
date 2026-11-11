@@ -1,10 +1,4 @@
-import type {
-  Condition,
-  ConditionStatus,
-  ConditionWithHistory,
-  IcdLookupResult,
-  UpdateConditionInput,
-} from "@orbit-types/condition";
+import type { Condition, ConditionStatus, ConditionWithHistory } from "@orbit-types/condition";
 import { conditionTimeline } from "@orbit-types/condition-summary";
 import { supabase } from "@/lib/supabase";
 
@@ -72,22 +66,9 @@ export async function fetchCondition(id: string): Promise<ConditionDetail | null
   return { ...(condition as Condition), ...conditionTimeline(mentions) };
 }
 
-export async function updateCondition(id: string, values: UpdateConditionInput): Promise<void> {
-  check(await supabase.from("conditions").update(values).eq("id", id));
-}
-
 /** Delete as the web app does: the row stays, marked deleted. */
 export async function deleteCondition(id: string): Promise<void> {
   check(
     await supabase.from("conditions").update({ deleted_at: new Date().toISOString() }).eq("id", id),
   );
-}
-
-/** An ICD-10 code's official names, from the edge function the web app asks. */
-export async function lookupIcdCode(code: string): Promise<IcdLookupResult> {
-  const { data, error } = await supabase.functions.invoke<IcdLookupResult>("icd-lookup", {
-    body: { code },
-  });
-  if (error) throw new Error(error.message);
-  return data as IcdLookupResult;
 }

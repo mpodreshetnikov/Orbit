@@ -1,5 +1,5 @@
-# Documents: the latest ones atop «Здоровье», the full list, the seeded blood test with its results,
-# and its details form. Nothing is saved: the recording only shows the form.
+# Documents: the health dashboard hero (search + latest docs), the full list, and the seeded blood
+# test with its results. Metadata editing is gone — view and attachments only.
 appId: host.exp.Exponent
 name: Документы
 ---
@@ -9,9 +9,35 @@ name: Документы
     text: "Open"
     optional: true
 - extendedWaitUntil:
+    visible: "Поиск документов"
+    timeout: 60000
+- extendedWaitUntil:
     visible: "Annual Blood Test Results.*" # A row reads as one element: match the whole of it.
     timeout: 60000
+- assertVisible: "Диагнозы"
+- assertVisible: "Находки"
+- assertVisible: "Чек-апы"
+# Compact hub rows keep mark-done on the first screen; a11y label is
+# «Отметить выполненным: <title>» (Maestro matches the whole string — use a prefix).
+- assertVisible: "Отметить выполненным: .*"
+# Documents CTA is still on the first screen with denser checkup rows — assert before
+# we scroll it away.
+- assertVisible: "Все документы"
+- takeScreenshot: documents-01-checkups-compact
+# Secondary charts sit below the checkup strip; after earlier flows mutate due dates the
+# hub grows and this header leaves the first screen / a11y tree until scrolled.
+- scrollUntilVisible:
+    element: "Анализы и измерения"
+    centerElement: true
+- assertVisible: "Анализы и измерения"
 - takeScreenshot: documents-01-health
+# Hero sits at the top of the ScrollView. direction UP is required (DOWN times out past
+# the footer); centerElement must stay off — Maestro cannot centre a top-pinned control
+# and fails with «No visible element found» even when the label is already on screen
+# (Mobile recordings 42753953959 / Документы @ 0db4e42; 42841373658 / #254).
+- scrollUntilVisible:
+    element: "Все документы"
+    direction: UP
 - tapOn: "Все документы"
 - extendedWaitUntil:
     visible: "Все типы"
@@ -24,9 +50,4 @@ name: Документы
     visible: "Заметки"
     timeout: 20000
 - takeScreenshot: documents-03-record
-- tapOn: "Редактировать"
-- extendedWaitUntil:
-    visible: "Тип записи"
-    timeout: 20000
-- takeScreenshot: documents-04-edit
-- tapOn: "Отмена"
+- assertVisible: "Заметки"
