@@ -278,6 +278,9 @@
     "supabase/db/policies/push_subscriptions.sql": [
       "supabase/tests/policies/notification_rls_access_test.sql"
     ],
+    "supabase/db/policies/live_activity_tokens.sql": [
+      "supabase/tests/policies/notification_rls_access_test.sql"
+    ],
     "supabase/db/policies/allowed_users.sql": [
       "supabase/tests/policies/allowed_users_rls_test.sql"
     ],

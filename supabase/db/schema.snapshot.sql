@@ -207,6 +207,22 @@ CREATE TABLE "public"."finding_type_catalog" (
 
 
 --
+-- Name: live_activity_tokens; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE "public"."live_activity_tokens" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "auth_user_id" "uuid" NOT NULL,
+    "push_to_start_token" "text" NOT NULL,
+    "bundle_id" "text" NOT NULL,
+    "apns_environment" "text" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "live_activity_tokens_apns_environment_check" CHECK (("apns_environment" = ANY (ARRAY['sandbox'::"text", 'production'::"text"])))
+);
+
+
+--
 -- Name: mcp_oauth_authorization_codes; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -900,7 +916,8 @@ CREATE TABLE "public"."push_subscriptions" (
     "endpoint" "text" NOT NULL,
     "p256dh" "text" NOT NULL,
     "auth" "text" NOT NULL,
-    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "suppress_medication_push" boolean DEFAULT false NOT NULL
 );
 
 
@@ -1153,6 +1170,22 @@ ALTER TABLE ONLY "public"."finding_type_catalog"
 
 ALTER TABLE ONLY "public"."finding_type_catalog"
     ADD CONSTRAINT "finding_type_catalog_pkey" PRIMARY KEY ("id");
+
+
+--
+-- Name: live_activity_tokens live_activity_tokens_auth_user_id_push_to_start_token_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."live_activity_tokens"
+    ADD CONSTRAINT "live_activity_tokens_auth_user_id_push_to_start_token_key" UNIQUE ("auth_user_id", "push_to_start_token");
+
+
+--
+-- Name: live_activity_tokens live_activity_tokens_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."live_activity_tokens"
+    ADD CONSTRAINT "live_activity_tokens_pkey" PRIMARY KEY ("id");
 
 
 --
@@ -1767,6 +1800,13 @@ CREATE INDEX "idx_finding_type_catalog_synonyms_en" ON "public"."finding_type_ca
 --
 
 CREATE INDEX "idx_finding_type_catalog_synonyms_ru" ON "public"."finding_type_catalog" USING "gin" ("synonyms_ru");
+
+
+--
+-- Name: idx_live_activity_tokens_auth_user_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_live_activity_tokens_auth_user_id" ON "public"."live_activity_tokens" USING "btree" ("auth_user_id");
 
 
 --
@@ -2759,6 +2799,14 @@ ALTER TABLE ONLY "public"."condition_records"
 
 ALTER TABLE ONLY "public"."conditions"
     ADD CONSTRAINT "conditions_person_id_fkey" FOREIGN KEY ("person_id") REFERENCES "public"."persons"("id") ON DELETE CASCADE;
+
+
+--
+-- Name: live_activity_tokens live_activity_tokens_auth_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."live_activity_tokens"
+    ADD CONSTRAINT "live_activity_tokens_auth_user_id_fkey" FOREIGN KEY ("auth_user_id") REFERENCES "auth"."users"("id") ON DELETE CASCADE;
 
 
 --

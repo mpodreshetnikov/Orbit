@@ -23,6 +23,19 @@ function createState(): NotificationState {
   };
 }
 
+function emptyLiveActivityTokens() {
+  return {
+    select: (_columns?: string) => ({
+      eq: async () => ({ data: [], error: null }),
+      then: (resolve: (value: { data: unknown[]; error: null }) => unknown) =>
+        Promise.resolve({ data: [], error: null }).then(resolve),
+    }),
+    delete: () => ({
+      eq: async () => ({ error: null }),
+    }),
+  };
+}
+
 function createZeroSubscriberClient() {
   return {
     rpc: async () => ({ data: null, error: null }),
@@ -31,6 +44,9 @@ function createZeroSubscriberClient() {
         return {
           select: async () => ({ data: [], error: null }),
         };
+      }
+      if (table === "live_activity_tokens") {
+        return emptyLiveActivityTokens();
       }
       return { select: async () => ({ data: [], error: null }) };
     },
@@ -60,6 +76,10 @@ function createNoNotificationsClient() {
             eq: async () => ({ error: null }),
           }),
         };
+      }
+
+      if (table === "live_activity_tokens") {
+        return emptyLiveActivityTokens();
       }
 
       if (table === "user_preferences") {
@@ -172,6 +192,10 @@ function createComplexClient(state: NotificationState) {
             },
           }),
         };
+      }
+
+      if (table === "live_activity_tokens") {
+        return emptyLiveActivityTokens();
       }
 
       if (table === "user_preferences") {
@@ -533,6 +557,10 @@ function createBranchCoverageClient(
         };
       }
 
+      if (table === "live_activity_tokens") {
+        return emptyLiveActivityTokens();
+      }
+
       if (table === "user_preferences") {
         return {
           select: () => ({
@@ -703,5 +731,369 @@ Deno.test(
     assertEquals(payload.ok, true);
     assertEquals(payload.processed, 1);
     assertEquals(state.deletedEndpoints, ["https://push.example/stale"]);
+  },
+);
+
+function createLiveActivityOnlyClient(state: NotificationState) {
+  return {
+    rpc: async (name: string) => {
+      if (name === "create_medication_reminder_digests") return { data: null, error: null };
+      if (name === "get_routed_persons_for_recipient") {
+        return {
+          data: [
+            {
+              person_id: "p1",
+              person_name: "Alice",
+              custom_prefix: null,
+              person_owner_user_id: "user-la",
+            },
+          ],
+          error: null,
+        };
+      }
+      return { data: [], error: null };
+    },
+    from: (table: string) => {
+      if (table === "push_subscriptions") {
+        return {
+          select: (columns: string) => {
+            if (columns === "auth_user_id") {
+              return Promise.resolve({ data: [], error: null });
+            }
+            return {
+              eq: async () => ({ data: [], error: null }),
+            };
+          },
+        };
+      }
+
+      if (table === "live_activity_tokens") {
+        return {
+          select: (columns?: string) => {
+            if (columns === "auth_user_id") {
+              return {
+                then: (resolve: (value: { data: unknown[]; error: null }) => unknown) =>
+                  Promise.resolve({
+                    data: [{ auth_user_id: "user-la" }],
+                    error: null,
+                  }).then(resolve),
+              };
+            }
+            return {
+              eq: async () => ({
+                data: [
+                  {
+                    // Low-entropy hex — avoids gitleaks generic-api-key on fixtures.
+                    push_to_start_token: "aa".repeat(16),
+                    bundle_id: "com.podreshetnikov.orbit",
+                    apns_environment: "sandbox",
+                  },
+                ],
+                error: null,
+              }),
+            };
+          },
+          delete: () => ({
+            eq: async () => ({ error: null }),
+          }),
+        };
+      }
+
+      if (table === "user_preferences") {
+        return {
+          select: () => ({
+            in: async () => ({
+              data: [
+                {
+                  auth_user_id: "user-la",
+                  checkup_notification_time: "09:00",
+                  checkup_notification_timezone: "UTC",
+                },
+              ],
+              error: null,
+            }),
+          }),
+        };
+      }
+
+      if (table === "notification_digests") {
+        const unsentChain = {
+          eq: () => unsentChain,
+          is: () => unsentChain,
+          order: () => unsentChain,
+          limit: async () => ({
+            data: [
+              {
+                id: "digest-med-la",
+                type: "medication",
+                scheduled_at: "2026-01-01T09:00:00.000Z",
+                person_id: "p1",
+                payload_json: {
+                  title: "Medication",
+                  body: "",
+                  url: "/health/medications",
+                  doses: [
+                    {
+                      dose_event_id: "dose-la-1",
+                      medication_name: "Aspirin",
+                      amount: "1",
+                      unit: "pill",
+                      time_str: "09:00",
+                    },
+                  ],
+                },
+              },
+            ],
+            error: null,
+          }),
+        };
+        return {
+          select: () => unsentChain,
+          update: () => ({
+            in: async (_column: string, ids: string[]) => {
+              state.updatedDigestIds = ids;
+              return { error: null };
+            },
+          }),
+        };
+      }
+
+      if (table === "med_dose_events") {
+        return {
+          update: () => ({
+            in: async (_column: string, ids: string[]) => {
+              state.updatedDoseEventIds = ids;
+              return { error: null };
+            },
+          }),
+        };
+      }
+
+      return { select: async () => ({ data: [], error: null }) };
+    },
+  };
+}
+
+function createSuppressMedicationClient(state: NotificationState) {
+  const base = createComplexClient(state);
+  return {
+    ...base,
+    from: (table: string) => {
+      if (table === "push_subscriptions") {
+        return {
+          select: (columns: string) => {
+            if (columns === "auth_user_id") {
+              return Promise.resolve({ data: [{ auth_user_id: "user-1" }], error: null });
+            }
+            return {
+              eq: async () => ({
+                data: [
+                  {
+                    endpoint: "https://web.push.apple.com/sub-1",
+                    p256dh: "k1",
+                    auth: "a1",
+                    suppress_medication_push: true,
+                  },
+                ],
+                error: null,
+              }),
+            };
+          },
+          delete: () => ({
+            eq: async () => ({ error: null }),
+          }),
+        };
+      }
+      if (table === "notification_digests") {
+        const unsentChain = {
+          eq: () => unsentChain,
+          is: () => unsentChain,
+          order: () => unsentChain,
+          limit: async () => ({
+            data: [
+              {
+                id: "digest-med",
+                type: "medication",
+                scheduled_at: "2026-01-01T09:00:00.000Z",
+                person_id: "p1",
+                payload_json: {
+                  title: "Medication",
+                  body: "",
+                  url: "/health/medications",
+                  doses: [
+                    {
+                      dose_event_id: "dose-1",
+                      medication_name: "Vitamin D",
+                      amount: "1",
+                      unit: "pill",
+                      time_str: "09:00",
+                    },
+                  ],
+                },
+              },
+              {
+                id: "digest-checkup",
+                type: "checkup",
+                scheduled_at: "2026-01-01T09:00:00.000Z",
+                person_id: "p1",
+                payload_json: {
+                  title: "Checkup",
+                  body: "Do checkup",
+                  url: "/health/checkups",
+                },
+              },
+            ],
+            error: null,
+          }),
+        };
+        const overlapChain = {
+          eq: () => overlapChain,
+          lt: () => overlapChain,
+          gt: () => overlapChain,
+          maybeSingle: async () => ({ data: null, error: null }),
+        };
+        return {
+          select: (columns: string) => {
+            if (columns.includes("sent_at")) return overlapChain;
+            return unsentChain;
+          },
+          insert: (payload: Record<string, unknown>) => ({
+            select: () => ({
+              single: async () => {
+                state.insertedDigests.push(payload);
+                return { data: { id: `inserted-${state.insertedDigests.length}` }, error: null };
+              },
+            }),
+          }),
+          update: () => ({
+            in: async (_column: string, ids: string[]) => {
+              state.updatedDigestIds = ids;
+              return { error: null };
+            },
+          }),
+        };
+      }
+      return base.from(table);
+    },
+  };
+}
+
+Deno.test(
+  "notifications-cron marks digests sent after APNs 200 for Live Activity–only users",
+  async () => {
+    const state = createState();
+    let apnsCalls = 0;
+
+    const handler = createNotificationsCronHandler({
+      supabaseUrl: "https://example.supabase.co",
+      supabaseServiceRoleKey: "service-role-key",
+      vapidPublicKey: null,
+      vapidPrivateKey: null,
+      apnsConfig: {
+        keyP8: "pem",
+        keyId: "KID",
+        teamId: "TEAM",
+        bundleId: "com.podreshetnikov.orbit",
+      },
+      createClientFn: (() => createLiveActivityOnlyClient(state)) as unknown as typeof createClient,
+      sendLiveActivityStartFn: async () => {
+        apnsCalls += 1;
+        return { ok: true, status: 200, apnsId: "apns-1" };
+      },
+      now: () => new Date("2026-01-01T09:00:00.000Z"),
+    });
+
+    const payload = await assertJsonResponse<{ ok: boolean; processed: number }>(
+      await handler(
+        new Request("http://localhost/functions/v1/notifications-cron", { method: "POST" }),
+      ),
+      200,
+    );
+
+    assertEquals(payload.ok, true);
+    assertEquals(payload.processed, 1);
+    assertEquals(apnsCalls, 1);
+    assertEquals(state.updatedDigestIds, ["digest-med-la"]);
+    assertEquals(state.updatedDoseEventIds, ["dose-la-1"]);
+  },
+);
+
+Deno.test(
+  "notifications-cron suppress_medication_push omits medications but still sends other digests",
+  async () => {
+    const state = createState();
+
+    const handler = createNotificationsCronHandler({
+      supabaseUrl: "https://example.supabase.co",
+      supabaseServiceRoleKey: "service-role-key",
+      vapidPublicKey: "public",
+      vapidPrivateKey: "private",
+      providersInWindow: [],
+      createClientFn: (() =>
+        createSuppressMedicationClient(state)) as unknown as typeof createClient,
+      webpushClient: {
+        setVapidDetails: () => {},
+        sendNotification: async (_subscription, payload) => {
+          state.sentPayloads.push(payload);
+          return {};
+        },
+      },
+      now: () => new Date("2026-01-01T09:00:00.000Z"),
+    });
+
+    const payload = await assertJsonResponse<{ ok: boolean; processed: number }>(
+      await handler(
+        new Request("http://localhost/functions/v1/notifications-cron", { method: "POST" }),
+      ),
+      200,
+    );
+
+    assertEquals(payload.ok, true);
+    assertEquals(state.sentPayloads.length, 1);
+    const parsed = JSON.parse(state.sentPayloads[0]!) as {
+      notifications: Array<{ type: string }>;
+    };
+    assertEquals(
+      parsed.notifications.every((item) => item.type !== "medication"),
+      true,
+    );
+    assertEquals(
+      parsed.notifications.some((item) => item.type === "checkup"),
+      true,
+    );
+  },
+);
+
+Deno.test(
+  "notifications-cron without APNs secrets does not process Live Activity–only owners",
+  async () => {
+    const state = createState();
+    let apnsCalls = 0;
+
+    const handler = createNotificationsCronHandler({
+      supabaseUrl: "https://example.supabase.co",
+      supabaseServiceRoleKey: "service-role-key",
+      vapidPublicKey: null,
+      vapidPrivateKey: null,
+      apnsConfig: null,
+      createClientFn: (() => createLiveActivityOnlyClient(state)) as unknown as typeof createClient,
+      sendLiveActivityStartFn: async () => {
+        apnsCalls += 1;
+        return { ok: true, status: 200, apnsId: "should-not-run" };
+      },
+      now: () => new Date("2026-01-01T09:00:00.000Z"),
+    });
+
+    const payload = await assertJsonResponse<{ ok: boolean; processed: number }>(
+      await handler(
+        new Request("http://localhost/functions/v1/notifications-cron", { method: "POST" }),
+      ),
+      200,
+    );
+
+    assertEquals(payload.ok, true);
+    assertEquals(payload.processed, 0);
+    assertEquals(apnsCalls, 0);
+    assertEquals(state.updatedDigestIds, []);
   },
 );

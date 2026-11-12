@@ -296,6 +296,13 @@ and installs — and after that deploys every commit that reaches `main`.
     `ORBIT_SSH_KNOWN_HOSTS` with the output of `ssh-keyscan <server ip>` so GitHub checks it talks to
     your server.
 
+    **iOS Live Activity / APNs (optional):** when Apple keys exist, set them on the same
+    Environment (`production`), not in the Supabase Dashboard. `APNS_KEY_P8` is a **Secret** —
+    one line only (`deploy/ci/deploy.sh` rejects newlines): paste the `.p8` base64 body with the
+    `BEGIN`/`END` fences removed, or keep fences but replace real newlines with the two characters
+    `\` and `n`. `APNS_KEY_ID`, `APNS_TEAM_ID`, and `APNS_BUNDLE_ID` (`com.podreshetnikov.orbit`)
+    are **Variables** (Secrets also work; a secret wins). Empty values leave APNs inert.
+
 5.  **Deploy**: _Actions → Deploy to your server → Run workflow_. The first run takes 5–15 minutes and
     ends green; the log shows the same steps as a manual install.
 
@@ -347,9 +354,11 @@ inherited and this job could deploy the wrong server):**
 **Optional (same names as `deploy/.env.example`; secrets for the secret ones):**
 `ORBIT_SERVER_USER`, `ORBIT_SSH_KNOWN_HOSTS`, `ORBIT_HTTP_ONLY`, `MCP_SERVER_ENABLED`,
 `OPENROUTER_API_KEY`, `WHO_ICD_CLIENT_ID` / `WHO_ICD_CLIENT_SECRET`, `BACKUP_*`,
-`ALERT_TELEGRAM_BOT_TOKEN`, `BACKUP_HEALTHCHECK_URL`, `OBS_GRAFANA_CLOUD_OTLP_HEADERS`, and — only
-when moving from a hosted project — `JWT_SECRET`, `ANON_KEY`, `SERVICE_ROLE_KEY`, `VAPID_*`,
-`SOURCE_*`. Use separate backup buckets/prefixes from production.
+`ALERT_TELEGRAM_BOT_TOKEN`, `BACKUP_HEALTHCHECK_URL`, `OBS_GRAFANA_CLOUD_OTLP_HEADERS`,
+`APNS_KEY_P8` / `APNS_KEY_ID` / `APNS_TEAM_ID` / `APNS_BUNDLE_ID` (Live Activity; leave empty to
+keep APNs inert — compose passes `${VAR:-}`), and — only when moving from a hosted project —
+`JWT_SECRET`, `ANON_KEY`, `SERVICE_ROLE_KEY`, `VAPID_*`, `SOURCE_*`. Use separate backup
+buckets/prefixes from production.
 
 **How deploy behaves after merge (no further agent work):**
 
