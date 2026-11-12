@@ -120,9 +120,9 @@ Deno.test("sendLiveActivityStart skips without secrets", async () => {
       alertBody: "Aspirin",
     },
     config: null,
-    fetchFn: async () => {
+    fetchFn: () => {
       fetchCalled = true;
-      return new Response("", { status: 200 });
+      return Promise.resolve(new Response("", { status: 200 }));
     },
   });
   assertEquals(result, { ok: false, skipped: true, reason: "missing_apns_secrets" });
@@ -152,10 +152,12 @@ Deno.test("sendLiveActivityStart posts sandbox liveactivity", async () => {
       teamId: "TEAM",
       bundleId: "com.podreshetnikov.orbit",
     },
-    fetchFn: async (input, init) => {
+    fetchFn: (input, init) => {
       seenUrl = String(input);
       topic = new Headers(init?.headers).get("apns-topic") ?? "";
-      return new Response("", { status: 200, headers: { "apns-id": "id-1" } });
+      return Promise.resolve(
+        new Response("", { status: 200, headers: { "apns-id": "id-1" } }),
+      );
     },
   });
   assertEquals(result, { ok: true, status: 200, apnsId: "id-1" });
