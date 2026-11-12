@@ -155,9 +155,7 @@ Deno.test("sendLiveActivityStart posts sandbox liveactivity", async () => {
     fetchFn: (input, init) => {
       seenUrl = String(input);
       topic = new Headers(init?.headers).get("apns-topic") ?? "";
-      return Promise.resolve(
-        new Response("", { status: 200, headers: { "apns-id": "id-1" } }),
-      );
+      return Promise.resolve(new Response("", { status: 200, headers: { "apns-id": "id-1" } }));
     },
   });
   assertEquals(result, { ok: true, status: 200, apnsId: "id-1" });
