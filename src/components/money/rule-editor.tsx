@@ -60,6 +60,7 @@ import type {
   MoneyLineItem,
   UpdateMoneyCategoryRuleInput,
 } from "@/types";
+import { callMoneyCategorizeAction } from "@/lib/money-categorize-client";
 import {
   emptyRuleForm,
   isSmartRuleKind,
@@ -71,6 +72,7 @@ import {
   ruleFormProblem,
   ruleNumberInput,
   rulePayload,
+  type MoneyLlmProvider,
   type RuleForm,
 } from "@/types/money-rules";
 import {
@@ -78,6 +80,12 @@ import {
   MONEY_CATEGORY_RULE_MATCH_MODES,
   MONEY_CATEGORY_RULE_SCOPE_FILTERS,
 } from "@/types";
+
+type LlmProviderStatus = {
+  jev: { configured: boolean };
+  openrouter: { configured: boolean };
+  default_provider: MoneyLlmProvider;
+};
 
 interface MoneyRuleEditorProps {
   mode: "create" | "edit";
@@ -150,6 +158,8 @@ export function MoneyRuleEditor({
   const [hasLocalChanges, setHasLocalChanges] = useState(false);
   const [previewRun, setPreviewRun] = useState<MoneyCategoryRuleRun | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [llmProviderStatus, setLlmProviderStatus] = useState<LlmProviderStatus | null>(null);
+  const [llmProviderStatusError, setLlmProviderStatusError] = useState<string | null>(null);
   const [transactionPickerOpen, setTransactionPickerOpen] = useState(false);
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   const [fallbackPickerOpen, setFallbackPickerOpen] = useState(false);
@@ -187,6 +197,25 @@ export function MoneyRuleEditor({
   useEffect(() => {
     setExampleLineItemId(initialExampleLineItemId);
   }, [initialExampleLineItemId]);
+
+  useEffect(() => {
+    if (form.ruleKind !== "llm_categorization") return;
+    let cancelled = false;
+    void callMoneyCategorizeAction<LlmProviderStatus>({ action: "llm_provider_status" })
+      .then((status) => {
+        if (cancelled) return;
+        setLlmProviderStatus(status);
+        setLlmProviderStatusError(null);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setLlmProviderStatus(null);
+        setLlmProviderStatusError(describeMoneyCategoryPipelineError(error, t));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [form.ruleKind, t]);
 
   useEffect(() => {
     if (!exampleTransaction?.line_items?.length) return;
@@ -737,15 +766,57 @@ export function MoneyRuleEditor({
             </div>
 
             {form.ruleKind === "llm_categorization" ? (
-              <Field label={t("money.rulePrompt")} hint={t("money.rulePromptHint")}>
-                <Textarea
-                  aria-label={t("money.rulePrompt")}
-                  value={form.prompt}
-                  onChange={(event) =>
-                    updateForm((current) => ({ ...current, prompt: event.target.value }))
-                  }
-                />
-              </Field>
+              <div className="space-y-4">
+                <Field label={t("money.ruleLlmProvider")} hint={t("money.ruleLlmProviderHint")}>
+                  <Select
+                    value={form.llmProvider}
+                    onValueChange={(value) =>
+                      updateForm((current) => ({
+                        ...current,
+                        llmProvider: value as MoneyLlmProvider,
+                      }))
+                    }
+                  >
+                    <SelectTrigger aria-label={t("money.ruleLlmProvider")}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="jev">
+                        {t("money.ruleLlmProviderJev")} · {t("money.ruleLlmProviderRecommended")}
+                      </SelectItem>
+                      <SelectItem value="openrouter">
+                        {t("money.ruleLlmProviderOpenRouter")}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <p className="text-xs text-muted-foreground">
+                  {form.llmProvider === "jev"
+                    ? t("money.ruleLlmProviderJevBlurb")
+                    : t("money.ruleLlmProviderOpenRouterBlurb")}
+                </p>
+                {llmProviderStatusError ? (
+                  <Alert>
+                    <AlertTitle>{t("common.error")}</AlertTitle>
+                    <AlertDescription>{llmProviderStatusError}</AlertDescription>
+                  </Alert>
+                ) : null}
+                {llmProviderStatus && !llmProviderStatus[form.llmProvider].configured ? (
+                  <Alert>
+                    <AlertTitle>{t("money.ruleLlmProviderNotConfiguredTitle")}</AlertTitle>
+                    <AlertDescription>{t("money.ruleLlmProviderNotConfigured")}</AlertDescription>
+                  </Alert>
+                ) : null}
+                <Field label={t("money.rulePrompt")} hint={t("money.rulePromptHint")}>
+                  <Textarea
+                    aria-label={t("money.rulePrompt")}
+                    value={form.prompt}
+                    onChange={(event) =>
+                      updateForm((current) => ({ ...current, prompt: event.target.value }))
+                    }
+                  />
+                </Field>
+              </div>
             ) : null}
 
             <div className="space-y-4">

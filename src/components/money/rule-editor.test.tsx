@@ -44,6 +44,19 @@ vi.mock("@/lib/date-locale", () => ({
   useIntlLocale: () => "en-US",
 }));
 
+vi.mock("@/lib/money-categorize-client", () => ({
+  callMoneyCategorizeAction: vi.fn(async (action: Record<string, unknown>) => {
+    if (action.action === "llm_provider_status") {
+      return {
+        jev: { configured: true },
+        openrouter: { configured: false },
+        default_provider: "jev",
+      };
+    }
+    throw new Error(`Unexpected money-categorize action: ${String(action.action)}`);
+  }),
+}));
+
 vi.mock("@/hooks", () => ({
   useCreateMoneyCategoryRule: (...args: unknown[]) => hookMocks.useCreateMoneyCategoryRule(...args),
   useMoneyAccounts: (...args: unknown[]) => hookMocks.useMoneyAccounts(...args),
@@ -558,7 +571,7 @@ describe("MoneyRuleEditor", () => {
         id: "rule-1",
         updates: expect.objectContaining({
           rule_kind: "llm_categorization",
-          config: { prompt: "New prompt" },
+          config: { provider: "jev", prompt: "New prompt" },
         }),
       });
     });

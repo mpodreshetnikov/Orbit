@@ -169,7 +169,7 @@ describe("the rule form", () => {
         { field: "merchant_name", operator: "is_empty" },
         { field: "merchant_name", operator: "contains", value: "Coffee" },
       ],
-      config: { prompt: "Еда?" },
+      config: { provider: "jev", prompt: "Еда?" },
       stop_processing: false,
     });
     expect(

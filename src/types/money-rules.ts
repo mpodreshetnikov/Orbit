@@ -216,6 +216,8 @@ export interface RuleFilterDraft {
   max: string;
 }
 
+export type MoneyLlmProvider = "jev" | "openrouter";
+
 export interface RuleForm {
   id: string | null;
   name: string;
@@ -227,8 +229,15 @@ export interface RuleForm {
   scopeFilter: MoneyCategoryRuleScopeFilter;
   stopProcessing: boolean;
   prompt: string;
+  llmProvider: MoneyLlmProvider;
   fallbackSystemKey: string;
   filters: RuleFilterDraft[];
+}
+
+export function resolveRuleLlmProvider(
+  config: Record<string, unknown> | null | undefined,
+): MoneyLlmProvider {
+  return config?.provider === "openrouter" ? "openrouter" : "jev";
 }
 
 function normalizeDraftOperator(
@@ -310,6 +319,7 @@ export function emptyRuleForm(): RuleForm {
     scopeFilter: "all_line_items",
     stopProcessing: false,
     prompt: "",
+    llmProvider: "jev",
     fallbackSystemKey: "uncategorized",
     filters: [],
   };
@@ -327,6 +337,7 @@ export function ruleFormOf(rule: MoneyCategoryRule): RuleForm {
     scopeFilter: rule.scope_filter,
     stopProcessing: rule.stop_processing,
     prompt: typeof rule.config.prompt === "string" ? rule.config.prompt : "",
+    llmProvider: resolveRuleLlmProvider(rule.config),
     fallbackSystemKey:
       typeof rule.config.target_system_key === "string"
         ? rule.config.target_system_key
@@ -342,8 +353,11 @@ export function rulePayload(
 ): CreateMoneyCategoryRuleInput | UpdateMoneyCategoryRuleInput {
   const config: Record<string, unknown> = {};
 
-  if (form.ruleKind === "llm_categorization" && form.prompt.trim()) {
-    config.prompt = form.prompt.trim();
+  if (form.ruleKind === "llm_categorization") {
+    config.provider = form.llmProvider;
+    if (form.prompt.trim()) {
+      config.prompt = form.prompt.trim();
+    }
   }
 
   if (form.ruleKind === "fallback_uncategorized") {
