@@ -7,7 +7,11 @@ import { LanguageSync } from "./language-sync";
 import { ProcessingIndicator } from "./processing-indicator";
 import { ScrollToTop } from "./scroll-to-top";
 import { RealtimeMonitor } from "./realtime-monitor";
-import { useEnsurePushSubscription, useNotifications } from "@/hooks";
+import {
+  useEnsureLiveActivityToken,
+  useEnsurePushSubscription,
+  useNotifications,
+} from "@/hooks";
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -16,6 +20,7 @@ interface AppShellProps {
 export function AppShell({ children }: AppShellProps) {
   useNotifications();
   useEnsurePushSubscription();
+  useEnsureLiveActivityToken();
   return (
     <div className="min-h-screen min-w-0 w-full max-w-full overflow-x-hidden bg-background">
       <LanguageSync />

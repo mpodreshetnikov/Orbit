@@ -360,6 +360,36 @@ export type Database = {
         }
         Relationships: []
       }
+      live_activity_tokens: {
+        Row: {
+          apns_environment: string
+          auth_user_id: string
+          bundle_id: string
+          created_at: string
+          id: string
+          push_to_start_token: string
+          updated_at: string
+        }
+        Insert: {
+          apns_environment: string
+          auth_user_id: string
+          bundle_id: string
+          created_at?: string
+          id?: string
+          push_to_start_token: string
+          updated_at?: string
+        }
+        Update: {
+          apns_environment?: string
+          auth_user_id?: string
+          bundle_id?: string
+          created_at?: string
+          id?: string
+          push_to_start_token?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       mcp_oauth_authorization_codes: {
         Row: {
           auth_user_id: string
@@ -2350,6 +2380,7 @@ export type Database = {
           endpoint: string
           id: string
           p256dh: string
+          suppress_medication_push: boolean
         }
         Insert: {
           auth: string
@@ -2358,6 +2389,7 @@ export type Database = {
           endpoint: string
           id?: string
           p256dh: string
+          suppress_medication_push?: boolean
         }
         Update: {
           auth?: string
@@ -2366,6 +2398,7 @@ export type Database = {
           endpoint?: string
           id?: string
           p256dh?: string
+          suppress_medication_push?: boolean
         }
         Relationships: []
       }

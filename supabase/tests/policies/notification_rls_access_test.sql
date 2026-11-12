@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(7);
+SELECT plan(9);
 
 INSERT INTO auth.users (id, email, aud, role)
 VALUES
@@ -17,6 +17,15 @@ VALUES (
   'https://example.com/sub/owner',
   'owner-p256dh',
   'owner-auth'
+);
+
+INSERT INTO public.live_activity_tokens (
+  auth_user_id, push_to_start_token, bundle_id, apns_environment
+) VALUES (
+  'aaaaaaaa-1111-1111-1111-111111111111',
+  'token-owner',
+  'com.podreshetnikov.orbit',
+  'sandbox'
 );
 
 INSERT INTO public.notification_routing (recipient_user_id, person_id, enabled, custom_prefix)
@@ -61,6 +70,11 @@ SELECT is(
   1::bigint,
   'owner can read own notification digests'
 );
+SELECT is(
+  (SELECT count(*) FROM public.live_activity_tokens),
+  1::bigint,
+  'owner can read own live activity tokens'
+);
 
 SELECT set_config('request.jwt.claim.sub', 'bbbbbbbb-2222-2222-2222-222222222222', true);
 
@@ -78,6 +92,11 @@ SELECT is(
   (SELECT count(*) FROM public.notification_digests),
   0::bigint,
   'non-owner cannot read another user digests'
+);
+SELECT is(
+  (SELECT count(*) FROM public.live_activity_tokens),
+  0::bigint,
+  'non-owner cannot read another user live activity tokens'
 );
 
 SELECT throws_ok(

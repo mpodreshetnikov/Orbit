@@ -23,6 +23,19 @@ function createState(): NotificationState {
   };
 }
 
+function emptyLiveActivityTokens() {
+  return {
+    select: (_columns?: string) => ({
+      eq: async () => ({ data: [], error: null }),
+      then: (resolve: (value: { data: unknown[]; error: null }) => unknown) =>
+        Promise.resolve({ data: [], error: null }).then(resolve),
+    }),
+    delete: () => ({
+      eq: async () => ({ error: null }),
+    }),
+  };
+}
+
 function createZeroSubscriberClient() {
   return {
     rpc: async () => ({ data: null, error: null }),
@@ -31,6 +44,9 @@ function createZeroSubscriberClient() {
         return {
           select: async () => ({ data: [], error: null }),
         };
+      }
+      if (table === "live_activity_tokens") {
+        return emptyLiveActivityTokens();
       }
       return { select: async () => ({ data: [], error: null }) };
     },
@@ -60,6 +76,10 @@ function createNoNotificationsClient() {
             eq: async () => ({ error: null }),
           }),
         };
+      }
+
+      if (table === "live_activity_tokens") {
+        return emptyLiveActivityTokens();
       }
 
       if (table === "user_preferences") {
@@ -172,6 +192,10 @@ function createComplexClient(state: NotificationState) {
             },
           }),
         };
+      }
+
+      if (table === "live_activity_tokens") {
+        return emptyLiveActivityTokens();
       }
 
       if (table === "user_preferences") {
@@ -531,6 +555,10 @@ function createBranchCoverageClient(
             eq: async () => ({ error: null }),
           }),
         };
+      }
+
+      if (table === "live_activity_tokens") {
+        return emptyLiveActivityTokens();
       }
 
       if (table === "user_preferences") {

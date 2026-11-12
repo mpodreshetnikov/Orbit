@@ -44,6 +44,16 @@ export interface PushSubscriptionInput {
   };
 }
 
+/** APNs environment reported by the native Live Activity plugin. */
+export type ApnsEnvironment = "sandbox" | "production";
+
+/** Body posted by the Capacitor shell when a push-to-start token rotates. */
+export interface LiveActivityTokenInput {
+  pushToStartToken: string;
+  bundleId: string;
+  apnsEnvironment: ApnsEnvironment;
+}
+
 // ============================================================================
 // Notification digest (backend) and payload (push/pull)
 // ============================================================================

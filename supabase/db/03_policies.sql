@@ -200,6 +200,10 @@ BEGIN;
 COMMIT;
 
 BEGIN;
+\i policies/live_activity_tokens.sql
+COMMIT;
+
+BEGIN;
 \i policies/notification_digests.sql
 COMMIT;
 

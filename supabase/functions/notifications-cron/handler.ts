@@ -11,7 +11,15 @@ import {
   type NotificationItem,
   type RoutedPersonRow,
 } from "./digest.ts";
-import { buildPushPayload } from "./push.ts";
+import {
+  isAppleWebPushEndpoint,
+  readApnsConfig,
+  sendLiveActivityStart,
+  type ApnsConfig,
+  type ApnsEnvironment,
+  type LiveActivityStartPayload,
+} from "./apns.ts";
+import { aggregateMedicationNotifications, buildPushPayload } from "./push.ts";
 import { isNotificationWindowForUser } from "./window.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
@@ -30,7 +38,16 @@ interface PushSubscriptionRow {
   endpoint: string;
   p256dh: string;
   auth: string;
+  suppress_medication_push?: boolean | null;
 }
+
+interface LiveActivityTokenRow {
+  push_to_start_token: string;
+  bundle_id: string;
+  apns_environment: ApnsEnvironment;
+}
+
+export type ApnsSender = typeof sendLiveActivityStart;
 
 interface UserPrefsRow {
   auth_user_id: string;
@@ -72,7 +89,9 @@ export interface NotificationsCronDeps {
   providersInWindow?: NotificationProvider[];
   providersEveryTick?: NotificationProvider[];
   now?: () => Date;
-  log?: Pick<Console, "log" | "error">;
+  log?: Pick<Console, "log" | "error" | "info" | "debug" | "warn">;
+  apnsConfig?: ApnsConfig | null;
+  sendLiveActivityStartFn?: ApnsSender;
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -88,6 +107,9 @@ export function createNotificationsCronHandler(deps: NotificationsCronDeps = {})
   const log = deps.log ?? console;
   const providersInWindow = deps.providersInWindow ?? NOTIFICATION_PROVIDERS_IN_WINDOW;
   const providersEveryTick = deps.providersEveryTick ?? NOTIFICATION_PROVIDERS_EVERY_TICK;
+  const sendLiveActivity = deps.sendLiveActivityStartFn ?? sendLiveActivityStart;
+  const resolvedApnsConfig =
+    deps.apnsConfig === undefined ? readApnsConfig() : deps.apnsConfig;
 
   const resolvedSupabaseUrl = deps.supabaseUrl ?? SUPABASE_URL;
   const resolvedServiceRoleKey = deps.supabaseServiceRoleKey ?? SUPABASE_SERVICE_ROLE_KEY;
@@ -173,14 +195,22 @@ export function createNotificationsCronHandler(deps: NotificationsCronDeps = {})
     };
 
     const subscriptionSpan = telemetry.startSpan("edge.notifications_cron.load_subscriptions");
-    const { data: subs } = await supabase.from("push_subscriptions").select("auth_user_id");
+    const [{ data: subs }, { data: liveTokenOwners }] = await Promise.all([
+      supabase.from("push_subscriptions").select("auth_user_id"),
+      supabase.from("live_activity_tokens").select("auth_user_id"),
+    ]);
     const userIds = [
-      ...new Set((subs ?? []).map((row: { auth_user_id: string }) => row.auth_user_id)),
+      ...new Set([
+        ...(subs ?? []).map((row: { auth_user_id: string }) => row.auth_user_id),
+        ...(liveTokenOwners ?? []).map((row: { auth_user_id: string }) => row.auth_user_id),
+      ]),
     ];
     await subscriptionSpan.end({
       status: "ok",
       attrs: {
         user_count: userIds.length,
+        push_subscriber_count: (subs ?? []).length,
+        live_activity_owner_count: (liveTokenOwners ?? []).length,
       },
     });
     if (userIds.length === 0) {
@@ -441,8 +471,92 @@ export function createNotificationsCronHandler(deps: NotificationsCronDeps = {})
 
       const { data: userSubs } = await supabase
         .from("push_subscriptions")
-        .select("endpoint, p256dh, auth")
+        .select("endpoint, p256dh, auth, suppress_medication_push")
         .eq("auth_user_id", authUserId);
+
+      const medicationGroups = aggregateMedicationNotifications(notificationsForUser);
+      let apnsDelivered = false;
+
+      if (medicationGroups.length > 0) {
+        const { data: liveTokens } = await supabase
+          .from("live_activity_tokens")
+          .select("push_to_start_token, bundle_id, apns_environment")
+          .eq("auth_user_id", authUserId);
+
+        if ((liveTokens as LiveActivityTokenRow[] | null)?.length) {
+          const apnsSpan = telemetry.startSpan("edge.notifications_cron.send_live_activity", {
+            attrs: {
+              token_count: (liveTokens as LiveActivityTokenRow[]).length,
+              medication_group_count: medicationGroups.length,
+              apns_configured: resolvedApnsConfig !== null,
+            },
+          });
+
+          if (resolvedApnsConfig === null) {
+            // Inert without secrets: one debug line, never an error, Web Push stays the path.
+            emit("debug", "notifications_cron_apns_skipped_missing_secrets");
+            await apnsSpan.end({
+              status: "ok",
+              attrs: { skipped: true, reason: "missing_apns_secrets" },
+            });
+          } else {
+            try {
+              for (const tokenRow of liveTokens as LiveActivityTokenRow[]) {
+                for (const group of medicationGroups) {
+                  const first = group.medItems[0];
+                  const payload: LiveActivityStartPayload = {
+                    medicationName: first?.medicationName ?? group.title,
+                    amountLabel: first?.amount
+                      ? `${first.amount} ${first.unit}`
+                      : (first?.body ?? group.title),
+                    personPrefix: group.title_prefix,
+                    dueAt: group.scheduledAt,
+                    snoozeMinutes: 60,
+                    doseEventIds: group.dose_event_ids,
+                    alertTitle: group.title,
+                    alertBody: group.medItems.map((item) => item.body).filter(Boolean).join("; "),
+                  };
+                  const result = await sendLiveActivity({
+                    token: tokenRow.push_to_start_token,
+                    environment: tokenRow.apns_environment,
+                    payload,
+                    config: resolvedApnsConfig,
+                  });
+                  if (result.ok) {
+                    apnsDelivered = true;
+                    emit("info", "notifications_cron_apns_delivered", {
+                      apns_status: result.status,
+                      apns_id: result.apnsId,
+                      apns_environment: tokenRow.apns_environment,
+                    });
+                  } else if (!result.skipped) {
+                    emit("warn", "notifications_cron_apns_failed", {
+                      apns_status: result.status,
+                      apns_id: result.apnsId,
+                      apns_environment: tokenRow.apns_environment,
+                    });
+                    if (result.status === 410) {
+                      await supabase
+                        .from("live_activity_tokens")
+                        .delete()
+                        .eq("push_to_start_token", tokenRow.push_to_start_token);
+                    }
+                  }
+                }
+              }
+              await apnsSpan.end({ status: "ok", attrs: { apns_delivered: apnsDelivered } });
+            } catch (error) {
+              emit("warn", "notifications_cron_apns_exception", {
+                error_message: error instanceof Error ? error.message : "Unknown APNs error",
+              });
+              await apnsSpan.end({
+                status: "error",
+                statusMessage: error instanceof Error ? error.message : "Unknown APNs error",
+              });
+            }
+          }
+        }
+      }
 
       if (resolvedVapidPublic && resolvedVapidPrivate && userSubs?.length) {
         const pushSpan = telemetry.startSpan("edge.notifications_cron.send_push", {
@@ -458,8 +572,21 @@ export function createNotificationsCronHandler(deps: NotificationsCronDeps = {})
             resolvedVapidPrivate,
           );
           const payloadToSend = buildPushPayload(notificationsForUser);
+          const hasMedication = medicationGroups.length > 0;
 
           for (const sub of userSubs as PushSubscriptionRow[]) {
+            if (
+              hasMedication &&
+              apnsDelivered &&
+              isAppleWebPushEndpoint(sub.endpoint) &&
+              !sub.suppress_medication_push
+            ) {
+              // Suppress Apple Web Push only after a confirmed Live Activity delivery.
+              continue;
+            }
+            if (hasMedication && sub.suppress_medication_push) {
+              continue;
+            }
             try {
               await webpushClient.sendNotification(
                 {

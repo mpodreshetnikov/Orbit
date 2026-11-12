@@ -74,4 +74,33 @@ describe("generated Xcode project", () => {
     expect(infoPlist).not.toContain("<key>NSAllowsArbitraryLoads</key><true/>");
     expect(infoPlist).toMatch(/<key>NSLocalNetworkUsageDescription<\/key><string>.+?<\/string>/);
   });
+
+  it("declares Live Activities and wires the App entitlements for APNs / App Group", () => {
+    const infoPlist = compactXml(readProjectFile("App/App/Info.plist"));
+    const entitlements = compactXml(readProjectFile("App/App/App.entitlements"));
+    const project = readProjectFile("App/App.xcodeproj/project.pbxproj");
+
+    expect(infoPlist).toContain("<key>NSSupportsLiveActivities</key><true/>");
+    expect(entitlements).toContain("<key>aps-environment</key><string>development</string>");
+    expect(entitlements).toContain("group.com.podreshetnikov.orbit");
+    expect(entitlements).toContain("com.podreshetnikov.orbit.shared");
+    expect(project).toContain("CODE_SIGN_ENTITLEMENTS = App/App.entitlements");
+    expect(project).toContain("LiveActivityPlugin.swift in Sources");
+    expect(project).toContain("MedicationAttributes.swift in Sources");
+    expect(project).toMatch(/IPHONEOS_DEPLOYMENT_TARGET = 17\.0/);
+  });
+
+  it("keeps MedicationActivity widget sources in the tree for the post-key Xcode target", () => {
+    const liveActivity = readProjectFile(
+      "App/MedicationActivity/MedicationActivityLiveActivity.swift",
+    );
+    const bundle = readProjectFile("App/MedicationActivity/MedicationActivityBundle.swift");
+    const widgetEntitlements = compactXml(
+      readProjectFile("App/MedicationActivity/MedicationActivity.entitlements"),
+    );
+
+    expect(bundle).toContain("MedicationActivityBundle");
+    expect(liveActivity).toContain("ActivityConfiguration(for: MedicationAttributes.self)");
+    expect(widgetEntitlements).toContain("group.com.podreshetnikov.orbit");
+  });
 });

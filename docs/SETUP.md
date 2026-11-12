@@ -76,6 +76,20 @@ select vault.create_secret('https://<your-project-ref>.supabase.co', 'project_ur
 
 Remove any manually created duplicate notifications cron job.
 
+### APNs Live Activity secrets (optional until keys exist)
+
+`notifications-cron` reads these Edge Function secrets for medication Live Activity push-to-start.
+When any is missing the APNs path is **inert** (no error spam; Web Push unchanged):
+
+| Secret           | Source                                      |
+| ---------------- | ------------------------------------------- |
+| `APNS_KEY_P8`    | Apple Push Notifications Auth Key `.p8`     |
+| `APNS_KEY_ID`    | Key ID for that `.p8`                       |
+| `APNS_TEAM_ID`   | Apple Developer Team ID                     |
+| `APNS_BUNDLE_ID` | `com.podreshetnikov.orbit`                  |
+
+Do not commit the `.p8`. Place secrets only after Maxim has the Apple keys.
+
 ## Google OAuth (Local)
 
 1. Open `supabase/config.toml`.
