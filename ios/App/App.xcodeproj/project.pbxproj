@@ -19,6 +19,7 @@
 		A1LA00012FE993A70072D4E8 /* LiveActivityPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1LA00002FE993A70072D4E8 /* LiveActivityPlugin.swift */; };
 		A1LA00032FE993A70072D4E8 /* MedicationAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1LA00022FE993A70072D4E8 /* MedicationAttributes.swift */; };
 		A1LA00052FE993A70072D4E8 /* MedicationDoseIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1LA00042FE993A70072D4E8 /* MedicationDoseIntents.swift */; };
+		A1LA00082FE993A70072D4E8 /* OrbitBridgeViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1LA00072FE993A70072D4E8 /* OrbitBridgeViewController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -37,6 +38,7 @@
 		A1LA00022FE993A70072D4E8 /* MedicationAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicationAttributes.swift; sourceTree = "<group>"; };
 		A1LA00042FE993A70072D4E8 /* MedicationDoseIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicationDoseIntents.swift; sourceTree = "<group>"; };
 		A1LA00062FE993A70072D4E8 /* App.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = App.entitlements; sourceTree = "<group>"; };
+		A1LA00072FE993A70072D4E8 /* OrbitBridgeViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitBridgeViewController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -74,6 +76,7 @@
 				9582B6822FE993A50072D4E8 /* SceneDelegate.swift */,
 				50379B222058CBB4000EE86E /* capacitor.config.json */,
 				504EC3071FED79650016851F /* AppDelegate.swift */,
+				A1LA00072FE993A70072D4E8 /* OrbitBridgeViewController.swift */,
 				A1LA00002FE993A70072D4E8 /* LiveActivityPlugin.swift */,
 				A1LA00022FE993A70072D4E8 /* MedicationAttributes.swift */,
 				A1LA00042FE993A70072D4E8 /* MedicationDoseIntents.swift */,
@@ -171,6 +174,7 @@
 			files = (
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */,
+				A1LA00082FE993A70072D4E8 /* OrbitBridgeViewController.swift in Sources */,
 				A1LA00012FE993A70072D4E8 /* LiveActivityPlugin.swift in Sources */,
 				A1LA00032FE993A70072D4E8 /* MedicationAttributes.swift in Sources */,
 				A1LA00052FE993A70072D4E8 /* MedicationDoseIntents.swift in Sources */,
@@ -317,7 +321,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				INFOPLIST_FILE = App/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -340,7 +344,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				INFOPLIST_FILE = App/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",

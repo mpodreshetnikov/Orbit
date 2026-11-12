@@ -130,6 +130,13 @@ jobs:
           ORBIT_SECRET_SERVICE_ROLE_KEY: ${{ secrets.SERVICE_ROLE_KEY }}
           ORBIT_SECRET_VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
           ORBIT_SECRET_VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          # Optional Live Activity APNs (T-0023). KEY_P8 must be a Secret (one-line .p8 body).
+          # KEY_ID / TEAM_ID / BUNDLE_ID arrive via ORBIT_VARS_JSON when set as Environment
+          # Variables; listing them as secrets here still wins if stored under Secrets instead.
+          ORBIT_SECRET_APNS_KEY_P8: ${{ secrets.APNS_KEY_P8 }}
+          ORBIT_SECRET_APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
+          ORBIT_SECRET_APNS_TEAM_ID: ${{ secrets.APNS_TEAM_ID }}
+          ORBIT_SECRET_APNS_BUNDLE_ID: ${{ secrets.APNS_BUNDLE_ID }}
           # The hosted project to move from, for migrate-from-supabase only (docs/SELF_HOSTING.md,
           # "Moving from hosted Supabase"): the SOURCE_* settings, or else the ones this repository's
           # hosted production deploys with (main.yml). deploy/ci/deploy.sh takes one whole set,

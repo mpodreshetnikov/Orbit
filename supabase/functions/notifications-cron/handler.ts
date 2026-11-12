@@ -194,9 +194,15 @@ export function createNotificationsCronHandler(deps: NotificationsCronDeps = {})
     };
 
     const subscriptionSpan = telemetry.startSpan("edge.notifications_cron.load_subscriptions");
+    // Without APNS_* do not union live_activity_tokens owners — otherwise LA-only users
+    // accumulate unsent digests every tick with nothing that can deliver them.
+    const liveOwnersQuery =
+      resolvedApnsConfig !== null
+        ? supabase.from("live_activity_tokens").select("auth_user_id")
+        : Promise.resolve({ data: [] as { auth_user_id: string }[], error: null });
     const [{ data: subs }, { data: liveTokenOwners }] = await Promise.all([
       supabase.from("push_subscriptions").select("auth_user_id"),
-      supabase.from("live_activity_tokens").select("auth_user_id"),
+      liveOwnersQuery,
     ]);
     const userIds = [
       ...new Set([
@@ -210,6 +216,7 @@ export function createNotificationsCronHandler(deps: NotificationsCronDeps = {})
         user_count: userIds.length,
         push_subscriber_count: (subs ?? []).length,
         live_activity_owner_count: (liveTokenOwners ?? []).length,
+        apns_configured: resolvedApnsConfig !== null,
       },
     });
     if (userIds.length === 0) {
@@ -503,13 +510,17 @@ export function createNotificationsCronHandler(deps: NotificationsCronDeps = {})
               for (const tokenRow of liveTokens as LiveActivityTokenRow[]) {
                 for (const group of medicationGroups) {
                   const first = group.medItems[0];
+                  const dueMs = Date.parse(group.scheduledAt);
                   const payload: LiveActivityStartPayload = {
                     medicationName: first?.medicationName ?? group.title,
                     amountLabel: first?.amount
                       ? `${first.amount} ${first.unit}`
                       : (first?.body ?? group.title),
                     personPrefix: group.title_prefix,
-                    dueAt: group.scheduledAt,
+                    // ActivityKit content-state Date = Unix seconds (not ISO string).
+                    dueAt: Number.isFinite(dueMs)
+                      ? Math.floor(dueMs / 1000)
+                      : Math.floor(now.getTime() / 1000),
                     snoozeMinutes: 60,
                     doseEventIds: group.dose_event_ids,
                     alertTitle: group.title,
@@ -560,35 +571,63 @@ export function createNotificationsCronHandler(deps: NotificationsCronDeps = {})
         }
       }
 
-      if (resolvedVapidPublic && resolvedVapidPrivate && userSubs?.length) {
+      const markDigestsAndDosesSent = async () => {
+        const sentDigestIds = [...new Set(notificationsForUser.map((item) => item.id))];
+        if (sentDigestIds.length > 0) {
+          await supabase
+            .from("notification_digests")
+            .update({ sent_at: now.toISOString() })
+            .in("id", sentDigestIds);
+        }
+
+        const doseEventIdsToMarkSent = notificationsForUser
+          .filter(
+            (item) => item.type === "medication" && item.dose_event_id && !item.isOverdueReminder,
+          )
+          .map((item) => item.dose_event_id as string);
+        if (doseEventIdsToMarkSent.length > 0) {
+          await supabase
+            .from("med_dose_events")
+            .update({ status: "sent", updated_at: new Date().toISOString() })
+            .in("id", doseEventIdsToMarkSent);
+        }
+      };
+
+      const hasWebPushPath = Boolean(
+        resolvedVapidPublic && resolvedVapidPrivate && userSubs?.length,
+      );
+
+      if (hasWebPushPath) {
         const pushSpan = telemetry.startSpan("edge.notifications_cron.send_push", {
           attrs: {
-            subscription_count: userSubs.length,
+            subscription_count: userSubs!.length,
             notification_count: notificationsForUser.length,
           },
         });
         try {
           webpushClient.setVapidDetails(
             "mailto:support@example.com",
-            resolvedVapidPublic,
-            resolvedVapidPrivate,
+            resolvedVapidPublic!,
+            resolvedVapidPrivate!,
           );
-          const payloadToSend = buildPushPayload(notificationsForUser);
           const hasMedication = medicationGroups.length > 0;
 
           for (const sub of userSubs as PushSubscriptionRow[]) {
-            if (
+            // suppress_medication_push / APNs-200 on Apple Web Push: drop medication items only,
+            // still deliver checkup and other digests in the same batch.
+            const omitMedication =
               hasMedication &&
-              apnsDelivered &&
-              isAppleWebPushEndpoint(sub.endpoint) &&
-              !sub.suppress_medication_push
-            ) {
-              // Suppress Apple Web Push only after a confirmed Live Activity delivery.
+              (Boolean(sub.suppress_medication_push) ||
+                (apnsDelivered && isAppleWebPushEndpoint(sub.endpoint)));
+            const notificationsForSub = omitMedication
+              ? notificationsForUser.filter(
+                  (item) => item.type !== "medication" && item.type !== "medication_snoozed",
+                )
+              : notificationsForUser;
+            if (notificationsForSub.length === 0) {
               continue;
             }
-            if (hasMedication && sub.suppress_medication_push) {
-              continue;
-            }
+            const payloadToSend = buildPushPayload(notificationsForSub);
             try {
               await webpushClient.sendNotification(
                 {
@@ -611,25 +650,7 @@ export function createNotificationsCronHandler(deps: NotificationsCronDeps = {})
             }
           }
 
-          const sentDigestIds = [...new Set(notificationsForUser.map((item) => item.id))];
-          if (sentDigestIds.length > 0) {
-            await supabase
-              .from("notification_digests")
-              .update({ sent_at: now.toISOString() })
-              .in("id", sentDigestIds);
-          }
-
-          const doseEventIdsToMarkSent = notificationsForUser
-            .filter(
-              (item) => item.type === "medication" && item.dose_event_id && !item.isOverdueReminder,
-            )
-            .map((item) => item.dose_event_id as string);
-          if (doseEventIdsToMarkSent.length > 0) {
-            await supabase
-              .from("med_dose_events")
-              .update({ status: "sent", updated_at: new Date().toISOString() })
-              .in("id", doseEventIdsToMarkSent);
-          }
+          await markDigestsAndDosesSent();
           await pushSpan.end({ status: "ok" });
         } catch (error) {
           log.error("Web Push send failed:", error);
@@ -641,6 +662,9 @@ export function createNotificationsCronHandler(deps: NotificationsCronDeps = {})
             statusMessage: error instanceof Error ? error.message : "Unknown push error",
           });
         }
+      } else if (apnsDelivered) {
+        // Live Activity–only recipient: APNs 200 still advances digest / dose bookkeeping.
+        await markDigestsAndDosesSent();
       }
 
       processed += 1;

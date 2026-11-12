@@ -30,4 +30,4 @@ COMMENT ON COLUMN public.live_activity_tokens.apns_environment IS
   'sandbox for Xcode development builds; production for TestFlight / App Store.';
 
 COMMENT ON COLUMN public.push_subscriptions.suppress_medication_push IS
-  'When true, skip medication Web Push for this subscription even without APNs delivery.';
+  'When true, omit medication items from Web Push for this subscription (other digest types still send); also used after APNs 200 for Apple Web Push endpoints. Not a whole-payload mute.';

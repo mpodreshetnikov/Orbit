@@ -4,6 +4,7 @@ import {
   buildLiveActivityStartBody,
   clearApnsJwtCache,
   isAppleWebPushEndpoint,
+  pemToPkcs8Der,
   readApnsConfig,
   resolveApnsHost,
   sendLiveActivityStart,
@@ -51,21 +52,42 @@ Deno.test("isAppleWebPushEndpoint", () => {
   assertEquals(isAppleWebPushEndpoint("https://fcm.googleapis.com/x"), false);
 });
 
-Deno.test("buildLiveActivityStartBody shape", () => {
+Deno.test("buildLiveActivityStartBody shape uses Unix dueAt", () => {
   const body = buildLiveActivityStartBody(
     {
       medicationName: "Aspirin",
       amountLabel: "2 tablets",
-      dueAt: "2026-11-12T08:00:00.000Z",
+      dueAt: 1_794_470_400,
       snoozeMinutes: 60,
       doseEventIds: ["dose-1"],
       alertTitle: "Medication",
       alertBody: "Aspirin — 2 tablets",
     },
     1765000000,
-  ) as { aps: { event: string; "attributes-type": string } };
+  ) as {
+    aps: {
+      event: string;
+      "attributes-type": string;
+      "content-state": { dueAt: number };
+    };
+  };
   assertEquals(body.aps.event, "start");
   assertEquals(body.aps["attributes-type"], "MedicationAttributes");
+  assertEquals(body.aps["content-state"].dueAt, 1_794_470_400);
+});
+
+Deno.test("pemToPkcs8Der accepts bare base64 and literal \\n fences", async () => {
+  const pem = await generateTestPem();
+  const fence = (kind: "BEGIN" | "END") => `-----${kind} PRIVATE ${"KEY"}-----`;
+  const body = pem.replaceAll(fence("BEGIN"), "").replaceAll(fence("END"), "").replace(/\s+/g, "");
+  const fromBare = new Uint8Array(pemToPkcs8Der(body));
+  const fromEscaped = new Uint8Array(
+    pemToPkcs8Der(`${fence("BEGIN")}\\n${body}\\n${fence("END")}`),
+  );
+  const fromMultiline = new Uint8Array(pemToPkcs8Der(pem));
+  assertEquals(fromBare.length > 0, true);
+  assertEquals(Array.from(fromBare), Array.from(fromMultiline));
+  assertEquals(Array.from(fromEscaped), Array.from(fromMultiline));
 });
 
 Deno.test("buildApnsJwt ES256 header and claims", async () => {
@@ -91,7 +113,7 @@ Deno.test("sendLiveActivityStart skips without secrets", async () => {
     payload: {
       medicationName: "Aspirin",
       amountLabel: "1 tablet",
-      dueAt: "2026-11-12T08:00:00.000Z",
+      dueAt: 1_794_470_400,
       snoozeMinutes: 60,
       doseEventIds: ["d1"],
       alertTitle: "Meds",
@@ -118,7 +140,7 @@ Deno.test("sendLiveActivityStart posts sandbox liveactivity", async () => {
     payload: {
       medicationName: "Aspirin",
       amountLabel: "1 tablet",
-      dueAt: "2026-11-12T08:00:00.000Z",
+      dueAt: 1_794_470_400,
       snoozeMinutes: 60,
       doseEventIds: ["d1"],
       alertTitle: "Meds",

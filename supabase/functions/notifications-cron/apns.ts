@@ -18,7 +18,8 @@ export interface LiveActivityStartPayload {
   medicationName: string;
   amountLabel: string;
   personPrefix?: string | null;
-  dueAt: string;
+  /** Unix seconds since 1970 — ActivityKit JSON-decodes `Date` this way in content-state. */
+  dueAt: number;
   snoozeMinutes: number;
   doseEventIds: string[];
   alertTitle: string;
@@ -62,11 +63,22 @@ function encodeJson(value: unknown): string {
   return base64UrlEncode(new TextEncoder().encode(JSON.stringify(value)));
 }
 
-/** PKCS#8 PEM → DER bytes for WebCrypto import. */
+/**
+ * PKCS#8 PEM or raw base64 body → DER bytes for WebCrypto import.
+ * Accepts multiline PEM, one-line fences with literal `\n`, or the bare base64 body
+ * (deploy/.env / GitHub Secrets cannot hold real newlines).
+ */
 export function pemToPkcs8Der(pem: string): ArrayBuffer {
   // Build PEM fence markers without a contiguous literal (secrets-preflight / gitleaks).
   const fence = (kind: "BEGIN" | "END") => `-----${kind} PRIVATE ${"KEY"}-----`;
-  const body = pem.replaceAll(fence("BEGIN"), "").replaceAll(fence("END"), "").replace(/\s+/g, "");
+  const normalized = pem.includes("\\n") ? pem.replaceAll("\\n", "\n") : pem;
+  const body = normalized
+    .replaceAll(fence("BEGIN"), "")
+    .replaceAll(fence("END"), "")
+    .replace(/\s+/g, "");
+  if (!body) {
+    throw new Error("APNS_KEY_P8 is empty after stripping PEM fences");
+  }
   const binary = atob(body);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i += 1) {

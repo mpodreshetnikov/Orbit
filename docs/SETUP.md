@@ -78,17 +78,29 @@ Remove any manually created duplicate notifications cron job.
 
 ### APNs Live Activity secrets (optional until keys exist)
 
-`notifications-cron` reads these Edge Function secrets for medication Live Activity push-to-start.
-When any is missing the APNs path is **inert** (no error spam; Web Push unchanged):
+`notifications-cron` reads these for medication Live Activity push-to-start. When any is missing
+the APNs path is **inert** (no error spam; Web Push unchanged).
 
-| Secret           | Source                                  |
+| Name             | Source                                  |
 | ---------------- | --------------------------------------- |
 | `APNS_KEY_P8`    | Apple Push Notifications Auth Key `.p8` |
 | `APNS_KEY_ID`    | Key ID for that `.p8`                   |
 | `APNS_TEAM_ID`   | Apple Developer Team ID                 |
 | `APNS_BUNDLE_ID` | `com.podreshetnikov.orbit`              |
 
-Do not commit the `.p8`. Place secrets only after Maxim has the Apple keys.
+**Where to put them depends on the deploy path:**
+
+- **Self-hosted (this repository's production server):** GitHub → Settings → Environments →
+  `production` — `APNS_KEY_P8` as a **Secret** (one line: `.p8` base64 body without PEM fences, or
+  fences with literal `\n`; multiline PEM is rejected by `deploy/ci/deploy.sh`), and
+  `APNS_KEY_ID` / `APNS_TEAM_ID` / `APNS_BUNDLE_ID` as **Variables** (or Secrets). They land in
+  `deploy/.env` and the functions container via `deploy/docker-compose.yml`. See
+  `docs/SELF_HOSTING.md`. Do **not** rely on Supabase Dashboard → Edge Function secrets for
+  self-host: that Dashboard is not what the self-hosted functions container reads.
+- **Hosted Supabase only:** Edge Functions → Secrets (or `supabase secrets set`), after Maxim has
+  the Apple keys.
+
+Do not commit the `.p8`.
 
 ## Google OAuth (Local)
 

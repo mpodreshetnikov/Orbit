@@ -87,7 +87,10 @@ describe("generated Xcode project", () => {
     expect(project).toContain("CODE_SIGN_ENTITLEMENTS = App/App.entitlements");
     expect(project).toContain("LiveActivityPlugin.swift in Sources");
     expect(project).toContain("MedicationAttributes.swift in Sources");
-    expect(project).toMatch(/IPHONEOS_DEPLOYMENT_TARGET = 17\.0/);
+    expect(project).toContain("OrbitBridgeViewController.swift in Sources");
+    // App stays on 15.0; Live Activity / intents are gated with @available (not a forced 17 bump).
+    expect(project).toMatch(/IPHONEOS_DEPLOYMENT_TARGET = 15\.0/);
+    expect(project).not.toMatch(/IPHONEOS_DEPLOYMENT_TARGET = 17\.0/);
   });
 
   it("keeps MedicationActivity widget sources in the tree for the post-key Xcode target", () => {

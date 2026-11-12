@@ -6,6 +6,7 @@ import Foundation
  Capacitor bridge for ActivityKit push-to-start tokens (T-0023).
  Registers as JS name `LiveActivity`. Without a signed Push entitlement the token stream
  never yields; the web hook treats that as a quiet no-op so Web Push stays the path.
+ Token rotations keep notifying — do not stop after the first value.
  */
 @objc(LiveActivityPlugin)
 public class LiveActivityPlugin: CAPPlugin, CAPBridgedPlugin {
@@ -33,15 +34,18 @@ public class LiveActivityPlugin: CAPPlugin, CAPBridgedPlugin {
         ])
         return
         #else
+        call.keepAlive = true
         Task {
             for await tokenData in Activity<MedicationAttributes>.pushToStartTokenUpdates {
                 let token = tokenData.map { String(format: "%02x", $0) }.joined()
-                call.resolve([
+                let payload: [String: Any] = [
                     "token": token,
                     "apnsEnvironment": Self.apnsEnvironment(),
                     "bundleId": Self.bundleId,
-                ])
-                return
+                ]
+                // Listener path picks up rotations; keepAlive resolve covers Promise callers.
+                notifyListeners("pushToStartToken", data: payload)
+                call.resolve(payload)
             }
             call.reject("pushToStartTokenUpdates ended without a token")
         }

@@ -1,4 +1,5 @@
 import { Capacitor, registerPlugin } from "@capacitor/core";
+import type { PluginListenerHandle } from "@capacitor/core";
 import type { ApnsEnvironment } from "@/types";
 
 export interface LiveActivityTokenEvent {
@@ -10,6 +11,10 @@ export interface LiveActivityTokenEvent {
 export interface LiveActivityPlugin {
   /** Starts observing ActivityKit push-to-start token updates (iOS 17.2+). */
   watchPushToStartToken(): Promise<LiveActivityTokenEvent>;
+  addListener(
+    eventName: "pushToStartToken",
+    listenerFunc: (event: LiveActivityTokenEvent) => void,
+  ): Promise<PluginListenerHandle>;
   /** Debug-only: request a local Live Activity with sample content (no APNs). */
   startDebugActivity(options?: {
     medicationName?: string;

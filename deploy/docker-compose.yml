@@ -91,6 +91,11 @@ services:
       WHO_ICD_CLIENT_SECRET: ${WHO_ICD_CLIENT_SECRET:-}
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:?}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:?}
+      # Optional: empty keeps Live Activity APNs inert (production-cacos without keys is fine).
+      APNS_KEY_P8: ${APNS_KEY_P8:-}
+      APNS_KEY_ID: ${APNS_KEY_ID:-}
+      APNS_TEAM_ID: ${APNS_TEAM_ID:-}
+      APNS_BUNDLE_ID: ${APNS_BUNDLE_ID:-}
       MONEY_FX_SYNC_TOKEN: ${MONEY_FX_SYNC_TOKEN:?}
       OBS_EXPORTER_MODE: ${OBS_EXPORTER_MODE:-off}
       OBS_OTLP_ENDPOINT: ${OBS_OTLP_ENDPOINT:-}
