@@ -10,11 +10,10 @@ import {
 } from "./apns.ts";
 
 async function generateTestPem(): Promise<string> {
-  const keyPair = await crypto.subtle.generateKey(
-    { name: "ECDSA", namedCurve: "P-256" },
-    true,
-    ["sign", "verify"],
-  );
+  const keyPair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
+    "sign",
+    "verify",
+  ]);
   const pkcs8 = new Uint8Array(await crypto.subtle.exportKey("pkcs8", keyPair.privateKey));
   let binary = "";
   for (const byte of pkcs8) binary += String.fromCharCode(byte);

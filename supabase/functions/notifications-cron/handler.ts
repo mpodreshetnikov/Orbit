@@ -108,8 +108,7 @@ export function createNotificationsCronHandler(deps: NotificationsCronDeps = {})
   const providersInWindow = deps.providersInWindow ?? NOTIFICATION_PROVIDERS_IN_WINDOW;
   const providersEveryTick = deps.providersEveryTick ?? NOTIFICATION_PROVIDERS_EVERY_TICK;
   const sendLiveActivity = deps.sendLiveActivityStartFn ?? sendLiveActivityStart;
-  const resolvedApnsConfig =
-    deps.apnsConfig === undefined ? readApnsConfig() : deps.apnsConfig;
+  const resolvedApnsConfig = deps.apnsConfig === undefined ? readApnsConfig() : deps.apnsConfig;
 
   const resolvedSupabaseUrl = deps.supabaseUrl ?? SUPABASE_URL;
   const resolvedServiceRoleKey = deps.supabaseServiceRoleKey ?? SUPABASE_SERVICE_ROLE_KEY;
@@ -514,7 +513,10 @@ export function createNotificationsCronHandler(deps: NotificationsCronDeps = {})
                     snoozeMinutes: 60,
                     doseEventIds: group.dose_event_ids,
                     alertTitle: group.title,
-                    alertBody: group.medItems.map((item) => item.body).filter(Boolean).join("; "),
+                    alertBody: group.medItems
+                      .map((item) => item.body)
+                      .filter(Boolean)
+                      .join("; "),
                   };
                   const result = await sendLiveActivity({
                     token: tokenRow.push_to_start_token,

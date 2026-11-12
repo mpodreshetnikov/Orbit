@@ -7,11 +7,7 @@ import { LanguageSync } from "./language-sync";
 import { ProcessingIndicator } from "./processing-indicator";
 import { ScrollToTop } from "./scroll-to-top";
 import { RealtimeMonitor } from "./realtime-monitor";
-import {
-  useEnsureLiveActivityToken,
-  useEnsurePushSubscription,
-  useNotifications,
-} from "@/hooks";
+import { useEnsureLiveActivityToken, useEnsurePushSubscription, useNotifications } from "@/hooks";
 
 interface AppShellProps {
   children: React.ReactNode;
