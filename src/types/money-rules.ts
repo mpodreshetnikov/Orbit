@@ -234,10 +234,11 @@ export interface RuleForm {
   filters: RuleFilterDraft[];
 }
 
+/** Legacy rules without `provider` stay on OpenRouter; only explicit `jev` selects Jev. */
 export function resolveRuleLlmProvider(
   config: Record<string, unknown> | null | undefined,
 ): MoneyLlmProvider {
-  return config?.provider === "openrouter" ? "openrouter" : "jev";
+  return config?.provider === "jev" ? "jev" : "openrouter";
 }
 
 function normalizeDraftOperator(

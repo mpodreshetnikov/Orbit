@@ -1,12 +1,17 @@
 export type MoneyLlmProvider = "jev" | "openrouter";
 
+/**
+ * Resolve the LLM provider for an existing rule config.
+ * Explicit `jev` / `openrouter` win. Missing or unknown → OpenRouter so legacy
+ * rules keep the pre-ORB-44 path (M1). New rules default to Jev only in the editor.
+ */
 export function resolveMoneyLlmProvider(
   config: Record<string, unknown> | null | undefined,
 ): MoneyLlmProvider {
   const raw = config?.provider;
+  if (raw === "jev") return "jev";
   if (raw === "openrouter") return "openrouter";
-  // Default is Jev (ORB-44 / Maxim t75u). Missing/unknown → jev.
-  return "jev";
+  return "openrouter";
 }
 
 export function isMoneyLlmProviderConfigured(
@@ -28,6 +33,7 @@ export function moneyLlmProviderStatus(env: {
 }): {
   jev: { configured: boolean };
   openrouter: { configured: boolean };
+  /** Recommended default for *new* LLM rules in the editor (not the legacy fallback). */
   default_provider: MoneyLlmProvider;
 } {
   return {

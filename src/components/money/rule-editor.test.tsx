@@ -571,7 +571,8 @@ describe("MoneyRuleEditor", () => {
         id: "rule-1",
         updates: expect.objectContaining({
           rule_kind: "llm_categorization",
-          config: { provider: "jev", prompt: "New prompt" },
+          // Legacy rules without provider stay on OpenRouter until the editor opts into Jev.
+          config: { provider: "openrouter", prompt: "New prompt" },
         }),
       });
     });

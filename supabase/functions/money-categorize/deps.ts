@@ -8,6 +8,9 @@ import { callOpenRouterMoneyCategorizeBatch } from "./openrouter-categorize.ts";
 import { createSupabaseMoneyCategorizeRepository } from "./repository.ts";
 import type { MoneyCategorizeServiceDeps } from "./service.ts";
 
+/** Independent of OpenRouter timeout; sized under the web client's ~20s wall budget. */
+const DEFAULT_JEV_TIMEOUT_MS = 12_000;
+
 export function createDefaultMoneyCategorizeDeps(): MoneyCategorizeServiceDeps & {
   authenticateAllowedUser(token: string): Promise<{ userId: string; email: string | null } | null>;
   getLlmProviderStatus(): ReturnType<typeof moneyLlmProviderStatus>;
@@ -34,7 +37,9 @@ export function createDefaultMoneyCategorizeDeps(): MoneyCategorizeServiceDeps &
       : 4;
   const jevTimeoutRaw = Deno.env.get("JEV_MONEY_CATEGORIZE_TIMEOUT_MS");
   const jevTimeoutMs =
-    jevTimeoutRaw && Number.isFinite(Number(jevTimeoutRaw)) ? Number(jevTimeoutRaw) : timeoutMs;
+    jevTimeoutRaw && Number.isFinite(Number(jevTimeoutRaw)) && Number(jevTimeoutRaw) > 0
+      ? Number(jevTimeoutRaw)
+      : DEFAULT_JEV_TIMEOUT_MS;
 
   const repository = createSupabaseMoneyCategorizeRepository({
     supabaseUrl: Deno.env.get("SUPABASE_URL") ?? undefined,

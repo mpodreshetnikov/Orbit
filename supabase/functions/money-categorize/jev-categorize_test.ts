@@ -1,6 +1,11 @@
 // deno-lint-ignore-file require-await
 import { assertEquals } from "std/assert/assert-equals";
-import { callJevMoneyCategorizeBatch, DEFAULT_JEV_MODEL } from "./jev-categorize.ts";
+import {
+  buildJevState,
+  callJevMoneyCategorizeBatch,
+  DEFAULT_JEV_MODEL,
+  mapPoolCancelOnError,
+} from "./jev-categorize.ts";
 import type { MoneyCategorizeLlmBatchRequest } from "./service.ts";
 
 function createBatchRequest(lineItemIds: string[]): MoneyCategorizeLlmBatchRequest {
@@ -133,25 +138,38 @@ async function assertThrowsWithMessage(
   assertEquals((thrown as Error | null)?.message ?? null, expectedMessage);
 }
 
+function okJevResponse(choice: string, probability: number, noul: number): Response {
+  return new Response(
+    JSON.stringify({
+      model: DEFAULT_JEV_MODEL,
+      answers: {
+        category: {
+          choice,
+          probabilities: { [choice]: probability, "cat-transport": 1 - probability },
+          confidence: probability,
+        },
+        any_fit: { noul },
+      },
+      usage: { input_tokens: 10, output_tokens: 2 },
+    }),
+    { status: 200, headers: { "Content-Type": "application/json" } },
+  );
+}
+
+Deno.test("buildJevState includes eligible_categories for companion Noul", () => {
+  const request = createBatchRequest(["line-1"]);
+  const state = buildJevState(request.items[0], {
+    "cat-food": "Еда / Food (food)",
+    "cat-transport": "Транспорт / Transport (transport)",
+  });
+  assertEquals(Array.isArray(state.eligible_categories), true);
+  assertEquals((state.eligible_categories as unknown[]).length, 2);
+});
+
 Deno.test("callJevMoneyCategorizeBatch applies high-confidence Choice+Noul", async () => {
   const result = await callJevMoneyCategorizeBatch(createBatchRequest(["line-1"]), {
     apiKey: "key",
-    fetchFn: (async () =>
-      new Response(
-        JSON.stringify({
-          model: DEFAULT_JEV_MODEL,
-          answers: {
-            category: {
-              choice: "cat-food",
-              probabilities: { "cat-food": 0.9, "cat-transport": 0.1 },
-              confidence: 0.9,
-            },
-            any_fit: { noul: 0.4 },
-          },
-          usage: { input_tokens: 10, output_tokens: 2 },
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      )) as typeof fetch,
+    fetchFn: (async () => okJevResponse("cat-food", 0.9, 0.7)) as typeof fetch,
   });
 
   assertEquals(result.model, DEFAULT_JEV_MODEL);
@@ -166,21 +184,7 @@ Deno.test(
   async () => {
     const result = await callJevMoneyCategorizeBatch(createBatchRequest(["line-1"]), {
       apiKey: "key",
-      fetchFn: (async () =>
-        new Response(
-          JSON.stringify({
-            answers: {
-              category: {
-                choice: "cat-food",
-                probabilities: { "cat-food": 0.4, "cat-transport": 0.3 },
-                confidence: 0.4,
-              },
-              any_fit: { noul: 0.9 },
-            },
-            usage: { input_tokens: 1, output_tokens: 1 },
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        )) as typeof fetch,
+      fetchFn: (async () => okJevResponse("cat-food", 0.4, 0.9)) as typeof fetch,
     });
 
     assertEquals(result.items[0].categoryId, null);
@@ -191,16 +195,22 @@ Deno.test(
 Deno.test("callJevMoneyCategorizeBatch keeps existing category when Noul is low", async () => {
   const result = await callJevMoneyCategorizeBatch(createBatchRequest(["line-1"]), {
     apiKey: "key",
+    fetchFn: (async () => okJevResponse("cat-food", 0.95, 0.1)) as typeof fetch,
+  });
+
+  assertEquals(result.items[0].categoryId, null);
+  assertEquals((result.items[0].reason ?? "").includes("Noul"), true);
+});
+
+Deno.test("callJevMoneyCategorizeBatch abstains when probabilities are missing", async () => {
+  const result = await callJevMoneyCategorizeBatch(createBatchRequest(["line-1"]), {
+    apiKey: "key",
     fetchFn: (async () =>
       new Response(
         JSON.stringify({
           answers: {
-            category: {
-              choice: "cat-food",
-              probabilities: { "cat-food": 0.95 },
-              confidence: 0.95,
-            },
-            any_fit: { noul: 0.1 },
+            category: { choice: "cat-food", confidence: 0.9 },
+            any_fit: { noul: 0.9 },
           },
           usage: { input_tokens: 1, output_tokens: 1 },
         }),
@@ -209,7 +219,46 @@ Deno.test("callJevMoneyCategorizeBatch keeps existing category when Noul is low"
   });
 
   assertEquals(result.items[0].categoryId, null);
-  assertEquals((result.items[0].reason ?? "").includes("Noul"), true);
+  assertEquals((result.items[0].reason ?? "").includes("probability"), true);
+});
+
+Deno.test("callJevMoneyCategorizeBatch rejects choice outside the candidate list", async () => {
+  const result = await callJevMoneyCategorizeBatch(createBatchRequest(["line-1"]), {
+    apiKey: "key",
+    fetchFn: (async () =>
+      new Response(
+        JSON.stringify({
+          answers: {
+            category: {
+              choice: "cat-unknown",
+              probabilities: { "cat-unknown": 0.99 },
+              confidence: 0.99,
+            },
+            any_fit: { noul: 0.9 },
+          },
+          usage: { input_tokens: 1, output_tokens: 1 },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      )) as typeof fetch,
+  });
+
+  assertEquals(result.items[0].categoryId, null);
+  assertEquals((result.items[0].reason ?? "").includes("outside the allowed"), true);
+});
+
+Deno.test("callJevMoneyCategorizeBatch rejects invalid JSON body", async () => {
+  await assertThrowsWithMessage(
+    () =>
+      callJevMoneyCategorizeBatch(createBatchRequest(["line-1"]), {
+        apiKey: "key",
+        fetchFn: (async () =>
+          new Response("not-json{", {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          })) as typeof fetch,
+      }),
+    "Jev returned invalid JSON",
+  );
 });
 
 Deno.test(
@@ -248,26 +297,89 @@ Deno.test("callJevMoneyCategorizeBatch maps aborts to timeout error", async () =
   );
 });
 
+Deno.test("mapPoolCancelOnError stops dequeuing and aborts peers after first failure", async () => {
+  const started: number[] = [];
+  const signals: AbortSignal[] = [];
+  let throws = 0;
+
+  let thrown: unknown = null;
+  try {
+    await mapPoolCancelOnError([0, 1, 2, 3, 4, 5], 2, async (value, _index, signal) => {
+      started.push(value);
+      signals.push(signal);
+      if (value === 1) {
+        throws += 1;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        throw new Error("503");
+      }
+      await new Promise<void>((resolve, reject) => {
+        const onAbort = () => reject(new DOMException("aborted", "AbortError"));
+        if (signal.aborted) {
+          onAbort();
+          return;
+        }
+        signal.addEventListener("abort", onAbort);
+        setTimeout(() => {
+          signal.removeEventListener("abort", onAbort);
+          resolve();
+        }, 40);
+      });
+      return value;
+    });
+  } catch (error) {
+    thrown = error;
+  }
+
+  assertEquals((thrown as Error | null)?.message ?? null, "503");
+  assertEquals(throws, 1);
+  // Only the first wave (concurrency 2) should start; later indexes must not dequeue.
+  assertEquals(started.length <= 3, true);
+  assertEquals(started.includes(5), false);
+  assertEquals(
+    signals.some((signal) => signal.aborted),
+    true,
+  );
+});
+
 Deno.test(
-  "callJevMoneyCategorizeBatch rejects unavailable provider by missing key upstream",
+  "callJevMoneyCategorizeBatch aborts remaining workers after one HTTP failure",
   async () => {
-    // Wiring throws before fetch when key missing; client itself requires apiKey string.
-    // Simulate empty key path by refusing Authorization-less calls in fetch:
+    let calls = 0;
+    const controllers: AbortSignal[] = [];
+
     await assertThrowsWithMessage(
       () =>
-        callJevMoneyCategorizeBatch(createBatchRequest(["line-1"]), {
-          apiKey: "",
-          fetchFn: (async (_input, init) => {
-            const headers =
-              (init as { headers?: Record<string, string> } | undefined)?.headers ?? {};
-            const auth = headers.Authorization ?? "";
-            if (!auth.includes("Bearer ") || auth.endsWith("Bearer ")) {
-              return new Response("{}", { status: 403 });
+        callJevMoneyCategorizeBatch(createBatchRequest(["a", "b", "c", "d", "e", "f"]), {
+          apiKey: "key",
+          concurrency: 2,
+          timeoutMs: 200,
+          fetchFn: ((_input, init) => {
+            calls += 1;
+            const signal = (init as { signal?: AbortSignal } | undefined)?.signal;
+            if (signal) controllers.push(signal);
+            if (calls === 2) {
+              return Promise.resolve(
+                new Response("{}", {
+                  status: 503,
+                  headers: { "Content-Type": "application/json" },
+                }),
+              );
             }
-            return new Response("{}", { status: 200 });
+            return new Promise((_resolve, reject) => {
+              signal?.addEventListener("abort", () => {
+                reject(new DOMException("The signal has been aborted", "AbortError"));
+              });
+            });
           }) as typeof fetch,
         }),
-      "Jev request failed: 403",
+      "Jev request failed: 503",
+    );
+
+    // Must not start a request for every item after the failure.
+    assertEquals(calls < 6, true);
+    assertEquals(
+      controllers.some((signal) => signal.aborted),
+      true,
     );
   },
 );

@@ -546,6 +546,11 @@ export function MoneyRuleEditor({
                       ...current,
                       ruleKind: value as MoneyCategoryRuleKind,
                       targetCategoryId: value === "direct" ? current.targetCategoryId : "",
+                      // New LLM rules recommend Jev; switching away/to other kinds leaves form as-is.
+                      llmProvider:
+                        value === "llm_categorization" && current.ruleKind !== "llm_categorization"
+                          ? "jev"
+                          : current.llmProvider,
                     }))
                   }
                 >

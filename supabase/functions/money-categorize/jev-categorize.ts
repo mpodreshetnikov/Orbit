@@ -21,7 +21,8 @@ export interface JevMoneyCategorizeDeps {
 
 /** Pinned for reproducibility (ORB-44 experiment used jev-1.14.0). */
 export const DEFAULT_JEV_MODEL = "jev-1.14.0";
-const DEFAULT_TIMEOUT_MS = 45_000;
+/** Per-call budget under the web client's ~20s money-categorize wall time. */
+export const DEFAULT_JEV_TIMEOUT_MS = 12_000;
 const DEFAULT_CONCURRENCY = 4;
 const DEFAULT_BASE_URL = "https://api.typesafe.ai";
 
@@ -58,8 +59,30 @@ function compactRecord(record: Record<string, unknown>): Record<string, unknown>
   );
 }
 
-/** Maximum available transaction/line fields for Jev state (no secrets). */
-export function buildJevState(item: MoneyCategorizeLlmBatchRequestItem): Record<string, unknown> {
+export function buildChoiceCriteria(
+  candidates: MoneyCategorizeCandidateCategory[],
+): Record<string, string> {
+  const criteria: Record<string, string> = {};
+  for (const candidate of candidates) {
+    // Choice keys must be the category UUID so the response maps directly to categoryId.
+    // Skip meta buckets that should not be auto-assigned.
+    const systemKey = candidate.canonical_system_key;
+    if (systemKey === "uncategorized" || systemKey === "needs_review") continue;
+    criteria[candidate.id] = `${candidate.name_ru} / ${candidate.name_en}${
+      systemKey ? ` (${systemKey})` : ""
+    }`;
+  }
+  return criteria;
+}
+
+/**
+ * Maximum available transaction/line fields for Jev state (no secrets), plus the
+ * eligible category list so companion Noul can see the same options as Choice (M2).
+ */
+export function buildJevState(
+  item: MoneyCategorizeLlmBatchRequestItem,
+  eligibleCategories: Record<string, string>,
+): Record<string, unknown> {
   const ctx: MoneyCategoryRuleContext = item.context;
   return compactRecord({
     line_item_id: item.lineItemId,
@@ -91,27 +114,16 @@ export function buildJevState(item: MoneyCategorizeLlmBatchRequestItem): Record<
     normalized_line_item_title: ctx.derived.normalized_line_item_title,
     normalized_merchant_name: ctx.derived.normalized_merchant_name,
     has_receipt_metadata: ctx.derived.has_receipt_metadata,
+    // Shared with Choice so Noul any_fit evaluates against the real option list.
+    eligible_categories: Object.entries(eligibleCategories).map(([id, label]) => ({
+      id,
+      label,
+    })),
   });
 }
 
-function buildChoiceCriteria(
-  candidates: MoneyCategorizeCandidateCategory[],
-): Record<string, string> {
-  const criteria: Record<string, string> = {};
-  for (const candidate of candidates) {
-    // Choice keys must be the category UUID so the response maps directly to categoryId.
-    // Skip meta buckets that should not be auto-assigned.
-    const systemKey = candidate.canonical_system_key;
-    if (systemKey === "uncategorized" || systemKey === "needs_review") continue;
-    criteria[candidate.id] = `${candidate.name_ru} / ${candidate.name_en}${
-      systemKey ? ` (${systemKey})` : ""
-    }`;
-  }
-  return criteria;
-}
-
 function buildQuestions(
-  candidates: MoneyCategorizeCandidateCategory[],
+  criteria: Record<string, string>,
   userPrompt: string | null,
 ): Record<string, unknown> {
   const instructions = [
@@ -126,34 +138,49 @@ function buildQuestions(
     category: {
       type: "choice",
       instructions,
-      criteria: buildChoiceCriteria(candidates),
+      criteria,
     },
     any_fit: {
       type: "noul",
       instructions:
-        "Подходит ли хотя бы одна из предложенных категорий уверенно? Нет — если перевод себе, данных недостаточно, или ни одна опция не подходит.",
+        "Подходит ли хотя бы одна из категорий из state.eligible_categories уверенно? Нет — если перевод себе, данных недостаточно, или ни одна опция не подходит.",
     },
   };
 }
 
-async function mapPool<T, R>(
+/**
+ * Bounded concurrency pool: on first failure abort remaining work, drain in-flight
+ * workers (allSettled), then rethrow. Prevents billable overlap with service retries (M3).
+ */
+export async function mapPoolCancelOnError<T, R>(
   values: T[],
   concurrency: number,
-  mapper: (value: T, index: number) => Promise<R>,
+  mapper: (value: T, index: number, signal: AbortSignal) => Promise<R>,
 ): Promise<R[]> {
   const results = new Array<R>(values.length);
   let nextIndex = 0;
+  let firstError: unknown = null;
+  const controller = new AbortController();
 
   async function worker(): Promise<void> {
-    while (nextIndex < values.length) {
+    while (!controller.signal.aborted) {
+      if (nextIndex >= values.length) return;
       const index = nextIndex;
       nextIndex += 1;
-      results[index] = await mapper(values[index], index);
+      try {
+        results[index] = await mapper(values[index], index, controller.signal);
+      } catch (error) {
+        if (!firstError) {
+          firstError = error;
+          controller.abort();
+        }
+      }
     }
   }
 
   const workers = Math.max(1, Math.min(concurrency, values.length || 1));
-  await Promise.all(Array.from({ length: workers }, () => worker()));
+  await Promise.allSettled(Array.from({ length: workers }, () => worker()));
+  if (firstError) throw firstError;
   return results;
 }
 
@@ -161,13 +188,20 @@ async function callJevOnce(
   item: MoneyCategorizeLlmBatchRequestItem,
   request: MoneyCategorizeLlmBatchRequest,
   deps: JevMoneyCategorizeDeps,
+  criteria: Record<string, string>,
+  parentSignal?: AbortSignal,
 ): Promise<{
   item: MoneyCategorizeLlmBatchResultItem;
   promptTokens: number;
   completionTokens: number;
 }> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), deps.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const timeoutMs = deps.timeoutMs ?? DEFAULT_JEV_TIMEOUT_MS;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const onParentAbort = () => controller.abort();
+  parentSignal?.addEventListener("abort", onParentAbort);
+  if (parentSignal?.aborted) controller.abort();
+
   const baseUrl = (deps.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, "");
   const model = deps.model ?? DEFAULT_JEV_MODEL;
   const userPrompt =
@@ -176,6 +210,10 @@ async function callJevOnce(
       : null;
 
   try {
+    if (controller.signal.aborted) {
+      throw new DOMException("The signal has been aborted", "AbortError");
+    }
+
     const response = await deps.fetchFn(`${baseUrl}/v1/systemone`, {
       method: "POST",
       headers: {
@@ -185,8 +223,8 @@ async function callJevOnce(
       signal: controller.signal,
       body: JSON.stringify({
         model,
-        state: buildJevState(item),
-        questions: buildQuestions(request.candidateCategories, userPrompt),
+        state: buildJevState(item, criteria),
+        questions: buildQuestions(criteria, userPrompt),
       }),
     });
 
@@ -195,13 +233,26 @@ async function callJevOnce(
       throw new Error(`Jev request failed: ${response.status}`);
     }
 
-    const body = asRecord(await response.json());
+    let body: Record<string, unknown>;
+    try {
+      body = asRecord(await response.json());
+    } catch {
+      throw new Error("Jev returned invalid JSON");
+    }
+
     const answers = asRecord(body.answers);
+    if (!("category" in answers) && !("any_fit" in answers)) {
+      throw new Error("Jev returned invalid JSON answers");
+    }
+
     const categoryAnswer = asRecord(answers.category);
     const noulAnswer = asRecord(answers.any_fit);
     const choice = asString(categoryAnswer.choice);
     const probabilities = asRecord(categoryAnswer.probabilities);
-    const choiceProbability = choice ? asNumber(probabilities[choice]) : null;
+    const hasProbabilities =
+      Object.keys(probabilities).length > 0 ||
+      (categoryAnswer.probabilities != null && typeof categoryAnswer.probabilities === "object");
+    const choiceProbability = choice && hasProbabilities ? asNumber(probabilities[choice]) : null;
     const noul = asNumber(noulAnswer.noul);
     const usage = asRecord(body.usage);
 
@@ -213,14 +264,7 @@ async function callJevOnce(
       noulThreshold: deps.noulThreshold,
     });
 
-    const allowedIds = new Set(
-      request.candidateCategories
-        .filter((candidate) => {
-          const key = candidate.canonical_system_key;
-          return key !== "uncategorized" && key !== "needs_review";
-        })
-        .map((candidate) => candidate.id),
-    );
+    const allowedIds = new Set(Object.keys(criteria));
 
     let categoryId: string | null = null;
     let reason = decision.reason;
@@ -228,6 +272,8 @@ async function callJevOnce(
       categoryId = choice;
     } else if (decision.apply && choice && !allowedIds.has(choice)) {
       categoryId = null;
+      reason = "Jev returned a category outside the allowed candidate list";
+    } else if (!decision.apply && choice && !allowedIds.has(choice)) {
       reason = "Jev returned a category outside the allowed candidate list";
     }
 
@@ -244,6 +290,7 @@ async function callJevOnce(
           apply: decision.apply,
           probability_threshold: decision.probabilityThreshold,
           noul_threshold: decision.noulThreshold,
+          has_probabilities: hasProbabilities,
         },
       },
       promptTokens: asNumber(usage.input_tokens) ?? 0,
@@ -251,17 +298,21 @@ async function callJevOnce(
     };
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
+      if (parentSignal?.aborted) {
+        throw new Error("Jev batch aborted");
+      }
       throw new Error("Jev request timed out");
     }
     throw error;
   } finally {
     clearTimeout(timer);
+    parentSignal?.removeEventListener("abort", onParentAbort);
   }
 }
 
 /**
  * Jev evaluates one state per request. Preserve the batch service contract by
- * fan-out with a bounded concurrency pool.
+ * fan-out with a bounded concurrency pool that cancels on first failure.
  */
 export async function callJevMoneyCategorizeBatch(
   request: MoneyCategorizeLlmBatchRequest,
@@ -287,8 +338,8 @@ export async function callJevMoneyCategorizeBatch(
   }
 
   const concurrency = Math.max(1, deps.concurrency ?? DEFAULT_CONCURRENCY);
-  const settled = await mapPool(request.items, concurrency, (item) =>
-    callJevOnce(item, request, deps),
+  const settled = await mapPoolCancelOnError(request.items, concurrency, (item, _index, signal) =>
+    callJevOnce(item, request, deps, criteria, signal),
   );
 
   return {

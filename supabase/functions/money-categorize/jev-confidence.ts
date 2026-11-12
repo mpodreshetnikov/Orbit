@@ -1,6 +1,10 @@
-/** Calibrated on the 2026-11-10 labeled experiment sample (read-only re-score 2026-11-12). */
+/**
+ * Calibrated on the 2026-11-10 labeled sample after M2 (eligible_categories in Noul state).
+ * Prior 0.65/0.25 assumed Noul~0.2–0.4 without the category list; with the list Noul rises
+ * (p50≈0.70) and 0.65/0.5 restores 100% precision on applied rows at ~61% coverage.
+ */
 export const DEFAULT_JEV_PROBABILITY_THRESHOLD = 0.65;
-export const DEFAULT_JEV_NOUL_THRESHOLD = 0.25;
+export const DEFAULT_JEV_NOUL_THRESHOLD = 0.5;
 
 export interface JevConfidenceInput {
   choice: string | null;

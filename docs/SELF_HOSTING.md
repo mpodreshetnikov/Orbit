@@ -105,7 +105,9 @@ Every setting has a comment above it saying what it is and where to get it. You 
 | `GOOGLE_CLIENT_SECRET` | From Google Cloud Console, see below                                       |
 
 `OPENROUTER_API_KEY` is optional but recommended: without it, reading photos of documents and
-categorising transactions are switched off.
+OpenRouter money categorization are switched off. `JEV_API_KEY` is optional for the recommended
+Jev (TypeSafe) money categorization provider; without it, Jev mode shows as not configured in the
+rule editor (OpenRouter mode still works if that key is set).
 
 In `nano`, save with `Ctrl+O`, `Enter`, and leave with `Ctrl+X`.
 
@@ -288,7 +290,7 @@ and installs — and after that deploys every commit that reaches `main`.
     At the least `ORBIT_DOMAIN`, `ORBIT_ADMIN_EMAIL`, `ORBIT_ALLOWED_EMAILS` and `GOOGLE_CLIENT_ID`
     as variables and `GOOGLE_CLIENT_SECRET` as a secret; for backups, the `BACKUP_*` names. These
     go under _Secrets_, which nobody can read back: `GOOGLE_CLIENT_SECRET`, `OPENROUTER_API_KEY`,
-    `WHO_ICD_CLIENT_SECRET`, the four `BACKUP_*_ACCESS_KEY_ID` / `_SECRET_ACCESS_KEY`,
+    `JEV_API_KEY`, `WHO_ICD_CLIENT_SECRET`, the four `BACKUP_*_ACCESS_KEY_ID` / `_SECRET_ACCESS_KEY`,
     `ALERT_TELEGRAM_BOT_TOKEN`, `BACKUP_HEALTHCHECK_URL`, `OBS_GRAFANA_CLOUD_OTLP_HEADERS` (and, when
     moving from hosted Supabase, `JWT_SECRET`, `ANON_KEY`, `SERVICE_ROLE_KEY`, `VAPID_*`). Everything
     else is a _Variable_ — a setting saved as a secret under any other name is not read. Optional:
@@ -346,7 +348,7 @@ inherited and this job could deploy the wrong server):**
 
 **Optional (same names as `deploy/.env.example`; secrets for the secret ones):**
 `ORBIT_SERVER_USER`, `ORBIT_SSH_KNOWN_HOSTS`, `ORBIT_HTTP_ONLY`, `MCP_SERVER_ENABLED`,
-`OPENROUTER_API_KEY`, `WHO_ICD_CLIENT_ID` / `WHO_ICD_CLIENT_SECRET`, `BACKUP_*`,
+`OPENROUTER_API_KEY`, `JEV_API_KEY`, `WHO_ICD_CLIENT_ID` / `WHO_ICD_CLIENT_SECRET`, `BACKUP_*`,
 `ALERT_TELEGRAM_BOT_TOKEN`, `BACKUP_HEALTHCHECK_URL`, `OBS_GRAFANA_CLOUD_OTLP_HEADERS`, and — only
 when moving from a hosted project — `JWT_SECRET`, `ANON_KEY`, `SERVICE_ROLE_KEY`, `VAPID_*`,
 `SOURCE_*`. Use separate backup buckets/prefixes from production.
@@ -378,9 +380,9 @@ time; you switch over only when the new one checks out, and you can switch back.
     - _Project Settings → JWT Keys → Legacy JWT secret_: the value.
     - _Project Settings → API Keys → Legacy API keys_: `anon` and `service_role`.
     - _Connect → Session pooler_: the connection string, with the database password filled in.
-    - Your edge function secrets, if you still have them: `OPENROUTER_API_KEY`, `WHO_ICD_CLIENT_*`,
-      and `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` (without the VAPID pair, every device has to turn
-      notifications on again once).
+    - Your edge function secrets, if you still have them: `OPENROUTER_API_KEY`, `JEV_API_KEY`,
+      `WHO_ICD_CLIENT_*`, and `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` (without the VAPID pair, every
+      device has to turn notifications on again once).
 2.  **Install the new server** as in Steps 1–5, but before `deploy/orbit install` add to the bottom of
     `deploy/.env`:
 

@@ -5,11 +5,12 @@ import {
   resolveMoneyLlmProvider,
 } from "./llm-provider.ts";
 
-Deno.test("resolveMoneyLlmProvider defaults to jev", () => {
-  assertEquals(resolveMoneyLlmProvider({}), "jev");
-  assertEquals(resolveMoneyLlmProvider({ provider: "jev" }), "jev");
+Deno.test("resolveMoneyLlmProvider keeps legacy missing provider on openrouter", () => {
+  assertEquals(resolveMoneyLlmProvider({}), "openrouter");
+  assertEquals(resolveMoneyLlmProvider(null), "openrouter");
+  assertEquals(resolveMoneyLlmProvider({ provider: "other" }), "openrouter");
   assertEquals(resolveMoneyLlmProvider({ provider: "openrouter" }), "openrouter");
-  assertEquals(resolveMoneyLlmProvider({ provider: "other" }), "jev");
+  assertEquals(resolveMoneyLlmProvider({ provider: "jev" }), "jev");
 });
 
 Deno.test("isMoneyLlmProviderConfigured checks the selected key only", () => {
@@ -27,7 +28,7 @@ Deno.test("isMoneyLlmProviderConfigured checks the selected key only", () => {
   );
 });
 
-Deno.test("moneyLlmProviderStatus reports both providers without leaking keys", () => {
+Deno.test("moneyLlmProviderStatus recommends jev for new rules without leaking keys", () => {
   assertEquals(moneyLlmProviderStatus({ jevApiKey: "secret", openRouterApiKey: "" }), {
     jev: { configured: true },
     openrouter: { configured: false },

@@ -132,7 +132,9 @@ describe("the rule form", () => {
     ]);
     expect(
       ruleFormOf({ ...saved, config: { prompt: "Еда?", target_system_key: "other" } }),
-    ).toMatchObject({ prompt: "Еда?", fallbackSystemKey: "other" });
+    ).toMatchObject({ prompt: "Еда?", fallbackSystemKey: "other", llmProvider: "openrouter" });
+    expect(ruleFormOf({ ...saved, config: { provider: "jev" } }).llmProvider).toBe("jev");
+    expect(emptyRuleForm().llmProvider).toBe("jev");
   });
 
   it("writes a new rule at the end of the order, with only what its kind uses", () => {

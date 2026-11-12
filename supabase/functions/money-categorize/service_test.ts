@@ -824,3 +824,46 @@ Deno.test(
     assertEquals(firstDebug.llm_fallback_mode, "retry_single_after_batch_failure");
   },
 );
+
+Deno.test(
+  "applyMoneyCategoryRulePipelineService does not retry a failed Jev batch as single-item calls",
+  async () => {
+    const lineItemIds = ["line-1", "line-2", "line-3", "line-4"];
+    const { deps, state } = createDeps({
+      rules: [
+        createRule({
+          id: "rule-jev",
+          name: "Jev no paid retry",
+          rule_kind: "llm_categorization",
+          sort_order: 1,
+          config: { prompt: "Do not duplicate billable calls.", provider: "jev" },
+        }),
+      ],
+      contexts: buildContexts(lineItemIds),
+      batchCategorize: async () => {
+        throw new Error("jev batch exploded");
+      },
+    });
+
+    const result = await applyMoneyCategoryRulePipelineService(
+      {
+        lineItemIds,
+        personId: "person-1",
+        triggerSource: "date_range_replay",
+      },
+      deps,
+    );
+
+    assertEquals(result.count, 4);
+    assertEquals(state.batchCalls, [
+      { ruleId: "rule-jev", itemIds: ["line-1", "line-2", "line-3", "line-4"] },
+    ]);
+    const step = getStepForLineItem(state, "line-1", "rule-jev");
+    const debug = (step?.debug_payload as Record<string, unknown>) ?? {};
+    assertEquals(debug.llm_fallback_mode, "jev_batch_error_no_retry");
+    assertEquals(
+      result.runs.every((run) => run.final_category_id === run.starting_category_id),
+      true,
+    );
+  },
+);
