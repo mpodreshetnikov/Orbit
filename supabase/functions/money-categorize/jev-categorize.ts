@@ -287,7 +287,7 @@ export async function callJevMoneyCategorizeBatch(
   }
 
   const concurrency = Math.max(1, deps.concurrency ?? DEFAULT_CONCURRENCY);
-  const settled = await mapPool(request.items, concurrency, async (item) =>
+  const settled = await mapPool(request.items, concurrency, (item) =>
     callJevOnce(item, request, deps),
   );
 
