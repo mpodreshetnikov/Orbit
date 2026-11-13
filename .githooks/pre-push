@@ -10,6 +10,10 @@ fi
 
 just secrets-preflight
 
+# D7: complex claimed tasks need ## Spec + second-participant approve on the task file.
+echo "[pre-push] Checking Spec / second-participant approve..."
+node scripts/just/spec-approve.cjs --check-claimed
+
 # The same gate CI runs, one step earlier: a branch pushed over the limit has already been opened as
 # a pull request by the time CI says so, and re-cutting it then costs the opening review too.
 #

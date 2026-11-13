@@ -179,7 +179,14 @@ The budget is per pull request. Rebasing does not reset it, reopening does not r
 
 A finished pull request has three outcomes, and the session picks one rather than handing every branch to a person. Waiting is not among them.
 
-**Merge it, when all five hold.**
+**Agents never merge (D10 / T-261113-o9b).** An agent session does not merge any pull request —
+simple or complex — even when CI is green and the automated review is clean. Merge happens only
+after an explicit user confirmation, and only from a participant GitHub account (Maxim or Igor).
+A simple task may skip the second-participant review, but it still needs that user confirmation
+and a participant merge. The five conditions below are what the _participant_ checks before they
+merge; they are not a licence for the agent to click merge.
+
+**Ready to hand for merge, when all five hold** (then ask the user; do not merge yourself):
 
 1. **CI is green** on the current head.
 2. **The automated review has run on this branch and been answered** — every finding fixed and pushed or answered on its thread, with the threads resolved — **and the gap between the reviewed commit and this head does not itself earn another pass**, by the two lists above. Answering the last review in place is named in **Do not request one when** as a gap that does not, so the push that answers a review does not lock the branch out of merging; a gap that does earn a pass is the next outcome, not a reason to wait. What this condition refuses is merging past a review that never ran: a review that has not posted yet is not a review that found nothing — #36 was merged on green CI one minute before its review posted a `P1`, and production stood broken for an hour.
@@ -187,7 +194,7 @@ A finished pull request has three outcomes, and the session picks one rather tha
 4. **The change is off the stop list** below.
 5. **The session can state what would break and how it would see it** — a check, a query, a log, a dashboard, a screen. If the answer is "I would not see it", that is the not-sure branch, not a risk to accept quietly.
 
-Merging is the session's own call under those five, and needs no permission first. What follows it is not optional: the acceptance review the registry's `task-registry` skill requires — verify the outcome on the production surface with whatever the session can reach, then hand the owner a guide for what the machine could not exercise, and leave the task `in-progress` until they answer. A merge is not a close.
+What follows a participant merge is not optional: the acceptance review the registry's `task-registry` skill requires — verify the outcome on the production surface with whatever the session can reach, then hand the owner a guide for what the machine could not exercise, and leave the task `in-progress` until they answer. A merge is not a close.
 
 **Buy another review, when unsure.** Unsure is a state to spend the budget on, not to escalate. Request a review when any trigger in **Request another review when any of these holds** applies to the gap since the watermark, then re-decide on what comes back.
 
@@ -197,7 +204,8 @@ Once the budget is spent and the doubt remains, it becomes the owner's question 
 
 **A merge that is refused is not a hand-over.** The three outcomes are decisions; being unable to carry one out is a fourth thing and must never be dressed as the third. When the five conditions hold and the merge itself is refused — the API denies it, the session is acting as an identity without the right, the branch cannot be updated — say so in the same message, in those words: what was attempted, what answered, and which identity it was attempted as (`get_me` names it). #82, #83, #86 and #106 sat five to nine days looking like ordinary hand-overs; one session reported the merge endpoint denying it, and the conclusion drawn — that the App could not merge — was wrong, since all three later merged under that same App by their own sessions. A named obstacle is checkable and gets corrected the same day; an unnamed one reads as "waiting for you" and costs a week, whichever diagnosis is right. Name it once, then hand over as below — this is not a licence to retry.
 
-**Hand it over, on the stop list.** Three surfaces are never self-merged, however sure the session is:
+**Hand it over, on the stop list — and always for merge itself.** Three surfaces are never
+agent-merged, and after D10 _no_ surface is agent-merged:
 
 1. **Database schema and migrations** — `supabase/db`, anything under the migrations directory. A migration is not undone by reverting the commit.
 2. **Secrets and deploy configuration** — the deploy workflows, environment and hosting configuration. The effect is not in the diff, so no amount of reading it raises confidence.

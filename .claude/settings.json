@@ -49,6 +49,16 @@
             "timeout": 10
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write|NotebookEdit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/just/task-claim-hook.cjs\" --pre",
+            "timeout": 15
+          }
+        ]
       }
     ],
     "PostToolUseFailure": [

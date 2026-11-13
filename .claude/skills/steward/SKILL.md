@@ -1,6 +1,6 @@
 ---
 name: steward
-description: Finish a pull request in this repository and stop, instead of watching it forever or handing over a head nobody reviewed. Use after opening a pull request, when an automated review or a CI result arrives, when deciding whether to request another review after pushing, when asked to watch, monitor, babysit or autofix one, and whenever about to schedule a check-in on an open pull request. Names what a session does instead of waiting: merge it when sure, buy another review when not, hand over only what the owner must decide, and stop watching once the PR is quiet.
+description: Finish a pull request in this repository and stop, instead of watching it forever or handing over a head nobody reviewed. Use after opening a pull request, when an automated review or a CI result arrives, when deciding whether to request another review after pushing, when asked to watch, monitor, babysit or autofix one, and whenever about to schedule a check-in on an open pull request. Names what a session does instead of waiting: never merge (D10 — only a participant after user confirmation), buy another review when not sure, hand over the merge as the owner's next action, and stop watching once the PR is quiet.
 ---
 
 # Steward
@@ -22,8 +22,9 @@ skipped or disabled to reach green, and history on somebody else's branch is sti
 - **Automated Review Policy** — when the review runs, the watermark, when another is worth
   requesting and when it is not, the request budget, how to answer a review by class, and which
   findings are answered on the thread instead of by a push.
-- **The merge decision** — the three outcomes, the five merge conditions, the stop list, and what
-  to say when the merge itself is refused.
+- **The merge decision** — agents never merge (D10). The five readiness conditions and the stop
+  list decide when to *ask the user* to merge from a participant account; what to say when a merge
+  attempt is refused stays the same.
 - **Reviewable Change Size** — the limit, and what to do when a branch is over it.
 
 Read it, then apply it. What this file adds is only the part about the session: which outcome it
@@ -33,11 +34,12 @@ takes, when it stops, what it says instead of waiting, and when it stops watchin
 
 Reach one of the three outcomes in the turn the bar below is met. None of them is waiting:
 
-- **Merge** — press it, then run the acceptance review the registry's `task-registry` skill
-  requires: verify on the production surface, publish what was verified, hand the owner the guide
-  for the rest. The task stays `in-progress` until their verdict.
+- **Ready for participant merge** — do **not** press merge (D10). Tell the user the five conditions
+  hold and ask them to merge from a participant GitHub account. After *they* merge, run the
+  acceptance review the registry's `task-registry` skill requires. The task stays `in-progress`
+  until their verdict.
 - **Buy a review** — comment `@codex review`, say in one line what the doubt is, and end the turn.
-- **Hand over** — only on the stop list, or with the budget spent and the doubt unresolved.
+- **Hand over** — stop list, budget spent, or any merge decision (agents never merge themselves).
 
 Confidence is a claim about evidence, not a mood. If the merge condition "state what would break and
 how you would see it" cannot be answered in one sentence naming a check, a query, a log, a dashboard
@@ -126,7 +128,8 @@ merge needs a person, and a person acting is an event.
 - Never push an empty commit, or close and reopen a pull request, to make CI or the reviewer run.
 - Never merge on quiet. Quiet is not one of the five conditions, and a review that has not posted
   yet is not a review that found nothing.
-- Never merge anything on the stop list, however sure you are.
+- Never merge anything as an agent (D10), including off the stop list and including "sure" simple
+  PRs — only a participant account after explicit user confirmation.
 - Never leave a merge unverified: a merge obliges the production check and the review guide that
   follow it.
 - Never treat a green pull request awaiting a person as unfinished work of yours, once the decision

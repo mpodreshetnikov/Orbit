@@ -39,6 +39,9 @@ function scratchRepo() {
   fs.writeFileSync(path.join(root, ".githooks", "pre-push"), "#!/bin/sh\nexit 0\n", {
     mode: 0o755,
   });
+  fs.writeFileSync(path.join(root, ".githooks", "commit-msg"), "#!/bin/sh\nexit 0\n", {
+    mode: 0o755,
+  });
   return root;
 }
 
@@ -69,9 +72,14 @@ describe("install", () => {
     const first = install({ repoRoot, home });
     expect(first.ok).toBe(true);
     expect(first.changed).toEqual(
-      expect.arrayContaining(["symlink pre-push", ".cursor-original-hooks-path"]),
+      expect.arrayContaining([
+        "symlink pre-push",
+        "symlink commit-msg",
+        ".cursor-original-hooks-path",
+      ]),
     );
     expect(fs.readlinkSync(path.join(hooksDir, "pre-push"))).toBe(".dispatcher");
+    expect(fs.readlinkSync(path.join(hooksDir, "commit-msg"))).toBe(".dispatcher");
     expect(fs.readFileSync(path.join(hooksDir, ".cursor-original-hooks-path"), "utf8").trim()).toBe(
       path.join(repoRoot, ".githooks"),
     );
@@ -97,6 +105,15 @@ describe("gitHooksProblem", () => {
     const repoRoot = scratchRepo();
     const { home, hooksDir } = scratchHomeWithDispatcher(repoRoot);
     fs.symlinkSync(".dispatcher", path.join(hooksDir, "pre-push"));
+    fs.symlinkSync(".dispatcher", path.join(hooksDir, "commit-msg"));
     expect(gitHooksProblem({ repoRoot, home })).toContain(".git/hooks");
+  });
+
+  it("names a missing commit-msg dispatcher link when tracked", () => {
+    const repoRoot = scratchRepo();
+    const { home, hooksDir } = scratchHomeWithDispatcher(repoRoot);
+    fs.symlinkSync(".dispatcher", path.join(hooksDir, "pre-push"));
+    fs.writeFileSync(path.join(hooksDir, ".cursor-original-hooks-path"), `${repoRoot}/.githooks\n`);
+    expect(gitHooksProblem({ repoRoot, home })).toMatch(/commit-msg/);
   });
 });
