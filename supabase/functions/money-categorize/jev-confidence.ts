@@ -1,9 +1,8 @@
 /**
- * Calibrated on the 2026-11-10 labeled sample after M2 (eligible_categories in Noul state).
- * Prior 0.65/0.25 assumed Noul~0.2–0.4 without the category list; with the list Noul rises
- * (p50≈0.70) and 0.65/0.5 restores 100% precision on applied rows at ~61% coverage.
+ * Maxim confirmed probability floor 0.9 (2026-11-13). Noul companion still gates fit after
+ * eligible_categories were added to state; keep noul ≥ 0.5 from the M2 recalibration.
  */
-export const DEFAULT_JEV_PROBABILITY_THRESHOLD = 0.65;
+export const DEFAULT_JEV_PROBABILITY_THRESHOLD = 0.9;
 export const DEFAULT_JEV_NOUL_THRESHOLD = 0.5;
 
 export interface JevConfidenceInput {

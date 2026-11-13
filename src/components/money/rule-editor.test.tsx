@@ -336,9 +336,8 @@ describe("MoneyRuleEditor", () => {
     await user.click(screen.getAllByText(/Food \/ Еда/)[0]);
     await user.click(screen.getByRole("button", { name: "money.ruleAddFilter" }));
 
-    const filterCards = screen.getAllByText(/money.ruleExampleValue/);
-    const filterCard = filterCards[0]?.closest(".rounded-xl") as HTMLElement | null;
-    expect(filterCard).not.toBeNull();
+    const filterCard = screen.getAllByTestId("rule-filter-row")[0] as HTMLElement | undefined;
+    expect(filterCard).toBeTruthy();
     if (!filterCard) return;
 
     await user.click(within(filterCard).getByText("money.ruleOperatorRegex"));
@@ -357,9 +356,8 @@ describe("MoneyRuleEditor", () => {
     await user.type(screen.getByLabelText("money.ruleName"), "Coffee match");
     await user.click(screen.getByRole("button", { name: "money.ruleAddFilter" }));
 
-    const filterCards = screen.getAllByText(/money.ruleExampleValue/);
-    const filterCard = filterCards[0]?.closest(".rounded-xl") as HTMLElement | null;
-    expect(filterCard).not.toBeNull();
+    const filterCard = screen.getAllByTestId("rule-filter-row")[0] as HTMLElement | undefined;
+    expect(filterCard).toBeTruthy();
     if (!filterCard) return;
 
     await user.click(within(filterCard).getByText("money.ruleOperatorContainsAnyOfSet"));
@@ -498,7 +496,9 @@ describe("MoneyRuleEditor", () => {
     );
 
     expect(screen.getByRole("button", { name: "common.save" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: /money.ruleSaveAndPreviewExample/i })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: /money.ruleCheckSaveAndRun|money.ruleCheckAction/i }),
+    ).toBeDisabled();
     expect(screen.getByText("money.rulePreviewResult")).toBeInTheDocument();
   });
 
@@ -519,7 +519,9 @@ describe("MoneyRuleEditor", () => {
     const valueInput = screen.getByLabelText("money.ruleFilterValue");
     await user.clear(valueInput);
     await user.type(valueInput, "dish");
-    const previewButton = screen.getByRole("button", { name: /money.ruleSaveAndPreviewExample/i });
+    const previewButton = screen.getByRole("button", {
+      name: /money.ruleCheckSaveAndRun|money.ruleSaveAndPreviewExample/i,
+    });
     expect(previewButton).toBeInTheDocument();
     await user.click(previewButton);
 
@@ -564,7 +566,11 @@ describe("MoneyRuleEditor", () => {
     const promptInput = screen.getByLabelText("money.rulePrompt");
     await user.clear(promptInput);
     await user.type(promptInput, "New prompt");
-    await user.click(screen.getByRole("button", { name: /money.ruleRunExample/i }));
+    await user.click(
+      screen.getByRole("button", {
+        name: /money.ruleCheckSaveAndRun|money.ruleCheckAction|money.ruleRunExample/i,
+      }),
+    );
 
     await waitFor(() => {
       expect(updateRuleMutateAsync).toHaveBeenCalledWith({
