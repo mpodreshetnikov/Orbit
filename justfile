@@ -131,8 +131,12 @@ mobile-start instance="":
 quality-lint-supabase-functions:
   deno lint --config supabase/functions/deno.json supabase/functions
 
+# Assertion-smell scan on unit tests (warn by default; ORBIT_TEST_SMELL_FAIL=1 to gate).
+test-smell-lint:
+  node scripts/just/test-smell-lint.cjs
+
 # Run all lint surfaces with zero warnings allowed.
-quality-lint: quality-lint-web quality-lint-extension quality-lint-scripts quality-lint-supabase-functions
+quality-lint: quality-lint-web quality-lint-extension quality-lint-scripts quality-lint-supabase-functions test-smell-lint
 
 # Run all lint surfaces in parallel (faster for CI).
 quality-lint-parallel:

@@ -361,6 +361,13 @@ When adding mocks or test utilities, read @testing-anti-patterns.md to avoid com
 - Adding test-only methods to production classes
 - Mocking without understanding dependencies
 
+## High-signal tests (Orbit)
+
+Canonical policy:
+[`docs/design/common/testing-quality.md`](../../../docs/design/common/testing-quality.md).
+A test is incomplete until a deliberate fault (manual edit or `test-mutation` on covered lines)
+makes it fail. Do not restate coverage/mutation thresholds here.
+
 ## Final Rule
 
 ```
