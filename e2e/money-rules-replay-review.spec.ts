@@ -323,7 +323,7 @@ test.describe("money rules replay review report", () => {
       await page.goto("/money/rules/replay-review");
 
       await expect(
-        page.getByRole("heading", { level: 1, name: "Check against history" }),
+        page.getByRole("heading", { level: 1, name: "Recalculate history" }),
       ).toBeVisible();
 
       await page.getByLabel("From date").fill("2099-01-01");
