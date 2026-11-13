@@ -305,7 +305,8 @@ Deno.test(
     assertEquals(state.insertedLineItems.length, 2);
     assertEquals(
       state.insertedLineItems.every(
-        (entry) => (entry.lineItem.raw_payload as Record<string, unknown> | undefined)?.source !==
+        (entry) =>
+          (entry.lineItem.raw_payload as Record<string, unknown> | undefined)?.source !==
           "balancing",
       ),
       true,
