@@ -92,20 +92,44 @@ function runHook(
   const result = spawnSync(process.execPath, [HOOK, ...args], {
     encoding: "utf8",
     input: JSON.stringify(input),
-    env: { ...process.env, TASK_CLAIM_HOOK_REPO_ROOT: code, ORBIT_TASKS_REGISTRY: "", ...env },
+    env: {
+      ...process.env,
+      TASK_CLAIM_HOOK_REPO_ROOT: code,
+      ORBIT_TASKS_REGISTRY: "",
+      CURSOR_AGENT: "",
+      CURSOR_CODE_REMOTE: "",
+      CLAUDE_CODE_REMOTE: "",
+      CODEX_THREAD_ID: "",
+      CODEX_SESSION_ID: "",
+      CODEX_CI: "",
+      CODEX_SANDBOX: "",
+      ...env,
+    },
   });
   expect(result.status).toBe(0);
   expect(result.stderr).toBe("");
-  return result.stdout.trim()
-    ? (JSON.parse(result.stdout).hookSpecificOutput.additionalContext as string)
-    : "";
+  const parsed = result.stdout.trim() ? JSON.parse(result.stdout).hookSpecificOutput : null;
+  if (!parsed) return "";
+  return String(parsed.additionalContext ?? parsed.permissionDecisionReason ?? "");
 }
 
 function runHookRaw(code: string, input: unknown, env: Record<string, string> = {}) {
   const result = spawnSync(process.execPath, [HOOK], {
     encoding: "utf8",
     input: JSON.stringify(input),
-    env: { ...process.env, TASK_CLAIM_HOOK_REPO_ROOT: code, ORBIT_TASKS_REGISTRY: "", ...env },
+    env: {
+      ...process.env,
+      TASK_CLAIM_HOOK_REPO_ROOT: code,
+      ORBIT_TASKS_REGISTRY: "",
+      CURSOR_AGENT: "",
+      CURSOR_CODE_REMOTE: "",
+      CLAUDE_CODE_REMOTE: "",
+      CODEX_THREAD_ID: "",
+      CODEX_SESSION_ID: "",
+      CODEX_CI: "",
+      CODEX_SANDBOX: "",
+      ...env,
+    },
   });
   return result.stdout.trim() ? JSON.parse(result.stdout).hookSpecificOutput : null;
 }
@@ -489,7 +513,19 @@ describe("the pre-commit end", () => {
     const result = spawnSync("git", ["-c", `core.hooksPath=${global}`, "commit", "-q", "-m", "x"], {
       cwd: code,
       encoding: "utf8",
-      env: { ...process.env, ORBIT_TASKS_REGISTRY: "", ...env },
+      env: {
+        ...process.env,
+        // Human advisory path: clear cloud markers so D9 hard-fail does not fire.
+        CURSOR_AGENT: "",
+        CURSOR_CODE_REMOTE: "",
+        CLAUDE_CODE_REMOTE: "",
+        CODEX_THREAD_ID: "",
+        CODEX_SESSION_ID: "",
+        CODEX_CI: "",
+        CODEX_SANDBOX: "",
+        ORBIT_TASKS_REGISTRY: "",
+        ...env,
+      },
     });
     expect(result.status).toBe(0);
     return result.stderr;
@@ -530,5 +566,32 @@ describe("the pre-commit end", () => {
     expect(commitThroughGlobalHooks(code, { ORBIT_TASKS_REGISTRY: registry })).not.toContain(
       "task-claim (pre-commit)",
     );
+  });
+
+  it("hard-fails an unclaimed commit in an agent/cloud session (D9)", () => {
+    const { registry, code } = fixture([{ id: "T-260902-jxe", status: "in-progress" }]);
+    fs.mkdirSync(path.join(code, ".githooks"), { recursive: true });
+    fs.mkdirSync(path.join(code, "scripts", "just"), { recursive: true });
+    fs.copyFileSync(HOOK, path.join(code, "scripts/just/task-claim-hook.cjs"));
+    // Minimal pre-commit like the repo's: claim only.
+    fs.writeFileSync(
+      path.join(code, ".githooks/pre-commit"),
+      "#!/bin/sh\nnode scripts/just/task-claim-hook.cjs --git\n",
+      { mode: 0o755 },
+    );
+    fs.mkdirSync(path.join(code, "src"), { recursive: true });
+    fs.writeFileSync(path.join(code, "src", "a.ts"), "a\n");
+    git(code, "add", "-A");
+    const result = spawnSync("git", ["-c", "core.hooksPath=.githooks", "commit", "-q", "-m", "x"], {
+      cwd: code,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        CURSOR_AGENT: "1",
+        ORBIT_TASKS_REGISTRY: registry,
+      },
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr + result.stdout).toMatch(/REFUSED|task-claim/);
   });
 });

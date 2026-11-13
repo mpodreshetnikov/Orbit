@@ -310,30 +310,99 @@ function checkUnknown(label) {
   };
 }
 
+/**
+ * Dual-repo fail-closed extras (D8 / A.6): both clones on disk, registry skills reachable,
+ * orbit-tasks git hooks present. Applied on top of harness-specific hook checks for agent sessions.
+ */
+function checkDualRepo({ repoRoot = REPO_ROOT, exists = fs.existsSync, env = process.env } = {}) {
+  const missing = [];
+  const tasksRoot =
+    typeof env.ORBIT_TASKS_ROOT === "string" && env.ORBIT_TASKS_ROOT
+      ? path.resolve(env.ORBIT_TASKS_ROOT)
+      : path.resolve(repoRoot, "..", "orbit-tasks");
+
+  if (!exists(path.join(tasksRoot, "docs", "tasks"))) {
+    missing.push(
+      `orbit-tasks clone with docs/tasks not found at ${tasksRoot} (set ORBIT_TASKS_ROOT or keep the sibling checkout)`,
+    );
+  } else {
+    for (const skill of ["task-registry", "task-status-sync", "steward"]) {
+      const skillPath = path.join(tasksRoot, ".agents", "skills", skill, "SKILL.md");
+      if (!exists(skillPath)) {
+        missing.push(`registry skill missing: ${skillPath}`);
+      }
+    }
+    if (!exists(path.join(tasksRoot, ".githooks", "pre-push"))) {
+      missing.push(`orbit-tasks .githooks/pre-push missing under ${tasksRoot}`);
+    }
+  }
+
+  const linkedSkills = path.join(repoRoot, ".agents", "skills", "task-registry", "SKILL.md");
+  const claudeSkills = path.join(repoRoot, ".claude", "skills", "task-registry", "SKILL.md");
+  if (
+    !exists(linkedSkills) &&
+    !exists(claudeSkills) &&
+    !exists(path.join(tasksRoot, ".agents", "skills", "task-registry", "SKILL.md"))
+  ) {
+    missing.push(
+      "task-registry skill not reachable from Orbit (.agents/.claude) or orbit-tasks — run orbit-tasks install-into or keep dual checkout",
+    );
+  }
+
+  if (missing.length === 0) {
+    return {
+      ok: true,
+      message: "agent-env-check: dual-repo Orbit + orbit-tasks skills/hooks reachable.",
+    };
+  }
+  return {
+    ok: false,
+    message:
+      `agent-env-check: REFUSED. Dual-repo / skills / hooks gap (D8):\n` +
+      missing.map((m) => `  - ${m}`).join("\n") +
+      `\nSee ${DOC}. Do not edit Dashboard / environment.json from the agent session.`,
+  };
+}
+
 function check({
   env = process.env,
   home = os.homedir(),
   repoRoot = REPO_ROOT,
   exists = fs.existsSync,
+  requireDualRepo = true,
 } = {}) {
+  let harness;
   if (isClaudeCloud(env)) {
-    return checkClaude({ home, repoRoot, exists });
+    harness = checkClaude({ home, repoRoot, exists });
+  } else if (isCursorCloud(env)) {
+    harness = checkCursor({ home, repoRoot, exists });
+  } else if (isCodexAgent(env)) {
+    harness = checkCodex({ home, repoRoot, exists, env });
+  } else {
+    const unknown = unknownAgentLabel(env);
+    if (unknown) {
+      harness = checkUnknown(unknown);
+    } else {
+      harness = {
+        ok: true,
+        message:
+          "agent-env-check: not a cloud session; Claude hooks load from .claude/settings.json when Claude Code starts in this checkout, Cursor loads .cursor/hooks.json from the project, and Codex loads ~/.codex/hooks.json / .codex/hooks.json when configured.",
+      };
+    }
   }
-  if (isCursorCloud(env)) {
-    return checkCursor({ home, repoRoot, exists });
+
+  if (!harness.ok) return harness;
+
+  // Dual-repo extras only for agent/cloud harnesses (local humans may work Orbit-only).
+  if (requireDualRepo && (isClaudeCloud(env) || isCursorCloud(env) || isCodexAgent(env))) {
+    const dual = checkDualRepo({ repoRoot, exists, env });
+    if (!dual.ok) return dual;
+    return {
+      ok: true,
+      message: `${harness.message} ${dual.message}`,
+    };
   }
-  if (isCodexAgent(env)) {
-    return checkCodex({ home, repoRoot, exists, env });
-  }
-  const unknown = unknownAgentLabel(env);
-  if (unknown) {
-    return checkUnknown(unknown);
-  }
-  return {
-    ok: true,
-    message:
-      "agent-env-check: not a cloud session; Claude hooks load from .claude/settings.json when Claude Code starts in this checkout, Cursor loads .cursor/hooks.json from the project, and Codex loads ~/.codex/hooks.json / .codex/hooks.json when configured.",
-  };
+  return harness;
 }
 
 if (require.main === module) {
@@ -346,6 +415,7 @@ module.exports = {
   CURSOR_REQUIRED_EVENTS,
   bridgePathIn,
   check,
+  checkDualRepo,
   cursorRefusalMessage,
   escapeRegExp,
   isClaudeCloud,

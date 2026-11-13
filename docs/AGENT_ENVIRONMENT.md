@@ -185,6 +185,10 @@ node scripts/just/agent-env-check.cjs
   `project-hooks-bridge.cjs`.
 - Any other detected agent harness (OpenCode, pi, novel `AI_AGENT=…`, bare `AGENT=1`, …):
   **REFUSED** (fail-closed). Only Claude, Cursor, and Codex have recipes today.
+- Claude / Cursor / Codex cloud also require the **dual-repo** extras (D8 / T-261113-o9b): an
+  `orbit-tasks` checkout beside Orbit (or `ORBIT_TASKS_ROOT`), registry skills
+  `task-registry` / `task-status-sync` / `steward` reachable there, and
+  `orbit-tasks/.githooks/pre-push` present. Refusal names what is missing.
 - Otherwise it passes and says it is not a cloud session (local human / in-checkout Claude or
   Cursor desktop without cloud markers).
 

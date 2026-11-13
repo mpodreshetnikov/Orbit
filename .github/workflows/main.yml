@@ -52,6 +52,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Human authorship (D13)
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          node scripts/just/human-authorship.cjs --check-range \
+            "${{ github.event.pull_request.base.sha }}" \
+            "${{ github.event.pull_request.head.sha }}"
       # Impact detection runs before the heavy toolchain setup, so a change that needs neither the
       # database nor the functions can skip installing Deno and the Supabase CLI along with the
       # lanes that need them. change-impact.cjs uses only Node built-ins and git, so it runs
