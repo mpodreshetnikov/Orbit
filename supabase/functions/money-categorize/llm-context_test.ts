@@ -173,3 +173,22 @@ Deno.test("buildLlmCategorizeItemContext applies safe-sized transaction.raw_payl
   const raw = (payload.transaction as { raw_payload: Record<string, unknown> }).raw_payload;
   assertEquals(raw._truncated, true);
 });
+
+Deno.test(
+  "buildLlmCategorizeItemContext prefers pipeline currentCategoryId over snapshot ids",
+  () => {
+    const context = createContext();
+    context.line_item.category_id = "cat-old";
+    context.current_category.id = "cat-old";
+    const payload = buildLlmCategorizeItemContext({
+      lineItemId: "line-target",
+      currentCategoryId: "cat-food",
+      currentCanonicalSystemKey: "food",
+      context,
+    });
+
+    assertEquals(payload.current_category_id, "cat-food");
+    assertEquals((payload.target_line_item as { category_id: string }).category_id, "cat-food");
+    assertEquals((payload.current_category as { id: string }).id, "cat-food");
+  },
+);

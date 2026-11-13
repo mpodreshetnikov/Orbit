@@ -727,6 +727,48 @@ function createMissingLlmResult(
   };
 }
 
+/**
+ * Overlay pipeline category state onto the SQL context snapshot so LLM providers
+ * see a consistent current category (ids + names), not a pre-pipeline stale copy.
+ */
+function buildLlmBatchRequestItem(
+  item: PipelineItemState,
+  candidateCategories: MoneyCategorizeCandidateCategory[],
+): MoneyCategorizeLlmBatchRequestItem {
+  const state = item.state;
+  const candidate = state.currentCategoryId
+    ? (candidateCategories.find((entry) => entry.id === state.currentCategoryId) ?? null)
+    : null;
+
+  return {
+    lineItemId: item.options.lineItemId,
+    currentCategoryId: state.currentCategoryId,
+    currentCanonicalSystemKey: state.currentCanonicalSystemKey,
+    context: {
+      ...item.context,
+      line_item: {
+        ...item.context.line_item,
+        category_id: state.currentCategoryId,
+      },
+      current_category: {
+        id: state.currentCategoryId,
+        kind: state.currentCategoryKind,
+        name_en: candidate?.name_en ?? null,
+        name_ru: candidate?.name_ru ?? null,
+        system_key:
+          state.currentCategoryKind === "canonical" ? state.currentCanonicalSystemKey : null,
+        canonical_category_id: state.currentCanonicalCategoryId,
+        canonical_system_key: state.currentCanonicalSystemKey,
+      },
+      derived: {
+        ...item.context.derived,
+        current_category_kind: state.currentCategoryKind,
+        current_canonical_system_key: state.currentCanonicalSystemKey,
+      },
+    },
+  };
+}
+
 async function resolveSingleLlmDecision(
   evaluation: RuleEvaluation,
   rule: MoneyCategoryRule,
@@ -737,14 +779,7 @@ async function resolveSingleLlmDecision(
   const batchResult = await deps.categorizeWithLlmBatch({
     rule,
     candidateCategories,
-    items: [
-      {
-        lineItemId: evaluation.indexedItem.item.options.lineItemId,
-        context: evaluation.indexedItem.item.context,
-        currentCategoryId: evaluation.indexedItem.item.state.currentCategoryId,
-        currentCanonicalSystemKey: evaluation.indexedItem.item.state.currentCanonicalSystemKey,
-      },
-    ],
+    items: [buildLlmBatchRequestItem(evaluation.indexedItem.item, candidateCategories)],
   });
 
   const result =
@@ -792,12 +827,9 @@ async function resolveLlmDecisions(
     const batchResult = await deps.categorizeWithLlmBatch({
       rule,
       candidateCategories,
-      items: evaluations.map((evaluation) => ({
-        lineItemId: evaluation.indexedItem.item.options.lineItemId,
-        context: evaluation.indexedItem.item.context,
-        currentCategoryId: evaluation.indexedItem.item.state.currentCategoryId,
-        currentCanonicalSystemKey: evaluation.indexedItem.item.state.currentCanonicalSystemKey,
-      })),
+      items: evaluations.map((evaluation) =>
+        buildLlmBatchRequestItem(evaluation.indexedItem.item, candidateCategories),
+      ),
     });
 
     const resultByLineItemId = new Map<string, MoneyCategorizeLlmBatchResultItem>();

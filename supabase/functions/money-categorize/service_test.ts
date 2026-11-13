@@ -394,6 +394,7 @@ Deno.test(
 Deno.test(
   "applyMoneyCategoryRulePipelineService runs a single-item LLM batch and persists debug history",
   async () => {
+    const captured: { request: MoneyCategorizeLlmBatchRequest | null } = { request: null };
     const { deps, state } = createDeps({
       rules: [
         createRule({
@@ -402,6 +403,7 @@ Deno.test(
           rule_kind: "direct",
           sort_order: 1,
           target_category_id: "cat-food",
+          stop_processing: false,
           filters: [
             {
               field: "merchant_name",
@@ -434,16 +436,19 @@ Deno.test(
           merchantName: "Coffee House",
         }),
       },
-      batchCategorize: async (request) => ({
-        items: request.items.map((item) => ({
-          lineItemId: item.lineItemId,
-          categoryId: "cat-coffee",
-          reason: "Drink-specific category available",
-        })),
-        promptTokens: 42,
-        completionTokens: 9,
-        model: "google/gemini-2.0-flash-001",
-      }),
+      batchCategorize: async (request) => {
+        captured.request = request;
+        return {
+          items: request.items.map((item) => ({
+            lineItemId: item.lineItemId,
+            categoryId: "cat-coffee",
+            reason: "Drink-specific category available",
+          })),
+          promptTokens: 42,
+          completionTokens: 9,
+          model: "google/gemini-2.0-flash-001",
+        };
+      },
     });
 
     const result = await applyMoneyCategoryRulePipelineService(
@@ -487,6 +492,16 @@ Deno.test(
     assertEquals(llmDebug.llm_batched, false);
     assertEquals(llmDebug.llm_batch_size, 1);
     assertEquals(llmDebug.llm_model, "google/gemini-2.0-flash-001");
+    // Direct rule assigned cat-food before LLM; provider payload must match that state.
+    assertEquals(captured.request?.items[0]?.currentCategoryId, "cat-food");
+    assertEquals(captured.request?.items[0]?.context.line_item.category_id, "cat-food");
+    assertEquals(captured.request?.items[0]?.context.current_category.id, "cat-food");
+    assertEquals(captured.request?.items[0]?.context.current_category.name_en, "Food");
+    assertEquals(captured.request?.items[0]?.context.current_category.kind, "canonical");
+    assertEquals(
+      captured.request?.items[0]?.context.current_category.canonical_system_key,
+      "food",
+    );
   },
 );
 

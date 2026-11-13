@@ -55,7 +55,10 @@ export function truncateJsonForLlm(
   return shallow;
 }
 
-function buildTargetLineItem(ctx: MoneyCategoryRuleContext): Record<string, unknown> {
+function buildTargetLineItem(
+  ctx: MoneyCategoryRuleContext,
+  currentCategoryId: string | null,
+): Record<string, unknown> {
   return compactRecord({
     id: ctx.line_item.id,
     title: ctx.line_item.title,
@@ -63,7 +66,9 @@ function buildTargetLineItem(ctx: MoneyCategoryRuleContext): Record<string, unkn
     quantity: ctx.line_item.quantity,
     unit: ctx.line_item.unit,
     line_status: ctx.line_item.line_status,
-    category_id: ctx.line_item.category_id,
+    // Prefer pipeline state over the SQL snapshot so mid-pipeline category
+    // changes stay consistent with current_category_id.
+    category_id: currentCategoryId ?? ctx.line_item.category_id,
     assignment_method: ctx.line_item.assignment_method,
     raw_payload: truncateJsonForLlm(ctx.line_item.raw_payload),
   });
@@ -92,15 +97,18 @@ export function buildLlmCategorizeItemContext(
   item: MoneyCategorizeLlmBatchRequestItem,
 ): Record<string, unknown> {
   const ctx = item.context;
+  const currentCategoryId = item.currentCategoryId ?? ctx.current_category.id;
+  const currentCanonicalSystemKey =
+    item.currentCanonicalSystemKey ?? ctx.current_category.canonical_system_key;
 
   // Always include receipt_sibling_items (even []) so single- and multi-line
   // receipts share the same explicit target-vs-sibling contract.
   return {
     ...compactRecord({
       line_item_id: item.lineItemId,
-      current_category_id: item.currentCategoryId,
-      current_canonical_system_key: item.currentCanonicalSystemKey,
-      target_line_item: buildTargetLineItem(ctx),
+      current_category_id: currentCategoryId,
+      current_canonical_system_key: currentCanonicalSystemKey,
+      target_line_item: buildTargetLineItem(ctx, currentCategoryId),
       transaction: compactRecord({
         id: ctx.transaction.id,
         payer_person_id: ctx.transaction.payer_person_id,
@@ -140,13 +148,13 @@ export function buildLlmCategorizeItemContext(
         slug: ctx.brand?.slug ?? null,
       }),
       current_category: compactRecord({
-        id: ctx.current_category.id,
+        id: currentCategoryId,
         kind: ctx.current_category.kind,
         name_en: ctx.current_category.name_en,
         name_ru: ctx.current_category.name_ru,
         system_key: ctx.current_category.system_key,
         canonical_category_id: ctx.current_category.canonical_category_id,
-        canonical_system_key: ctx.current_category.canonical_system_key,
+        canonical_system_key: currentCanonicalSystemKey,
       }),
       derived: compactRecord({
         normalized_line_item_title: ctx.derived.normalized_line_item_title,
@@ -156,7 +164,8 @@ export function buildLlmCategorizeItemContext(
         posted_day_of_week: ctx.derived.posted_day_of_week,
         posted_month: ctx.derived.posted_month,
         current_category_kind: ctx.derived.current_category_kind,
-        current_canonical_system_key: ctx.derived.current_canonical_system_key,
+        current_canonical_system_key:
+          currentCanonicalSystemKey ?? ctx.derived.current_canonical_system_key,
         has_receipt_metadata: ctx.derived.has_receipt_metadata,
       }),
     }),
