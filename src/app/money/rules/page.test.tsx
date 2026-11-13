@@ -190,7 +190,7 @@ describe("MoneyRulesPage", () => {
       "/money/rules/rule-1/edit",
     );
     expect(
-      screen.getByText("Merchant name contains any of set 'coffee', 'market'"),
+      screen.getByText("Merchant name: contains any of set 'coffee', 'market'"),
     ).toBeInTheDocument();
   });
 
