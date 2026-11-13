@@ -253,6 +253,10 @@ quality-db-test:
 tasks-claim id *options:
   node scripts/just/tasks-claim-here.cjs "{{ id }}" {{ options }}
 
+# Autonomous WIP-aware backlog pickup report from the linked registry (default --wip-limit 5; never claims).
+tasks-autopilot *options:
+  node scripts/just/tasks-autopilot-here.cjs {{ options }}
+
 # Start local Supabase stack. Through the retry runner: the CLI's readiness probe reaches the
 # API gateway before the edge runtime is listening and calls the resulting 502 fatal, which fails
 # this lane roughly six times in ten. Only that signature is retried — see T-260829-hhj.

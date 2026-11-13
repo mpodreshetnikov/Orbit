@@ -72,6 +72,8 @@ Use these command IDs in plans, PRs, and handoffs:
 - `mcp-grafana-token-list`: `just mcp-grafana-token-list [service_account_id]` (list local Grafana service account token metadata via Grafana API; defaults to `mcp-local`)
 - `secrets-preflight`: `just secrets-preflight` (scan likely push range for accidentally committed secrets)
 - `secrets-preflight-range`: `just secrets-preflight-range <from> <to>` (scan an explicit commit range; used by CI)
+- `tasks-claim`: `just tasks-claim <id>` (claim a linked-registry task and arm `.git/current-task`)
+- `tasks-autopilot`: `just tasks-autopilot` (autonomous WIP-aware pickup report from the linked registry; default `--wip-limit` 5; never claims)
 
 For less common and environment-specific commands (deploy, targeted DB ops, single-service dev flows), use `commands-list` and pick from `just --list --unsorted`.
 
