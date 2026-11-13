@@ -82,6 +82,7 @@ function createBatchRequest(lineItemIds: string[]): MoneyCategorizeLlmBatchReque
           id: `tx-${lineItemId}`,
           payer_person_id: "person-1",
           account_id: "account-1",
+          card_id: null,
           source: "tbank",
           posted_at: "2026-03-10T10:00:00.000Z",
           amount: 100 + index,
@@ -100,15 +101,31 @@ function createBatchRequest(lineItemIds: string[]): MoneyCategorizeLlmBatchReque
           raw_payload: {},
         },
         account: {
+          id: "account-1",
           source: "tbank",
           account_kind: "debit",
+          account_label: "Main",
+        },
+        card: {
+          id: null,
+          last4: null,
+          card_label: null,
+        },
+        brand: {
+          id: null,
+          name: null,
+          slug: null,
         },
         current_category: {
           id: index === 0 ? "cat-transport" : null,
           kind: index === 0 ? "canonical" : null,
+          name_en: index === 0 ? "Transport" : null,
+          name_ru: index === 0 ? "Транспорт" : null,
+          system_key: index === 0 ? "transport" : null,
           canonical_category_id: index === 0 ? "cat-transport" : null,
           canonical_system_key: index === 0 ? "transport" : null,
         },
+        receipt_sibling_items: [],
         derived: {
           normalized_line_item_title: `item ${index + 1}`,
           normalized_merchant_name: "synthetic cafe",
@@ -164,6 +181,46 @@ Deno.test("buildJevState includes eligible_categories for companion Noul", () =>
   });
   assertEquals(Array.isArray(state.eligible_categories), true);
   assertEquals((state.eligible_categories as unknown[]).length, 2);
+});
+
+Deno.test("buildJevState exposes target_line_item vs receipt_sibling_items", () => {
+  const request = createBatchRequest(["line-1"]);
+  request.items[0].context.receipt_sibling_items = [
+    {
+      id: "line-sib",
+      title: "Sibling juice",
+      amount: 50,
+      quantity: 1,
+      unit: "pcs",
+      line_status: "final",
+      category_id: null,
+      assignment_method: "import",
+    },
+  ];
+  request.items[0].context.transaction.card_id = "card-9";
+  request.items[0].context.card = { id: "card-9", last4: "1234", card_label: "Travel" };
+  request.items[0].context.brand = { id: "brand-9", name: "Cafe", slug: "cafe" };
+  request.items[0].context.account.account_label = "Travel debit";
+
+  const state = buildJevState(request.items[0], {
+    "cat-food": "Еда / Food (food)",
+  });
+
+  assertEquals((state.target_line_item as { id: string }).id, "line-1");
+  assertEquals(
+    (state.receipt_sibling_items as Array<{ id: string }>).map((item) => item.id),
+    ["line-sib"],
+  );
+  assertEquals((state.card as { last4: string }).last4, "1234");
+  assertEquals((state.brand as { name: string }).name, "Cafe");
+  assertEquals((state.account as { account_label: string }).account_label, "Travel debit");
+  assertEquals(state.line_item_title, undefined);
+});
+
+Deno.test("buildJevState keeps empty receipt_sibling_items for single-line receipts", () => {
+  const request = createBatchRequest(["line-1"]);
+  const state = buildJevState(request.items[0], { "cat-food": "Еда / Food (food)" });
+  assertEquals(state.receipt_sibling_items, []);
 });
 
 Deno.test("callJevMoneyCategorizeBatch applies high-confidence Choice+Noul", async () => {

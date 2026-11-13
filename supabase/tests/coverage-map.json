@@ -94,7 +94,8 @@
       "supabase/tests/functions/money_spending_report_test.sql"
     ],
     "supabase/db/functions/money_get_category_rule_context.sql": [
-      "supabase/tests/functions/money_category_rule_pipeline_test.sql"
+      "supabase/tests/functions/money_category_rule_pipeline_test.sql",
+      "supabase/tests/functions/money_get_category_rule_context_test.sql"
     ],
     "supabase/db/functions/money_get_category_rule_debug.sql": [
       "supabase/tests/functions/money_category_rule_pipeline_test.sql"

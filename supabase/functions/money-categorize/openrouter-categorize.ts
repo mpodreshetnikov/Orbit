@@ -1,3 +1,4 @@
+import { buildLlmCategorizeItemContext } from "./llm-context.ts";
 import type {
   MoneyCategorizeLlmBatchRequest,
   MoneyCategorizeLlmBatchResult,
@@ -38,20 +39,6 @@ function asNumber(value: unknown): number | null {
   return null;
 }
 
-function compactRecord(record: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(
-    Object.entries(record).filter(([, value]) => {
-      if (value == null) return false;
-      if (typeof value === "string") return value.trim().length > 0;
-      if (Array.isArray(value)) return value.length > 0;
-      if (typeof value === "object") {
-        return Object.keys(asRecord(value)).length > 0;
-      }
-      return true;
-    }),
-  );
-}
-
 function parseJsonContent(content: string): Record<string, unknown> {
   const trimmed = content.trim();
   const candidates: string[] = [];
@@ -71,57 +58,16 @@ function parseJsonContent(content: string): Record<string, unknown> {
   throw new Error(INVALID_BATCH_JSON_ERROR_MESSAGE);
 }
 
-function buildPrompt(request: MoneyCategorizeLlmBatchRequest): string {
+export function buildPrompt(request: MoneyCategorizeLlmBatchRequest): string {
   return [
-    "Classify each money line item into exactly one allowed category or choose no change.",
+    "Classify only each item's target_line_item into exactly one allowed category or choose no change.",
+    "receipt_sibling_items are other lines on the same receipt — use them as context, do not classify them.",
     'Return strict JSON with shape: {"items":[{"line_item_id":"...","category_id":"...|null","reason":"..."}]}',
     "category_id must be one of the provided candidate ids or null.",
     "If uncertain, keep category_id null.",
     `Rule prompt: ${JSON.stringify(request.rule.config.prompt ?? "")}`,
     `Allowed categories: ${JSON.stringify(request.candidateCategories)}`,
-    `Line items: ${JSON.stringify(
-      request.items.map((item) =>
-        compactRecord({
-          line_item_id: item.lineItemId,
-          current_category_id: item.currentCategoryId,
-          current_canonical_system_key: item.currentCanonicalSystemKey,
-          line_item: compactRecord({
-            title: item.context.line_item.title,
-            amount: item.context.line_item.amount,
-            quantity: item.context.line_item.quantity,
-            unit: item.context.line_item.unit,
-            line_status: item.context.line_item.line_status,
-            raw_payload: item.context.line_item.raw_payload,
-          }),
-          transaction: compactRecord({
-            id: item.context.transaction.id,
-            source: item.context.transaction.source,
-            merchant_name: item.context.transaction.merchant_name,
-            posted_at: item.context.transaction.posted_at,
-            amount: item.context.transaction.amount,
-            currency: item.context.transaction.currency,
-            transaction_type: item.context.transaction.transaction_type,
-            status: item.context.transaction.status,
-            source_category_id: item.context.transaction.source_category_id,
-            source_category_name: item.context.transaction.source_category_name,
-            comment: item.context.transaction.comment,
-            source_comment: item.context.transaction.source_comment,
-            mcc: item.context.transaction.mcc,
-            cashback_amount: item.context.transaction.cashback_amount,
-            is_transfer: item.context.transaction.is_transfer,
-          }),
-          account: compactRecord({
-            source: item.context.account.source,
-            account_kind: item.context.account.account_kind,
-          }),
-          derived: compactRecord({
-            normalized_line_item_title: item.context.derived.normalized_line_item_title,
-            normalized_merchant_name: item.context.derived.normalized_merchant_name,
-            has_receipt_metadata: item.context.derived.has_receipt_metadata,
-          }),
-        }),
-      ),
-    )}`,
+    `Line items: ${JSON.stringify(request.items.map((item) => buildLlmCategorizeItemContext(item)))}`,
   ].join("\n\n");
 }
 
