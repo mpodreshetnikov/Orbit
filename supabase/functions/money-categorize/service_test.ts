@@ -498,10 +498,7 @@ Deno.test(
     assertEquals(captured.request?.items[0]?.context.current_category.id, "cat-food");
     assertEquals(captured.request?.items[0]?.context.current_category.name_en, "Food");
     assertEquals(captured.request?.items[0]?.context.current_category.kind, "canonical");
-    assertEquals(
-      captured.request?.items[0]?.context.current_category.canonical_system_key,
-      "food",
-    );
+    assertEquals(captured.request?.items[0]?.context.current_category.canonical_system_key, "food");
   },
 );
 
