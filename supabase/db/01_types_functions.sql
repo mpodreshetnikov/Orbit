@@ -117,12 +117,13 @@ BEGIN;
 \i functions/money_resolve_fx_rate.sql
 \i functions/money_get_budget_report.sql
 \i functions/money_get_spending_report.sql
+\i functions/money_list_line_item_discrepancies.sql
 
 -- Cron entry point functions
 \i functions/run_med_event_generation_for_all_users.sql
 \i functions/run_money_fx_sync_http.sql
 \i functions/run_notifications_cron_http.sql
 
-\echo '=== Phase 1 Complete: 9 types, 41 functions ==='
+\echo '=== Phase 1 Complete: 9 types, 42 functions ==='
 
 COMMIT;

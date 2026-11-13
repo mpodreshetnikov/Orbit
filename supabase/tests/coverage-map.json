@@ -87,6 +87,9 @@
     "supabase/db/functions/money_get_budget_report.sql": [
       "supabase/tests/functions/money_budget_reporting_test.sql"
     ],
+    "supabase/db/functions/money_list_line_item_discrepancies.sql": [
+      "supabase/tests/functions/money_line_item_discrepancies_test.sql"
+    ],
     "supabase/db/functions/money_get_spending_report.sql": [
       "supabase/tests/functions/money_spending_report_test.sql"
     ],

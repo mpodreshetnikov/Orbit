@@ -352,13 +352,22 @@ export function extractAccountHintFromRow(row: CanonicalTransactionRowInput): st
   return null;
 }
 
+export const BALANCING_LINE_ITEM_SOURCE = "balancing";
+export const BALANCING_TOLERANCE = 0.01;
+export const BALANCING_MAX_SHARE = 0.5;
+
 export function normalizeLineItems(row: CanonicalTransactionRowInput): ImportLineItemInput[] {
   if (Array.isArray(row.line_items) && row.line_items.length > 0) return row.line_items;
+  const basePayload = toObject(row.raw_payload) ?? {};
   return [
     {
       title: row.merchant_name || "Imported",
       amount: row.amount,
-      raw_payload: row.raw_payload ?? null,
+      is_placeholder: true,
+      raw_payload: {
+        ...basePayload,
+        source: "fallback",
+      },
     },
   ];
 }
@@ -366,9 +375,41 @@ export function normalizeLineItems(row: CanonicalTransactionRowInput): ImportLin
 export function isSyntheticImportLineItem(
   lineItem: ImportLineItemInput | null | undefined,
 ): boolean {
+  if (lineItem?.is_placeholder === true) return true;
   const rawPayload = toObject(lineItem?.raw_payload);
   const source = normalizeText(rawPayload?.source)?.toLowerCase();
   return source === "fallback" || source === "dom_fallback";
+}
+
+export function buildBalancingLineItem(
+  row: CanonicalTransactionRowInput,
+  lineItems: ImportLineItemInput[],
+): ImportLineItemInput | null {
+  const transactionAmount = toNumberOrNull(row.amount);
+  if (transactionAmount === null) return null;
+
+  let lineItemsSum = 0;
+  for (const lineItem of lineItems) {
+    const amount = toNumberOrNull(lineItem.amount);
+    if (amount !== null) lineItemsSum += amount;
+  }
+
+  const delta = transactionAmount - lineItemsSum;
+  if (Math.abs(delta) < BALANCING_TOLERANCE) return null;
+
+  const maxDelta = Math.abs(transactionAmount) * BALANCING_MAX_SHARE;
+  if (Math.abs(delta) > maxDelta) {
+    throw new Error("Receipt total does not match transaction amount");
+  }
+
+  return {
+    title: "Прочее по операции",
+    amount: delta,
+    raw_payload: {
+      source: BALANCING_LINE_ITEM_SOURCE,
+      delta,
+    },
+  };
 }
 
 export function hasRealImportLineItems(
