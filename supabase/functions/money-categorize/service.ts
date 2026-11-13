@@ -64,6 +64,17 @@ export interface MoneyCategory {
   archived_at: string | null;
 }
 
+export interface MoneyCategoryRuleContextSiblingLineItem {
+  id: string;
+  title: string | null;
+  amount: number | null;
+  quantity: number | null;
+  unit: string | null;
+  line_status: string | null;
+  category_id: string | null;
+  assignment_method: string | null;
+}
+
 export interface MoneyCategoryRuleContext {
   line_item: {
     id: string;
@@ -87,6 +98,7 @@ export interface MoneyCategoryRuleContext {
     id: string;
     payer_person_id: string;
     account_id: string | null;
+    card_id: string | null;
     source: string | null;
     posted_at: string | null;
     amount: number | null;
@@ -105,15 +117,32 @@ export interface MoneyCategoryRuleContext {
     raw_payload: Record<string, unknown>;
   };
   account: {
+    id: string | null;
     source: string | null;
     account_kind: string | null;
+    account_label: string | null;
+  };
+  card: {
+    id: string | null;
+    last4: string | null;
+    card_label: string | null;
+  };
+  brand: {
+    id: string | null;
+    name: string | null;
+    slug: string | null;
   };
   current_category: {
     id: string | null;
     kind: MoneyCategoryKind | null;
+    name_en: string | null;
+    name_ru: string | null;
+    system_key: string | null;
     canonical_category_id: string | null;
     canonical_system_key: string | null;
   };
+  /** Other line items on the same transaction; empty for single-line receipts. */
+  receipt_sibling_items: MoneyCategoryRuleContextSiblingLineItem[];
   derived: {
     normalized_line_item_title: string | null;
     normalized_merchant_name: string | null;
