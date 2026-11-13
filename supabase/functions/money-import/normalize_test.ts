@@ -1,9 +1,12 @@
 import { assertEquals } from "std/assert/assert-equals";
 import {
+  buildBalancingLineItem,
   buildLineItemImportHash,
   buildTransactionInsertPayload,
   getBearerToken,
+  isSyntheticImportLineItem,
   jsonResponse,
+  normalizeLineItems,
   normalizeSourceForTransactions,
   normalizeText,
   normalizeTransactionRow,
@@ -50,6 +53,101 @@ Deno.test("normalizeTransactionRow fills defaults and normalizes fields", () => 
   assertEquals(normalized.transaction_type, "expense");
   assertEquals(normalized.merchant_name, "Shop");
   assertEquals(normalized.line_items?.length, 1);
+  assertEquals(normalized.line_items?.[0]?.is_placeholder, true);
+  // raw_payload must stay unchanged so import_hash matches pre-upgrade stubs
+  assertEquals(normalized.line_items?.[0]?.raw_payload, null);
+});
+
+Deno.test(
+  "normalizeLineItems fallback preserves raw_payload for import_hash stability",
+  async () => {
+    const rawPayload = { description: "Cafe", amount: 10 };
+    const lineItem = normalizeLineItems({
+      posted_at: "2026-01-01",
+      amount: 10,
+      merchant_name: "Cafe",
+      transaction_type: "expense",
+      raw_payload: rawPayload,
+    })[0];
+    assertEquals(lineItem.is_placeholder, true);
+    assertEquals(lineItem.raw_payload, rawPayload);
+    assertEquals((lineItem.raw_payload as Record<string, unknown> | null)?.source, undefined);
+
+    const hash = await buildLineItemImportHash("tx-1", lineItem, 0);
+    const legacyHash = await buildLineItemImportHash(
+      "tx-1",
+      { title: "Cafe", amount: 10, raw_payload: rawPayload },
+      0,
+    );
+    assertEquals(hash, legacyHash);
+
+    const mutatedHash = await buildLineItemImportHash(
+      "tx-1",
+      {
+        title: "Cafe",
+        amount: 10,
+        raw_payload: { ...rawPayload, source: "fallback" },
+      },
+      0,
+    );
+    assertEquals(hash === mutatedHash, false);
+  },
+);
+
+Deno.test("isSyntheticImportLineItem recognizes placeholder flag and legacy sources", () => {
+  assertEquals(isSyntheticImportLineItem({ is_placeholder: true, title: "CSV" }), true);
+  assertEquals(
+    isSyntheticImportLineItem({ title: "Ext", raw_payload: { source: "fallback" } }),
+    true,
+  );
+  assertEquals(
+    isSyntheticImportLineItem({ title: "Dom", raw_payload: { source: "dom_fallback" } }),
+    true,
+  );
+  assertEquals(
+    isSyntheticImportLineItem({ title: "Milk", raw_payload: { source: "receipt" } }),
+    false,
+  );
+  assertEquals(
+    normalizeLineItems({ posted_at: "2026-01-01", amount: 10, transaction_type: "expense" })[0]
+      .is_placeholder,
+    true,
+  );
+});
+
+Deno.test("buildBalancingLineItem covers small deltas and rejects large ones", () => {
+  const balanced = buildBalancingLineItem(
+    { posted_at: "2026-01-01", amount: 100, transaction_type: "expense" },
+    [
+      { title: "A", amount: 40 },
+      { title: "B", amount: 60 },
+    ],
+  );
+  assertEquals(balanced, null);
+
+  const withDelta = buildBalancingLineItem(
+    { posted_at: "2026-01-01", amount: 1000, transaction_type: "expense" },
+    [
+      { title: "A", amount: 500 },
+      { title: "B", amount: 440 },
+    ],
+  );
+  assertEquals(withDelta?.amount, 60);
+  assertEquals((withDelta?.raw_payload as Record<string, unknown>).source, "balancing");
+
+  let threw = false;
+  try {
+    buildBalancingLineItem({ posted_at: "2026-01-01", amount: 1000, transaction_type: "expense" }, [
+      { title: "A", amount: 100 },
+    ]);
+  } catch (error) {
+    threw = true;
+    assertEquals(
+      error instanceof Error ? error.message : "",
+      "Receipt total does not match transaction amount",
+    );
+  }
+  assertEquals(threw, true);
 });
 
 Deno.test(
