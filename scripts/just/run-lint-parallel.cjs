@@ -27,6 +27,7 @@ const LINT_RECIPES = [
   "quality-lint-extension",
   "quality-lint-scripts",
   "quality-lint-supabase-functions",
+  "test-smell-lint",
 ];
 
 function resolveParallelism() {

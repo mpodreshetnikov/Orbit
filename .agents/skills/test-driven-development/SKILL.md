@@ -361,6 +361,20 @@ When adding mocks or test utilities, read @testing-anti-patterns.md to avoid com
 - Adding test-only methods to production classes
 - Mocking without understanding dependencies
 
+## High-signal tests (Orbit)
+
+Line/branch % proves a line ran, not that a fault would fail the test. Before claiming test work done:
+
+- A test is incomplete until a deliberate fault (manual edit or `test-mutation`) makes it fail.
+- Never generate oracles that only “match current implementation output” without an independent
+  expected value from the requirement, schema, or shared fixture.
+- Prefer one behavioural assertion over many structural ones (call order, className, HTML shape).
+- Mock at I/O boundaries only; never mock the module under test.
+- Ban as primary oracle: `toBeTruthy` / `toBeDefined` / lone `toContain` on markup or strings;
+  mock `toHaveBeenCalled*` without a result assertion. See vitest skill + `test-smell-lint`.
+- Dual SQL/TS rules: follow `docs/design/common/sql-ts-parity.md` — shared fixtures, both twins
+  assert the same cases.
+
 ## Final Rule
 
 ```

@@ -76,6 +76,7 @@
     "eslint-config-next": "^15.5.25",
     "eslint-import-resolver-typescript": "^4.4.4",
     "eslint-plugin-import": "^2.32.0",
+    "fast-check": "^4.10.2",
     "jsdom": "^28.1.0",
     "postcss": "^8.5.26",
     "prettier": "^3.6.2",

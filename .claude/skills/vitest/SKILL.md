@@ -50,3 +50,22 @@ Vitest is a next-generation testing framework powered by Vite. It provides a Jes
 | Environments | Test environments: node, jsdom, happy-dom, custom | [advanced-environments](references/advanced-environments.md) |
 | Type Testing | Type-level testing with expectTypeOf and assertType | [advanced-type-testing](references/advanced-type-testing.md) |
 | Projects | Multi-project workspaces, different configs per project | [advanced-projects](references/advanced-projects.md) |
+
+## High-signal tests (Orbit)
+
+Orbit agents write most Vitest suites. Prefer tests that would fail under a realistic fault:
+
+1. **Mock at I/O only** (Supabase, fetch, LLM). Never mock the SUT; never assert mock call order as
+   the sole proof of a business rule.
+2. **Oracles:** ban as primary proof — `toBeTruthy` / `toBeDefined` / lone `toContain` on HTML or
+   free text. Prefer concrete values, schemas, roles/text the user sees, or shared fixtures.
+3. **Smell lint:** `just test-smell-lint` (warn by default; `ORBIT_TEST_SMELL_FAIL=1` to gate). Do
+   not add new smells; suppress only with `// test-smell-ok: <reason>` on the expect line.
+4. **Pure functions:** table-driven examples plus optional **`fast-check`** properties with explicit
+   ranges. Pilots: `src/lib/mcp/zoned-time.property.test.ts`,
+   `src/lib/money/rule-filter-text.property.test.ts`.
+5. **SQL↔TS twins:** when the same rule exists in SQL and TS, follow
+   `docs/design/common/sql-ts-parity.md` (shared fixtures; do not re-encode SQL in the TS test).
+6. **Mutation:** when available, `test-mutation` is **required** and must report **100%** killed
+   mutants on the mutate surface — not advisory, not a nightly/full/baseline side lane. See
+   `relevant-quality-checks`.

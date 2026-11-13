@@ -22,6 +22,18 @@ Use this skill whenever a task edits repository files.
 8. If a check remains `blocked`, always provide a concrete reason explaining why it is an external blocker.
 9. Use command IDs in communication (`ci`, `db-test`) and map to concrete commands via `AGENTS.md`.
 
+## High-signal / mutation (Orbit)
+
+After changing tests or pure logic under Vitest:
+
+1. Run `test-smell-lint` (warn by default; do not add new smells).
+2. Prefer concrete oracles over presence/`toContain`/mock-call-only expects (vitest + TDD skills).
+3. When `test-mutation` is available on the tree: run it and require **100%** mutation score on
+   the mutate surface before claiming the test work done. Report survivors if any — do not treat
+   `coverage-check` green alone as proof. There is **no** advisory mutation lane, **no** nightly
+   full run, and **no** separate baseline/full command IDs to prefer over `test-mutation`.
+4. Dual SQL/TS rules: `docs/design/common/sql-ts-parity.md`.
+
 ## Final Report Contract
 
 Include this checklist in the final task response:
