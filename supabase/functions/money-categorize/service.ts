@@ -414,7 +414,8 @@ function getFilterRawValue(
   }
 }
 
-function evaluateRuleFilter(
+/** Exported for operator/parity unit tests (T-261113-qgz). */
+export function evaluateRuleFilter(
   context: MoneyCategoryRuleContext,
   state: CategoryState,
   filter: MoneyCategoryRuleFilter,

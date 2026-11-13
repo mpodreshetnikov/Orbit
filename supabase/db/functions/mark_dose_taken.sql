@@ -24,6 +24,13 @@ BEGIN
     RAISE EXCEPTION 'Not authenticated';
   END IF;
 
+  -- SECURITY DEFINER bypasses RLS; refuse non-allowlisted authenticated callers
+  -- the same way money category RPCs do (T-261113-qgz).
+  IF COALESCE(current_setting('role', true), '') = 'authenticated'
+    AND NOT public.is_allowed_user() THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
   SELECT e.id, e.regimen_id, e.planned_intake, e.actual_at
   INTO v_event
   FROM public.med_dose_events e

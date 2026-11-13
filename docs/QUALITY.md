@@ -25,6 +25,7 @@ Use the full command list in **AGENTS.md** and `just --list --unsorted`. For day
 - CI runs `test-e2e` when change impact includes web, DB, or Supabase Edge Functions surfaces.
 - **`quality`**: static checks only (format, lint, typecheck). No builds or tests.
 - **`test-extraction`**: scored extraction quality against the fixture corpus in `test/fixtures/extraction/`. See "Extraction quality" below. **Not a gate** — it is not part of `ci`, `ci-fast`, `check` or `coverage-check`, and it never runs on a pull request.
+- **`test-mutation`** / **`test-mutation-baseline`** / **`test-mutation-full`**: Stryker mutation testing on Vitest-covered JS/TS. **Not a gate** — advisory only (`thresholds.break: null`); see `docs/design/common/mutation-testing.md`. Do not put these in the fast PR Quality Gates job.
 
 ## Extraction quality
 

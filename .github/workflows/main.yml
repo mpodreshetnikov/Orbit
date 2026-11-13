@@ -391,6 +391,10 @@ jobs:
           path: .cache/docker/supabase-images
           key: ${{ steps.supabase-image-cache.outputs.cache-primary-key }}
       - name: Test and coverage
+        env:
+          # Owner locale (no DST). Attention/date-fns formatting and spend-draft TZ tests
+          # must pass under this zone (T-261113-qgz).
+          TZ: Asia/Krasnoyarsk
         run: just test-unit-coverage && just coverage-check
 
   extension-release-bundle:

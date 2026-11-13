@@ -195,15 +195,15 @@ quality-smoke-build: web-build-production
 
 # Run web unit tests across client and server runtime projects.
 test-unit-web:
-  npx vitest run --project web --project web-server
+  TZ="${TZ:-Asia/Krasnoyarsk}" npx vitest run --project web --project web-server
 
 # Run extension unit tests (core + popup UI).
 test-unit-ext:
-  npx vitest run --project extension-core --project extension-ui
+  TZ="${TZ:-Asia/Krasnoyarsk}" npx vitest run --project extension-core --project extension-ui
 
 # Run node/runtime-agnostic unit tests.
 test-unit-node:
-  npx vitest run --project node
+  TZ="${TZ:-Asia/Krasnoyarsk}" npx vitest run --project node
 
 # Run Supabase Edge Function unit tests under Deno.
 test-unit-functions:
@@ -211,15 +211,26 @@ test-unit-functions:
 
 # Run fast unit tests across all non-DB surfaces.
 test-unit:
-  npx vitest run
+  TZ="${TZ:-Asia/Krasnoyarsk}" npx vitest run
   deno test --allow-env --allow-read --config supabase/functions/deno.json supabase/functions
 
 # Run unit tests with coverage reports.
 test-unit-coverage:
-  npx vitest run --coverage --retry=1
+  TZ="${TZ:-Asia/Krasnoyarsk}" npx vitest run --coverage --retry=1
   deno test --allow-env --allow-read --config supabase/functions/deno.json supabase/functions
   deno test --allow-env --allow-read --config supabase/functions/deno.json --coverage=.coverage/deno supabase/functions
   node scripts/just/coverage-report.cjs
+
+# Mutation testing (Stryker). Advisory — not part of quality / ci-fast / PR Quality Gates.
+# See docs/design/common/mutation-testing.md.
+test-mutation:
+  node scripts/just/run-mutation.cjs
+
+test-mutation-baseline:
+  node scripts/just/run-mutation.cjs --baseline
+
+test-mutation-full:
+  node scripts/just/run-mutation.cjs --full
 
 # Run end-to-end product flow checks in deterministic no-external-LLM mode where applicable.
 test-e2e:

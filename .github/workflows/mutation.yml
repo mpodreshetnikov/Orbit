@@ -1,0 +1,55 @@
+name: Mutation (advisory)
+
+# Stryker incremental mutation. Never required by branch protection / Quality Gates.
+# Failures here are informational (or runner breakage); thresholds.break is null.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "src/**"
+      - "browserExtension/**"
+      - "scripts/**"
+      - "native/**"
+      - "stryker.config.mjs"
+      - "vitest.config.ts"
+      - "package-lock.json"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mutation:
+    name: Stryker incremental (advisory)
+    runs-on: ubuntu-24.04
+    # Do not fail the workflow status for a low score — only for runner crashes.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: taiki-e/install-action@just
+      - name: Install dependencies
+        run: npm ci
+      - name: Run incremental mutation
+        env:
+          TZ: Asia/Krasnoyarsk
+          STRYKER_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || 'origin/main' }}
+          CI: "true"
+        run: just test-mutation
+      - name: Upload mutation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-report
+          path: |
+            reports/mutation/
+          if-no-files-found: ignore
+          retention-days: 14

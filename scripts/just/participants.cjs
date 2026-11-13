@@ -28,7 +28,9 @@ const PARTICIPANTS = [
 
 const OWNER_CLAIM_EMAILS = new Set(
   PARTICIPANTS.flatMap((p) =>
-    p.emails.filter((e) => !e.toLowerCase().endsWith("@users.noreply.github.com")),
+    p.emails
+      .filter((e) => !e.toLowerCase().endsWith("@users.noreply.github.com"))
+      .map((e) => e.toLowerCase()),
   ),
 );
 

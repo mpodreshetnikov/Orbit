@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "mode": "baseline",
+  "generatedAt": "2026-11-13T07:06:28.133Z",
+  "mutationScore": 54.35,
+  "mutationScoreCovered": 63.7,
+  "killed": 437,
+  "survived": 249,
+  "noCoverage": 118,
+  "timeout": 0,
+  "runtimeErrors": 0,
+  "totalMutants": 804,
+  "files": [
+    "scripts/just/participants.cjs",
+    "src/lib/mcp/money/spend-draft.ts",
+    "src/lib/mcp/money/transactions.ts",
+    "src/lib/mcp/apps/record-draft-page.ts",
+    "src/lib/mcp/apps/checkup-draft-page.ts",
+    "src/lib/mcp/apps/category-draft-page.ts",
+    "src/lib/mcp/apps/spend-draft-page.ts"
+  ],
+  "note": "Honest baseline from just test-mutation-baseline on 2026-11-13 (T-261113-qgz). Advisory only; thresholds.break remains null.",
+  "command": "just test-mutation-baseline"
+}

@@ -12,6 +12,10 @@ describe("participant allowlist (D9/D14)", () => {
     expect(participantOwnerProblem("mpodreshetnikov@gmail.com")).toBeNull();
   });
 
+  it("matches claim emails case-insensitively via lowercased OWNER_CLAIM_EMAILS", () => {
+    expect(participantOwnerProblem("MPodreshetnikov@Gmail.COM")).toBeNull();
+  });
+
   it("refuses agent as executor/owner", () => {
     expect(participantOwnerProblem("cursoragent@cursor.com")).toMatch(/agent/i);
     expect(EXTRA_REJECTED_AGENT_MAILBOXES).toContain("cursoragent@cursor.com");

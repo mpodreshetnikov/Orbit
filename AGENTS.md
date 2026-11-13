@@ -38,6 +38,9 @@ Use these command IDs in plans, PRs, and handoffs:
 - `test-unit-functions`: `just test-unit-functions`
 - `test-unit`: `just test-unit` (all fast runtime-split unit lanes)
 - `test-unit-coverage`: `just test-unit-coverage`
+- `test-mutation`: `just test-mutation` (Stryker incremental vs base; advisory — not in the fast PR gate)
+- `test-mutation-baseline`: `just test-mutation-baseline` (critical-path mutate set for a quick score)
+- `test-mutation-full`: `just test-mutation-full` (full Vitest mutate surface; slow)
 - `test-e2e`: `just test-e2e` (Playwright end-to-end lane for real local product flows; includes extraction coverage and runs in deterministic no-external-LLM mode where applicable)
 - `test-extraction`: `just test-extraction` (scored extraction quality against the fixture corpus; replays recordings by default, does not gate CI)
 - `coverage-report`: `just coverage-report`
