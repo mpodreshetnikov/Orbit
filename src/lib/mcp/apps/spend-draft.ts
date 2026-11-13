@@ -1,9 +1,11 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
+import { readTimezonePreference } from "@/lib/medications/regenerate-dose-events";
 import {
   applySpendDraft,
   buildCreateSpendDraft,
   buildEditSpendDraft,
+  resolveSpendDraftTimeZone,
   spendDraftSummaryText,
   type SpendCreateInput,
   type SpendEditInput,
@@ -229,8 +231,11 @@ export function registerSpendDraftApp(
       annotations: { readOnlyHint: true, openWorldHint: false },
       _meta: cardMeta,
     },
-    withPerson<CreateArgs>(async (supabase, person, args) => {
-      const built = await buildCreateSpendDraft(supabase, person, args);
+    withPerson<CreateArgs>(async (supabase, person, args, auth) => {
+      const preferred = await readTimezonePreference(supabase, auth.authUserId);
+      const built = await buildCreateSpendDraft(supabase, person, args, {
+        timeZone: resolveSpendDraftTimeZone(preferred),
+      });
       if (!built.ok) return fail(built.error);
       return ok(proposeResultText(built.draft), { spend_draft: built.draft });
     }, MONEY_READ_SCOPE),
@@ -249,8 +254,11 @@ export function registerSpendDraftApp(
       annotations: { readOnlyHint: true, openWorldHint: false },
       _meta: cardMeta,
     },
-    withPerson<EditArgs>(async (supabase, person, args) => {
-      const built = await buildEditSpendDraft(supabase, person, args);
+    withPerson<EditArgs>(async (supabase, person, args, auth) => {
+      const preferred = await readTimezonePreference(supabase, auth.authUserId);
+      const built = await buildEditSpendDraft(supabase, person, args, {
+        timeZone: resolveSpendDraftTimeZone(preferred),
+      });
       if (!built.ok) return fail(built.error);
       return ok(proposeResultText(built.draft), { spend_draft: built.draft });
     }, MONEY_READ_SCOPE),

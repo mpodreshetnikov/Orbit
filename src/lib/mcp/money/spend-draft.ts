@@ -14,6 +14,7 @@ import type {
   MoneyTransactionType,
   UpdateMoneyTransactionInput,
 } from "@/types/money";
+import { isValidTimeZone } from "@/lib/mcp/local-day";
 import { listMoneyAccounts, listMoneyCategories } from "./transactions";
 
 type MoneyTransactionInsert = Database["public"]["Tables"]["money_transactions"]["Insert"];
@@ -117,7 +118,20 @@ export function formatMoneyAmount(amount: number, currency: string): string {
   return `${sign}${amount.toFixed(2)} ${currency}`;
 }
 
-function russianDateTime(iso: string): string {
+/**
+ * Display zone for `posted_at_label`. Same contract as money MCP reads: saved preference
+ * when valid, otherwise UTC — never print the word "UTC" in the label itself.
+ */
+export type SpendDraftBuildOptions = {
+  timeZone?: string | null;
+};
+
+export function resolveSpendDraftTimeZone(timeZone?: string | null): string {
+  const trimmed = timeZone?.trim() || null;
+  return trimmed && isValidTimeZone(trimmed) ? trimmed : "UTC";
+}
+
+function russianDateTime(iso: string, timeZone?: string | null): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
   return date.toLocaleString("ru-RU", {
@@ -126,6 +140,7 @@ function russianDateTime(iso: string): string {
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: resolveSpendDraftTimeZone(timeZone),
   });
 }
 
@@ -234,6 +249,7 @@ export async function buildCreateSpendDraft(
   supabase: Client,
   person: { id: string; name: string },
   input: SpendCreateInput,
+  options?: SpendDraftBuildOptions,
 ): Promise<{ ok: true; draft: SpendDraftView } | { ok: false; error: string }> {
   if (!Number.isFinite(input.amount)) {
     return { ok: false, error: "amount must be a finite number." };
@@ -266,6 +282,7 @@ export async function buildCreateSpendDraft(
     comment: input.comment?.trim() || null,
     line_items: serializeLines(input.line_items ?? []),
   };
+  const timeZone = resolveSpendDraftTimeZone(options?.timeZone);
 
   return {
     ok: true,
@@ -275,7 +292,7 @@ export async function buildCreateSpendDraft(
       person_name: person.name,
       transaction_id: null,
       account_label: account.account_label,
-      posted_at_label: russianDateTime(normalized.posted_at),
+      posted_at_label: russianDateTime(normalized.posted_at, timeZone),
       amount_label: formatMoneyAmount(normalized.amount, currency),
       type_label: TYPE_LABELS[normalized.transaction_type],
       merchant_name: normalized.merchant_name ?? null,
@@ -291,6 +308,7 @@ export async function buildEditSpendDraft(
   supabase: Client,
   person: { id: string; name: string },
   input: SpendEditInput,
+  options?: SpendDraftBuildOptions,
 ): Promise<{ ok: true; draft: SpendDraftView } | { ok: false; error: string }> {
   const { data: existing, error } = await supabase
     .from("money_transactions")
@@ -375,12 +393,13 @@ export async function buildEditSpendDraft(
     line_items: serializeLines(lineSource),
   };
 
+  const timeZone = resolveSpendDraftTimeZone(options?.timeZone);
   const changes: string[] = [];
   if (accountId !== existing.account_id) {
     changes.push(`счёт → ${account.account_label}`);
   }
   if (postedAt.toISOString() !== new Date(existing.posted_at).toISOString()) {
-    changes.push(`дата → ${russianDateTime(normalized.posted_at!)}`);
+    changes.push(`дата → ${russianDateTime(normalized.posted_at!, timeZone)}`);
   }
   if (amount !== Number(existing.amount) || currency !== existing.currency) {
     changes.push(`сумма → ${formatMoneyAmount(amount, currency)}`);
@@ -406,7 +425,7 @@ export async function buildEditSpendDraft(
       person_name: person.name,
       transaction_id: existing.id,
       account_label: account.account_label,
-      posted_at_label: russianDateTime(normalized.posted_at!),
+      posted_at_label: russianDateTime(normalized.posted_at!, timeZone),
       amount_label: formatMoneyAmount(amount, currency),
       type_label: TYPE_LABELS[transactionType],
       merchant_name: merchant,

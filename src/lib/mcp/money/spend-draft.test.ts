@@ -170,6 +170,72 @@ describe("buildCreateSpendDraft", () => {
     });
     expect(built.ok).toBe(false);
   });
+
+  it("labels posted_at in Asia/Krasnoyarsk across the UTC day boundary (no DST)", async () => {
+    // Seed: local 00:55 +07 is previous calendar day 17:55Z — label must stay on the 13th.
+    const built = await buildCreateSpendDraft(
+      createClient({}),
+      PERSON,
+      {
+        account_id: "a-1",
+        posted_at: "2026-11-13T00:55:00+07:00",
+        amount: -120,
+        currency: "RUB",
+        transaction_type: "expense",
+        merchant_name: "Seed Cafe",
+      },
+      { timeZone: "Asia/Krasnoyarsk" },
+    );
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(built.draft.posted_at_label).toMatch(/13 ноября 2026/);
+    expect(built.draft.posted_at_label).toMatch(/00:55/);
+    expect(built.draft.posted_at_label).not.toMatch(/12 ноября/);
+    expect(built.draft.posted_at_label).not.toMatch(/17:55/);
+    expect(built.draft.posted_at_label).not.toMatch(/UTC/i);
+    // Storage instant stays UTC ISO; display-only fix.
+    expect(built.draft.input.posted_at).toBe("2026-11-12T17:55:00.000Z");
+  });
+
+  it("falls back to UTC wall clock when no owner timezone is available", async () => {
+    const built = await buildCreateSpendDraft(
+      createClient({}),
+      PERSON,
+      {
+        account_id: "a-1",
+        posted_at: "2026-11-13T00:55:00+07:00",
+        amount: -120,
+        currency: "RUB",
+        transaction_type: "expense",
+      },
+      { timeZone: null },
+    );
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(built.draft.posted_at_label).toMatch(/12 ноября 2026/);
+    expect(built.draft.posted_at_label).toMatch(/17:55/);
+    expect(built.draft.posted_at_label).not.toMatch(/UTC/i);
+  });
+
+  it("shows each provided line item in the preview, including a single position", async () => {
+    const built = await buildCreateSpendDraft(createClient({}), PERSON, {
+      account_id: "a-1",
+      posted_at: "2026-11-09T10:00:00.000Z",
+      amount: -350,
+      currency: "RUB",
+      transaction_type: "expense",
+      merchant_name: "Кофейня",
+      line_items: [{ title: "Латте", amount: -350, category_id: "c-food" }],
+    });
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(built.draft.lines).toHaveLength(1);
+    expect(built.draft.lines[0]).toMatchObject({
+      title: "Латте",
+      amount_label: "-350.00 RUB",
+      category_label: "Еда",
+    });
+  });
 });
 
 describe("buildEditSpendDraft", () => {

@@ -9,6 +9,9 @@ const spend = vi.hoisted(() => ({
   buildEditSpendDraft: vi.fn(),
   applySpendDraft: vi.fn(),
 }));
+const regen = vi.hoisted(() => ({
+  readTimezonePreference: vi.fn(),
+}));
 
 vi.mock("../money/spend-draft", async () => {
   const actual =
@@ -20,6 +23,9 @@ vi.mock("../money/spend-draft", async () => {
     applySpendDraft: spend.applySpendDraft,
   };
 });
+vi.mock("@/lib/medications/regenerate-dose-events", () => ({
+  readTimezonePreference: (...args: unknown[]) => regen.readTimezonePreference(...args),
+}));
 vi.mock("../supabase-user-client", () => ({
   createUserScopedSupabaseClient: vi.fn(() => ({}) as never),
 }));
@@ -140,6 +146,7 @@ function register() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  regen.readTimezonePreference.mockResolvedValue("Asia/Krasnoyarsk");
   spend.buildCreateSpendDraft.mockResolvedValue({ ok: true, draft: CREATE_DRAFT });
   spend.buildEditSpendDraft.mockResolvedValue({ ok: true, draft: EDIT_DRAFT });
   spend.applySpendDraft.mockResolvedValue({
@@ -205,6 +212,12 @@ describe("registerSpendDraftApp", () => {
   it("returns Markdown preview + text-fallback and writes nothing on propose", async () => {
     const result = await register().tools.get("propose_spend")!.handler(CREATE, moneyCtx);
     expect(result.isError).toBeFalsy();
+    expect(spend.buildCreateSpendDraft).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ id: "p-1" }),
+      expect.objectContaining({ account_id: CREATE.account_id }),
+      { timeZone: "Asia/Krasnoyarsk" },
+    );
     const text = result.content[0].text;
     expect(text).toContain("Кофейня Seed");
     expect(text).toContain("# Кофейня Seed");
