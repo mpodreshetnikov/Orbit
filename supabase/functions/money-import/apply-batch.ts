@@ -291,12 +291,11 @@ export async function applyPendingBatch(batchId: string, deps: ApplyBatchDeps): 
         card_id: resolvedCardId,
         brand_id: resolvedBrandId,
       };
-      const tx = await deps.repository.insertOrResolveTransaction(normalized, payerPersonId);
-
+      // Validate receipt composition before insert/resolve so a >50% imbalance never
+      // leaves an orphan transaction (outer catch reports transaction_id: null).
       const lineItems = normalizeLineItems(normalized);
-      // Validate balancing before any destructive repair: repair deletes stubs and cannot
-      // roll them back if this later throws.
       const balancing = buildBalancingLineItem(normalized, lineItems);
+      const tx = await deps.repository.insertOrResolveTransaction(normalized, payerPersonId);
 
       let blockedByManualEdit = false;
       // New txs and stub replacements need balancing; leave existing balancing when

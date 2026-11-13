@@ -1,6 +1,6 @@
 -- Explicit placeholder flag for synthetic whole-transaction stub line items.
--- Backfills extension stubs (raw_payload.source) and CSV-style single import stubs,
--- then cleans transactions where a stub already coexists with real receipt lines.
+-- Backfills only rows with synthetic provenance markers (extension/DOM sources or
+-- historical T-Bank CSV column keys). Does not mark genuine single-item receipts.
 
 ALTER TABLE public.money_line_items
   ADD COLUMN IF NOT EXISTS is_placeholder boolean NOT NULL DEFAULT false;
@@ -14,19 +14,23 @@ UPDATE public.money_line_items AS line_item
 SET is_placeholder = true
 WHERE COALESCE(line_item.raw_payload->>'source', '') IN ('fallback', 'dom_fallback');
 
--- CSV / empty-composition stubs: sole import line matching the transaction amount,
--- not locked by the user.
+-- Historical T-Bank CSV stubs: sole unlocked import line matching txn amount, with
+-- CSV column keys in raw_payload (not a receipt composition).
 UPDATE public.money_line_items AS line_item
 SET is_placeholder = true
 WHERE line_item.is_placeholder = false
   AND line_item.assignment_method = 'import'
-  AND line_item.import_hash IS NOT NULL
   AND line_item.category_locked_by_user = false
+  AND (
+    line_item.raw_payload ? 'Дата операции'
+    OR line_item.raw_payload ? 'Описание'
+  )
   AND EXISTS (
     SELECT 1
     FROM public.money_transactions AS tx
     WHERE tx.id = line_item.transaction_id
       AND tx.amount = line_item.amount
+      AND tx.source = 'tbank'
   )
   AND (
     SELECT count(*)::integer

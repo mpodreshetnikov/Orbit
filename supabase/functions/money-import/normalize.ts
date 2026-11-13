@@ -358,16 +358,15 @@ export const BALANCING_MAX_SHARE = 0.5;
 
 export function normalizeLineItems(row: CanonicalTransactionRowInput): ImportLineItemInput[] {
   if (Array.isArray(row.line_items) && row.line_items.length > 0) return row.line_items;
-  const basePayload = toObject(row.raw_payload) ?? {};
+  // Mark via is_placeholder only. Do not inject source:"fallback" into raw_payload —
+  // that would change buildLineItemImportHash and double stubs on re-import of
+  // pre-upgrade empty-composition rows.
   return [
     {
       title: row.merchant_name || "Imported",
       amount: row.amount,
       is_placeholder: true,
-      raw_payload: {
-        ...basePayload,
-        source: "fallback",
-      },
+      raw_payload: row.raw_payload ?? null,
     },
   ];
 }

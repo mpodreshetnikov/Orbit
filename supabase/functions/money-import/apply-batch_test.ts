@@ -14,6 +14,7 @@ interface ApplyBatchRepoState {
     lineItem: Record<string, unknown>;
   }>;
   insertLineItemCalls: number;
+  insertOrResolveCalls: number;
   appliedCategoryPipelineCalls: Array<{ lineItemIds: string[] }>;
 }
 
@@ -37,6 +38,7 @@ function createRepositoryMock(
     repairedTransactions: [],
     insertedLineItems: [],
     insertLineItemCalls: 0,
+    insertOrResolveCalls: 0,
     appliedCategoryPipelineCalls: [],
   };
 
@@ -78,6 +80,7 @@ function createRepositoryMock(
     findExistingTransactionId: async () => null,
     findExistingLineItemId: async () => null,
     insertOrResolveTransaction: async (row) => {
+      state.insertOrResolveCalls += 1;
       if (options.resolveTransaction) return await options.resolveTransaction(row);
       if (row.external_id === "dup-synth" || row.external_id === "dup-csv") {
         return { transactionId: "tx-existing", inserted: false };
@@ -329,13 +332,47 @@ Deno.test(
 
     const payload = await assertJsonResponse<{
       error_count: number;
-      row_results: Array<{ status: string; message: string | null }>;
+      row_results: Array<{
+        status: string;
+        message: string | null;
+        transaction_id?: string | null;
+      }>;
     }>(await applyPendingBatch("batch-1", { repository }), 200);
 
     assertEquals(payload.error_count, 1);
     assertEquals(payload.row_results[0].status, "error");
     assertEquals(payload.row_results[0].message, "Receipt total does not match transaction amount");
+    assertEquals(payload.row_results[0].transaction_id, null);
+    assertEquals(state.insertOrResolveCalls, 0);
     assertEquals(state.repairedTransactions.length, 0);
+    assertEquals(state.insertLineItemCalls, 0);
+  },
+);
+
+Deno.test(
+  "applyPendingBatch rejects oversized imbalance before inserting a new transaction",
+  async () => {
+    const { repository, state } = createRepositoryMock({
+      batchRows: [
+        previewTxRow({
+          external_id: "fresh-imbalance",
+          amount: 1000,
+          line_items: [{ title: "Wrong receipt", amount: 100, raw_payload: { source: "receipt" } }],
+        }),
+      ],
+    });
+
+    const payload = await assertJsonResponse<{
+      inserted: number;
+      error_count: number;
+      row_results: Array<{ status: string; transaction_id?: string | null }>;
+    }>(await applyPendingBatch("batch-1", { repository }), 200);
+
+    assertEquals(payload.inserted, 0);
+    assertEquals(payload.error_count, 1);
+    assertEquals(payload.row_results[0].status, "error");
+    assertEquals(payload.row_results[0].transaction_id, null);
+    assertEquals(state.insertOrResolveCalls, 0);
     assertEquals(state.insertLineItemCalls, 0);
   },
 );

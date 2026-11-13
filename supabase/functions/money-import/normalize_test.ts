@@ -54,11 +54,45 @@ Deno.test("normalizeTransactionRow fills defaults and normalizes fields", () => 
   assertEquals(normalized.merchant_name, "Shop");
   assertEquals(normalized.line_items?.length, 1);
   assertEquals(normalized.line_items?.[0]?.is_placeholder, true);
-  assertEquals(
-    (normalized.line_items?.[0]?.raw_payload as Record<string, unknown> | null)?.source,
-    "fallback",
-  );
+  // raw_payload must stay unchanged so import_hash matches pre-upgrade stubs
+  assertEquals(normalized.line_items?.[0]?.raw_payload, null);
 });
+
+Deno.test(
+  "normalizeLineItems fallback preserves raw_payload for import_hash stability",
+  async () => {
+    const rawPayload = { description: "Cafe", amount: 10 };
+    const lineItem = normalizeLineItems({
+      posted_at: "2026-01-01",
+      amount: 10,
+      merchant_name: "Cafe",
+      transaction_type: "expense",
+      raw_payload: rawPayload,
+    })[0];
+    assertEquals(lineItem.is_placeholder, true);
+    assertEquals(lineItem.raw_payload, rawPayload);
+    assertEquals((lineItem.raw_payload as Record<string, unknown> | null)?.source, undefined);
+
+    const hash = await buildLineItemImportHash("tx-1", lineItem, 0);
+    const legacyHash = await buildLineItemImportHash(
+      "tx-1",
+      { title: "Cafe", amount: 10, raw_payload: rawPayload },
+      0,
+    );
+    assertEquals(hash, legacyHash);
+
+    const mutatedHash = await buildLineItemImportHash(
+      "tx-1",
+      {
+        title: "Cafe",
+        amount: 10,
+        raw_payload: { ...rawPayload, source: "fallback" },
+      },
+      0,
+    );
+    assertEquals(hash === mutatedHash, false);
+  },
+);
 
 Deno.test("isSyntheticImportLineItem recognizes placeholder flag and legacy sources", () => {
   assertEquals(isSyntheticImportLineItem({ is_placeholder: true, title: "CSV" }), true);
