@@ -3056,6 +3056,17 @@ export type Database = {
         }
         Returns: Json
       }
+      money_list_line_item_discrepancies: {
+        Args: { p_min_delta?: number; p_person_id: string }
+        Returns: {
+          amount: number
+          delta: number
+          line_items_sum: number
+          merchant_name: string
+          posted_at: string
+          transaction_id: string
+        }[]
+      }
       money_list_transactions_feed: {
         Args: {
           p_account_ids?: string[]
