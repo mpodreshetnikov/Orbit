@@ -15,10 +15,8 @@
  * choose its branch name, and a correctly behaved feature branch contains no registry change at all,
  * because `task-status-sync` publishes every claim straight to `main`.
  *
- * It never blocks. Like `pr-size-hook.cjs` it emits `additionalContext`, which reaches the model as
- * information rather than as a refusal: the answer to work without a task is a decision the agent
- * makes -- claim one, or create one after the duplicate search and the user's confirmation -- not
- * a refused edit. Whether it earns teeth later is decided on whether these warnings are ignored.
+ * For local human sessions it still emits `additionalContext` (advisory). For agent/cloud sessions
+ * (D9 / T-261113-o9b) it hard-fails: PreToolUse denies the edit, and `pre-commit --git` exits 1.
  *
  * It also runs around `Bash`, which is the other way a file changes. Before the command it
  * snapshots HEAD and the working tree's status (`--pre`); after it, the paths that differ from that
@@ -35,7 +33,7 @@
  * `project-hooks-bridge.cjs` (T-260902-jxe). The check also runs as a git `pre-commit` hook (`--git`,
  * from `.githooks/pre-commit`), for whatever commits here without Claude Code's hooks. The verdict
  * is the same; it judges the staged paths outside `docs/tasks/`, goes to stderr, where the command's
- * output carries it back, is not throttled, and never refuses the commit.
+ * output carries it back. For agent/cloud sessions it refuses the commit (exit 1).
  *
  * Reported once per verdict per REPORT_INTERVAL_MS, tracked in .git/task-claim-hook-state, so a
  * fresh session hears it on its first code edit and then is left alone until the situation changes.
@@ -385,13 +383,45 @@ function verdictNow() {
   });
 }
 
-/** The pre-commit end: no hook input on stdin, nothing throttled, never a refusal. */
+function isAgentSession(env = process.env) {
+  // Match agent-env-check: local Claude (CLAUDECODE / AI_AGENT=claude-code_*) is an agent too.
+  const aiAgent = typeof env.AI_AGENT === "string" ? env.AI_AGENT : "";
+  return (
+    env.CURSOR_AGENT === "1" ||
+    env.CURSOR_CODE_REMOTE === "true" ||
+    env.CLAUDE_CODE_REMOTE === "true" ||
+    env.CLAUDECODE === "1" ||
+    aiAgent.startsWith("claude-code_") ||
+    Boolean(env.CODEX_THREAD_ID || env.CODEX_SESSION_ID || env.CODEX_CI === "1") ||
+    (typeof env.CODEX_SANDBOX === "string" && env.CODEX_SANDBOX.length > 0)
+  );
+}
+
+/** The pre-commit end: advisory for humans; refuse for agent/cloud (D9). */
 function mainGit() {
   const staged = stagedPathsOutsideRegistry(REPO_ROOT);
   if (staged.length === 0) return;
   const result = verdictNow();
   if (result.verdict === "claimed") return;
-  process.stderr.write(`task-claim (pre-commit): ${message(result, describePaths(staged))}\n`);
+  const text = `task-claim (pre-commit): ${message(result, describePaths(staged))}`;
+  process.stderr.write(`${text}\n`);
+  if (isAgentSession()) {
+    process.stderr.write(
+      "task-claim (pre-commit): REFUSED for agent/cloud session — claim an in-progress participant task first (D9).\n",
+    );
+    process.exit(1);
+  }
+}
+
+function denyPayload(hookEventName, reason) {
+  return {
+    hookSpecificOutput: {
+      hookEventName,
+      permissionDecision: "deny",
+      permissionDecisionReason: reason,
+      additionalContext: reason,
+    },
+  };
 }
 
 function main() {
@@ -401,9 +431,32 @@ function main() {
   }
   const input = readInput();
   const snapshotPath = preSnapshotPath(input.tool_use_id ?? input.session_id ?? "");
+  const hookEventName =
+    typeof input.hook_event_name === "string" && input.hook_event_name
+      ? input.hook_event_name
+      : process.argv.includes("--pre")
+        ? "PreToolUse"
+        : "PostToolUse";
+
   if (process.argv.includes("--pre")) {
-    if (!input.tool_name || SHELL_TOOLS.has(input.tool_name))
+    // Snapshot for Bash, and hard-deny Edit/Write for agent sessions without a claim (D9).
+    if (!input.tool_name || SHELL_TOOLS.has(input.tool_name)) {
       writePreSnapshot(REPO_ROOT, snapshotPath);
+    }
+    if (input.tool_name && EDIT_TOOLS.has(input.tool_name) && isAgentSession()) {
+      const filePath = input.tool_input?.file_path ?? input.tool_input?.notebook_path ?? "";
+      if (!isRegistryPath(filePath)) {
+        const result = verdictNow();
+        if (result.verdict !== "claimed") {
+          const reason = `task-claim: REFUSED. ${message(
+            result,
+            filePath ? path.relative(REPO_ROOT, path.resolve(REPO_ROOT, filePath)) : "(edit)",
+          )}`;
+          process.stdout.write(`${JSON.stringify(denyPayload(hookEventName, reason))}\n`);
+          process.exit(0);
+        }
+      }
+    }
     return;
   }
   let filePath = "";
@@ -421,18 +474,20 @@ function main() {
   const result = verdictNow();
   if (result.verdict === "claimed") return;
 
+  const reason = message(result, filePath);
+  if (isAgentSession()) {
+    process.stdout.write(
+      `${JSON.stringify(denyPayload(hookEventName, `task-claim: REFUSED. ${reason}`))}\n`,
+    );
+    return;
+  }
+
   const key = [result.verdict, result.id ?? "", result.status ?? ""].join(":");
   if (!shouldReport(key, statePathFor(input.session_id ?? ""))) return;
 
-  // The output names the event it answers; a PostToolUseFailure hook that said PostToolUse would
-  // be rejected rather than read.
-  const hookEventName =
-    typeof input.hook_event_name === "string" && input.hook_event_name
-      ? input.hook_event_name
-      : "PostToolUse";
   process.stdout.write(
     `${JSON.stringify({
-      hookSpecificOutput: { hookEventName, additionalContext: message(result, filePath) },
+      hookSpecificOutput: { hookEventName, additionalContext: reason },
     })}\n`,
   );
 }
@@ -449,8 +504,10 @@ module.exports = {
   EDIT_TOOLS,
   REPORT_INTERVAL_MS,
   changedPathsOutsideRegistry,
+  denyPayload,
   evaluate,
   gitPath,
+  isAgentSession,
   preSnapshotPath,
   readPreSnapshot,
   statePathFor,

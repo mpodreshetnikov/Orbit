@@ -1,10 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-# Advisory only: it never blocks a commit. The limit is enforced on pre-push and in CI; what this
-# adds is meeting it while the cut can still be changed. A branch that first hears about the limit
-# when CI fails is a finished branch, and the cheapest-looking answer then is to slice it into
-# pieces that do not stand on their own -- which is the one answer docs/QUALITY.md rules out.
+# Advisory size check for humans; claim + authorship hard-fail for agent/cloud (D9/D13).
 
 if ! command -v node >/dev/null 2>&1; then
   exit 0
@@ -12,7 +9,11 @@ fi
 
 node scripts/just/check-pr-size.cjs --advisory || true
 
-# Also advisory: reports a commit outside docs/tasks/ that no in-progress task stands behind. This is
-# the end of the claim check a cloud session holding several repositories still meets, since it loads
-# no hooks from .claude/settings.json; see the header of scripts/just/task-claim-hook.cjs.
-node scripts/just/task-claim-hook.cjs --git || true
+# Claim gate: reports for humans; exits 1 for agent/cloud without an in-progress claim (D9).
+node scripts/just/task-claim-hook.cjs --git
+
+# Authorship: strip agent trailers is commit-msg; here refuse agent author on the index tip identity.
+# commit-msg hook does the message scrub when installed beside this file.
+if [ -f scripts/just/human-authorship.cjs ]; then
+  :
+fi

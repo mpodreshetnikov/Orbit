@@ -14,6 +14,8 @@ const { bridgePathIn, check, escapeRegExp, missingCursorEvents, missingEvents, u
       home: string;
       repoRoot?: string;
       exists?: (file: string) => boolean;
+      /** When false, skip orbit-tasks dual-repo extras (harness-only fixtures). Default true. */
+      requireDualRepo?: boolean;
     }) => { ok: boolean; message: string };
     escapeRegExp: (value: string) => string;
     missingCursorEvents: (
@@ -192,7 +194,10 @@ describe("the check", () => {
 
   it("passes a Claude cloud session whose environment ran the documented block", () => {
     const home = homeFromDocumentedBlock();
-    expect(check({ env: { CLAUDE_CODE_REMOTE: "true" }, home }).ok).toBe(true);
+    // Dual-repo (orbit-tasks) is asserted separately; this fixture only covers harness hooks.
+    expect(check({ env: { CLAUDE_CODE_REMOTE: "true" }, home, requireDualRepo: false }).ok).toBe(
+      true,
+    );
   });
 
   it("refuses when the Claude block names a bridge that is not there", () => {
@@ -227,7 +232,9 @@ describe("the check", () => {
     fs.mkdirSync(hooksDir, { recursive: true });
     fs.writeFileSync(path.join(hooksDir, ".dispatcher"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
     expect(installCursorGitHooks({ repoRoot, home }).ok).toBe(true);
-    expect(check({ env: { CURSOR_AGENT: "1" }, home, repoRoot }).ok).toBe(true);
+    expect(check({ env: { CURSOR_AGENT: "1" }, home, repoRoot, requireDualRepo: false }).ok).toBe(
+      true,
+    );
   });
 
   it("does not apply outside the cloud", () => {
@@ -290,13 +297,20 @@ describe("the check", () => {
     const home = homeFromDocumentedCodexBlock(
       path.join(repoRoot, "scripts", "just", "project-hooks-bridge.cjs"),
     );
-    expect(check({ env: { CODEX_CI: "1" }, home, repoRoot }).ok).toBe(true);
+    expect(check({ env: { CODEX_CI: "1" }, home, repoRoot, requireDualRepo: false }).ok).toBe(true);
   });
 
   it("passes a Codex session when the shipped project .codex/hooks.json covers the bridge", () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-env-check-codex-project-"));
     temporaries.push(home);
-    expect(check({ env: { CODEX_SANDBOX: "seatbelt" }, home, repoRoot: ORBIT_ROOT }).ok).toBe(true);
+    expect(
+      check({
+        env: { CODEX_SANDBOX: "seatbelt" },
+        home,
+        repoRoot: ORBIT_ROOT,
+        requireDualRepo: false,
+      }).ok,
+    ).toBe(true);
   });
 
   it("exits 1 on a Claude refusal, which is what CLAUDE.md and tasks-claim stop on", () => {

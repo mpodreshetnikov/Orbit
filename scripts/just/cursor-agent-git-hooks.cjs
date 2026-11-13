@@ -27,7 +27,7 @@ const REPO_ROOT = process.env.CURSOR_AGENT_GIT_HOOKS_REPO_ROOT
   ? path.resolve(process.env.CURSOR_AGENT_GIT_HOOKS_REPO_ROOT)
   : path.resolve(__dirname, "..", "..");
 
-const HOOK_NAMES = ["pre-commit", "pre-push"];
+const HOOK_NAMES = ["pre-commit", "pre-push", "commit-msg"];
 
 /** Cursor's encoding of an absolute repo path for `~/.cursor/agent-hooks/<id>/`. */
 function agentHooksId(repoRoot) {
@@ -116,9 +116,12 @@ function gitHooksProblem({
   if (!fs.existsSync(hooksDir)) {
     return `${hooksDir} is missing (Cursor agent-hooks not installed for this checkout).`;
   }
-  const prePush = path.join(hooksDir, "pre-push");
-  if (!fs.existsSync(prePush)) {
-    return `${prePush} is missing, so git never runs the push gate.`;
+  for (const name of HOOK_NAMES) {
+    if (!fs.existsSync(path.join(githooksDir, name))) continue;
+    const link = path.join(hooksDir, name);
+    if (!fs.existsSync(link)) {
+      return `${link} is missing, so git never runs .githooks/${name}.`;
+    }
   }
   let original = "";
   try {
