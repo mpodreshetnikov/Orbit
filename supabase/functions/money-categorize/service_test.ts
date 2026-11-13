@@ -120,6 +120,7 @@ function createContext(input: {
       id: transactionId,
       payer_person_id: "person-1",
       account_id: "account-1",
+      card_id: null,
       source: "tbank",
       posted_at: "2026-03-10T10:00:00.000Z",
       amount: input.amount ?? 450,
@@ -138,15 +139,31 @@ function createContext(input: {
       raw_payload: {},
     },
     account: {
+      id: "account-1",
       source: "tbank",
       account_kind: "debit",
+      account_label: "Main",
+    },
+    card: {
+      id: null,
+      last4: null,
+      card_label: null,
+    },
+    brand: {
+      id: null,
+      name: null,
+      slug: null,
     },
     current_category: {
       id: currentCategoryId,
       kind: currentCategoryKind,
+      name_en: currentCategoryKind ? "Food" : null,
+      name_ru: currentCategoryKind ? "Еда" : null,
+      system_key: currentCanonicalSystemKey,
       canonical_category_id: currentCanonicalCategoryId,
       canonical_system_key: currentCanonicalSystemKey,
     },
+    receipt_sibling_items: [],
     derived: {
       normalized_line_item_title: (input.title ?? `Item ${input.lineItemId}`).toLowerCase(),
       normalized_merchant_name: (input.merchantName ?? "Coffee House").toLowerCase(),
@@ -377,6 +394,7 @@ Deno.test(
 Deno.test(
   "applyMoneyCategoryRulePipelineService runs a single-item LLM batch and persists debug history",
   async () => {
+    const captured: { request: MoneyCategorizeLlmBatchRequest | null } = { request: null };
     const { deps, state } = createDeps({
       rules: [
         createRule({
@@ -385,6 +403,7 @@ Deno.test(
           rule_kind: "direct",
           sort_order: 1,
           target_category_id: "cat-food",
+          stop_processing: false,
           filters: [
             {
               field: "merchant_name",
@@ -417,16 +436,19 @@ Deno.test(
           merchantName: "Coffee House",
         }),
       },
-      batchCategorize: async (request) => ({
-        items: request.items.map((item) => ({
-          lineItemId: item.lineItemId,
-          categoryId: "cat-coffee",
-          reason: "Drink-specific category available",
-        })),
-        promptTokens: 42,
-        completionTokens: 9,
-        model: "google/gemini-2.0-flash-001",
-      }),
+      batchCategorize: async (request) => {
+        captured.request = request;
+        return {
+          items: request.items.map((item) => ({
+            lineItemId: item.lineItemId,
+            categoryId: "cat-coffee",
+            reason: "Drink-specific category available",
+          })),
+          promptTokens: 42,
+          completionTokens: 9,
+          model: "google/gemini-2.0-flash-001",
+        };
+      },
     });
 
     const result = await applyMoneyCategoryRulePipelineService(
@@ -470,6 +492,13 @@ Deno.test(
     assertEquals(llmDebug.llm_batched, false);
     assertEquals(llmDebug.llm_batch_size, 1);
     assertEquals(llmDebug.llm_model, "google/gemini-2.0-flash-001");
+    // Direct rule assigned cat-food before LLM; provider payload must match that state.
+    assertEquals(captured.request?.items[0]?.currentCategoryId, "cat-food");
+    assertEquals(captured.request?.items[0]?.context.line_item.category_id, "cat-food");
+    assertEquals(captured.request?.items[0]?.context.current_category.id, "cat-food");
+    assertEquals(captured.request?.items[0]?.context.current_category.name_en, "Food");
+    assertEquals(captured.request?.items[0]?.context.current_category.kind, "canonical");
+    assertEquals(captured.request?.items[0]?.context.current_category.canonical_system_key, "food");
   },
 );
 
@@ -822,5 +851,48 @@ Deno.test(
       ["cat-food", "cat-food", "cat-food", "cat-food"],
     );
     assertEquals(firstDebug.llm_fallback_mode, "retry_single_after_batch_failure");
+  },
+);
+
+Deno.test(
+  "applyMoneyCategoryRulePipelineService does not retry a failed Jev batch as single-item calls",
+  async () => {
+    const lineItemIds = ["line-1", "line-2", "line-3", "line-4"];
+    const { deps, state } = createDeps({
+      rules: [
+        createRule({
+          id: "rule-jev",
+          name: "Jev no paid retry",
+          rule_kind: "llm_categorization",
+          sort_order: 1,
+          config: { prompt: "Do not duplicate billable calls.", provider: "jev" },
+        }),
+      ],
+      contexts: buildContexts(lineItemIds),
+      batchCategorize: async () => {
+        throw new Error("jev batch exploded");
+      },
+    });
+
+    const result = await applyMoneyCategoryRulePipelineService(
+      {
+        lineItemIds,
+        personId: "person-1",
+        triggerSource: "date_range_replay",
+      },
+      deps,
+    );
+
+    assertEquals(result.count, 4);
+    assertEquals(state.batchCalls, [
+      { ruleId: "rule-jev", itemIds: ["line-1", "line-2", "line-3", "line-4"] },
+    ]);
+    const step = getStepForLineItem(state, "line-1", "rule-jev");
+    const debug = (step?.debug_payload as Record<string, unknown>) ?? {};
+    assertEquals(debug.llm_fallback_mode, "jev_batch_error_no_retry");
+    assertEquals(
+      result.runs.every((run) => run.final_category_id === run.starting_category_id),
+      true,
+    );
   },
 );

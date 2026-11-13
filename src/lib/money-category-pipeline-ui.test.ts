@@ -10,6 +10,12 @@ describe("describeMoneyCategoryPipelineError", () => {
     );
   });
 
+  it("maps missing jev config to a specific llm message", () => {
+    expect(describeMoneyCategoryPipelineError(new Error("JEV_API_KEY is required"), t)).toBe(
+      "LLM rule preview is unavailable because JEV_API_KEY is not configured for the local money-categorize function.",
+    );
+  });
+
   it("maps timeout failures to a specific timeout message", () => {
     expect(
       describeMoneyCategoryPipelineError(new Error("Money categorize request timed out"), t),
