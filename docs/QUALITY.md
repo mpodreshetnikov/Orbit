@@ -316,7 +316,7 @@ Pass criteria: all steps exit successfully; coverage thresholds and ratchets are
 #### Reference: per-step pass criteria
 
 - Format: zero drift. Lint: zero warnings/errors (web, extension, scripts, Supabase functions). Types: no TS/Deno diagnostics.
-- Unit tests: all runtime-split suites pass. Coverage: artifacts under `coverage/` and `.coverage/deno/`; `src/**` and per-function aggregates at `>=75%` lines/branches; ratchet and DB object mapping enforced.
+- Unit tests: all runtime-split suites pass. Coverage: artifacts under `coverage/` and `.coverage/deno/`; `src/**` and per-function aggregates at `>=75%` lines/branches; ratchet and DB object mapping enforced. High-signal oracles, smell lint, and mutation (`mutationScoreCovered` = 100% on covered lines): canonical in [`docs/design/common/testing-quality.md`](./design/common/testing-quality.md).
 - E2E product flows: Playwright suites pass against local Supabase. For extraction-related suites, `HEALTH_STRUCTURE_PARSER_MODE=e2e_stub` must be active, validating happy and failure paths without external LLM calls.
 - Smoke: production build and static generation succeed.
 

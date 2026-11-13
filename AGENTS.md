@@ -97,7 +97,7 @@ Commands such as `dev-ready` start servers and do not exit until the stack is st
 - Debugging and operations: `docs/RUNBOOK.md`
 - Debug information in code: `docs/design/common/error-handling-and-observability.md`
 - Quality gates and PR checks: `docs/QUALITY.md`
-- High-signal unit tests (oracles, smell lint, `fast-check`, SQL↔TS parity, mutation): `.agents/skills/vitest/SKILL.md` § High-signal tests
+- High-signal unit tests, coverage floor, and mutation (`mutationScoreCovered`): `docs/design/common/testing-quality.md` (skills link; do not duplicate)
 - UI on every platform (web and iOS), mobile coverage, and pictures before merge: `docs/QUALITY.md`, "User-Interface Changes Ship On Every Platform"
 - Security and RLS expectations: `docs/SECURITY.md`
 - Where work is tracked, and how a multi-hour execution plan is written: the private task registry (see below)
