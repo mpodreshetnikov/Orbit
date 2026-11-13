@@ -21,9 +21,11 @@ const env = { ...process.env, TZ: process.env.TZ || "Asia/Krasnoyarsk" };
 const args = ["vitest", ...process.argv.slice(2)];
 const npx = resolveNpxBin();
 
+// Use `cmd.exe` on PATH (not ComSpec): same pattern as supabase-cli-retry.cjs —
+  // avoids CodeQL "shell command from environment values" on absolute ComSpec paths.
 const result =
   process.platform === "win32"
-    ? spawnSync(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", npx, ...args], {
+    ? spawnSync("cmd.exe", ["/d", "/s", "/c", npx, ...args], {
         stdio: "inherit",
         env,
       })
