@@ -15,6 +15,7 @@
 const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
+const { summarizeMutantStatuses } = require("./mutation-summary.cjs");
 
 const root = path.resolve(__dirname, "../..");
 const args = process.argv.slice(2);
@@ -108,63 +109,17 @@ function writeSummaryFromStrykerJson() {
   if (!fs.existsSync(reportPath)) return;
   const report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
   const files = report.files ? Object.keys(report.files) : [];
-  let killed = 0;
-  let survived = 0;
-  let noCoverage = 0;
-  let timeout = 0;
-  let runtimeErrors = 0;
-  let ignored = 0;
-  for (const file of Object.values(report.files ?? {})) {
-    for (const mutant of file.mutants ?? []) {
-      switch (mutant.status) {
-        case "Killed":
-          killed += 1;
-          break;
-        case "Survived":
-          survived += 1;
-          break;
-        case "NoCoverage":
-          noCoverage += 1;
-          break;
-        case "Timeout":
-          timeout += 1;
-          break;
-        case "RuntimeError":
-        case "CompileError":
-          runtimeErrors += 1;
-          break;
-        case "Ignored":
-          ignored += 1;
-          break;
-        default:
-          break;
-      }
-    }
-  }
-  // Match Stryker: ignored mutants are out of the denominator.
-  const totalMutants = killed + survived + noCoverage + timeout + runtimeErrors;
-  const detected = killed + timeout;
-  const score = totalMutants > 0 ? Math.round((10000 * detected) / totalMutants) / 100 : null;
-  const covered = killed + survived + timeout + runtimeErrors;
-  const coveredScore = covered > 0 ? Math.round((10000 * detected) / covered) / 100 : null;
+  const counts = summarizeMutantStatuses(report.files ?? {});
   const payload = {
     schemaVersion: 1,
     mode: full ? "full" : baseline ? "baseline" : "incremental",
     generatedAt: new Date().toISOString(),
-    mutationScore: score,
-    mutationScoreCovered: coveredScore,
-    killed,
-    survived,
-    noCoverage,
-    timeout,
-    runtimeErrors,
-    ignored,
-    totalMutants,
+    ...counts,
     files,
   };
   fs.writeFileSync(summaryPath, `${JSON.stringify(payload, null, 2)}\n`);
   console.log(
-    `run-mutation: wrote ${path.relative(root, summaryPath)} (score=${score}, covered=${coveredScore})`,
+    `run-mutation: wrote ${path.relative(root, summaryPath)} (score=${counts.mutationScore}, covered=${counts.mutationScoreCovered})`,
   );
 }
 

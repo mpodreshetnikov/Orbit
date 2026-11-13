@@ -34,13 +34,14 @@ const config = {
     "!**/database.types.ts",
   ],
   ignoreStatic: true,
+  // Do not ignore supabase/functions: Vitest parity tests (e.g. ocr-failure.test.ts)
+  // read Edge Function sources from disk. mutate globs already omit that tree.
   ignorePatterns: [
     "coverage",
     ".coverage",
     ".stryker-tmp",
     "reports",
     "mobile",
-    "supabase/functions",
     "e2e",
     "ios",
     "dist",

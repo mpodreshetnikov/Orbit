@@ -33,6 +33,8 @@ Stryker writes:
 - `reports/mutation/mutation.json` — raw Stryker JSON
 - `reports/mutation/mutation-summary.json` — Orbit summary (`schemaVersion: 1`, `mode`, `mutationScore`, counts, `files`)
 
+Scores match Stryker: `Ignored` and invalid (`RuntimeError` / `CompileError`) mutants stay in diagnostic counts but are excluded from both score denominators.
+
 `reports/mutation/` is gitignored except a committed baseline snapshot under `scripts/just/mutation-baseline.json` when a score is recorded.
 
 ## Thresholds
@@ -41,4 +43,4 @@ Stryker writes:
 
 ## Timezone
 
-Mutation and unit lanes default `TZ=Asia/Krasnoyarsk` (owner locale; no DST) so date formatting tests match CI.
+Mutation and unit lanes default `TZ=Asia/Krasnoyarsk` (owner locale; no DST) so date formatting tests match CI. Unit recipes go through `scripts/just/run-vitest.cjs` so the default works under just's Windows PowerShell shell as well as POSIX.
