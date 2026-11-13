@@ -364,6 +364,16 @@ function checkDualRepo({ repoRoot = REPO_ROOT, exists = fs.existsSync, env = pro
   };
 }
 
+/**
+ * @param {{
+ *   env?: NodeJS.ProcessEnv,
+ *   home?: string,
+ *   repoRoot?: string,
+ *   exists?: (file: string) => boolean,
+ *   requireDualRepo?: boolean,
+ * }} [options]
+ * @returns {{ ok: boolean, message: string }}
+ */
 function check({
   env = process.env,
   home = os.homedir(),

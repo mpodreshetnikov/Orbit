@@ -14,6 +14,8 @@ const { bridgePathIn, check, escapeRegExp, missingCursorEvents, missingEvents, u
       home: string;
       repoRoot?: string;
       exists?: (file: string) => boolean;
+      /** When false, skip orbit-tasks dual-repo extras (harness-only fixtures). Default true. */
+      requireDualRepo?: boolean;
     }) => { ok: boolean; message: string };
     escapeRegExp: (value: string) => string;
     missingCursorEvents: (
