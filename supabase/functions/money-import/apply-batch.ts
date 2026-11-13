@@ -1,6 +1,8 @@
 import type { EdgeTelemetry } from "../_shared/observability.ts";
 import {
+  buildBalancingLineItem,
   buildLineItemImportHash,
+  hasRealImportLineItems,
   jsonResponse,
   normalizeLineItems,
   normalizeSourceForTransactions,
@@ -289,10 +291,32 @@ export async function applyPendingBatch(batchId: string, deps: ApplyBatchDeps): 
         card_id: resolvedCardId,
         brand_id: resolvedBrandId,
       };
+      // Validate receipt composition before insert/resolve so a >50% imbalance never
+      // leaves an orphan transaction (outer catch reports transaction_id: null).
+      const lineItems = normalizeLineItems(normalized);
+      const balancing = buildBalancingLineItem(normalized, lineItems);
       const tx = await deps.repository.insertOrResolveTransaction(normalized, payerPersonId);
 
+      let blockedByManualEdit = false;
+      // New txs and stub replacements need balancing; leave existing balancing when
+      // real receipt lines are already present so their categories stay intact.
+      let shouldAppendBalancing = tx.inserted;
+      if (!tx.inserted && hasRealImportLineItems(lineItems)) {
+        const repair = await deps.repository.repairExistingTransactionDetails(
+          tx.transactionId,
+          normalized,
+        );
+        blockedByManualEdit = repair.blocked_by_manual_edit === true;
+        shouldAppendBalancing =
+          repair.replaced_synthetic_line_items === true || repair.has_real_line_items === false;
+      }
+
       const txStatus: RowStatus = tx.inserted ? "inserted" : "skipped";
-      const txMessage = tx.inserted ? null : "Duplicate transaction";
+      const txMessage = blockedByManualEdit
+        ? "Existing line items were edited manually"
+        : tx.inserted
+          ? null
+          : "Duplicate transaction";
       if (txStatus === "inserted") insertedCount += 1;
       if (txStatus === "skipped") skippedCount += 1;
 
@@ -309,68 +333,70 @@ export async function applyPendingBatch(batchId: string, deps: ApplyBatchDeps): 
         payload: normalized,
       });
 
-      const lineItems = normalizeLineItems(normalized);
       const lineResults: Array<Record<string, unknown>> = [];
-      for (let lineIndex = 0; lineIndex < lineItems.length; lineIndex++) {
-        const lineItem = lineItems[lineIndex];
-        try {
-          const importHash = await buildLineItemImportHash(tx.transactionId, lineItem, lineIndex);
-          const lineRes = await deps.repository.insertLineItemIfNew(
-            tx.transactionId,
-            lineItem,
-            importHash,
-            normalized.amount,
-          );
-          const lineStatus: RowStatus = lineRes.inserted ? "inserted" : "skipped";
-          const lineMessage = lineRes.inserted ? null : "Duplicate line item";
+      if (!blockedByManualEdit) {
+        if (balancing && shouldAppendBalancing) lineItems.push(balancing);
+        for (let lineIndex = 0; lineIndex < lineItems.length; lineIndex++) {
+          const lineItem = lineItems[lineIndex];
+          try {
+            const importHash = await buildLineItemImportHash(tx.transactionId, lineItem, lineIndex);
+            const lineRes = await deps.repository.insertLineItemIfNew(
+              tx.transactionId,
+              lineItem,
+              importHash,
+              normalized.amount,
+            );
+            const lineStatus: RowStatus = lineRes.inserted ? "inserted" : "skipped";
+            const lineMessage = lineRes.inserted ? null : "Duplicate line item";
 
-          await deps.repository.insertReportRow({
-            batch_id: batchId,
-            parent_row_id: txReportRowId,
-            row_kind: "line_item",
-            source_row_index: rowIndex,
-            source_line_index: lineIndex,
-            status: lineStatus,
-            message: lineMessage,
-            transaction_id: tx.transactionId,
-            line_item_id: lineRes.lineItemId,
-            payload: { ...lineItem, import_hash: importHash },
-          });
+            await deps.repository.insertReportRow({
+              batch_id: batchId,
+              parent_row_id: txReportRowId,
+              row_kind: "line_item",
+              source_row_index: rowIndex,
+              source_line_index: lineIndex,
+              status: lineStatus,
+              message: lineMessage,
+              transaction_id: tx.transactionId,
+              line_item_id: lineRes.lineItemId,
+              payload: { ...lineItem, import_hash: importHash },
+            });
 
-          lineResults.push({
-            line_index: lineIndex,
-            status: lineStatus,
-            message: lineMessage,
-            line_item_id: lineRes.lineItemId,
-          });
+            lineResults.push({
+              line_index: lineIndex,
+              status: lineStatus,
+              message: lineMessage,
+              line_item_id: lineRes.lineItemId,
+            });
 
-          if (lineRes.inserted && lineRes.lineItemId) {
-            insertedLineItemIds.push(lineRes.lineItemId);
+            if (lineRes.inserted && lineRes.lineItemId) {
+              insertedLineItemIds.push(lineRes.lineItemId);
+            }
+          } catch (lineError) {
+            const lineMessage =
+              lineError instanceof Error ? lineError.message : "Line item import failed";
+            errorCount += 1;
+
+            await deps.repository.insertReportRow({
+              batch_id: batchId,
+              parent_row_id: txReportRowId,
+              row_kind: "line_item",
+              source_row_index: rowIndex,
+              source_line_index: lineIndex,
+              status: "error",
+              message: lineMessage,
+              transaction_id: tx.transactionId,
+              line_item_id: null,
+              payload: lineItem,
+            });
+
+            lineResults.push({
+              line_index: lineIndex,
+              status: "error",
+              message: lineMessage,
+              line_item_id: null,
+            });
           }
-        } catch (lineError) {
-          const lineMessage =
-            lineError instanceof Error ? lineError.message : "Line item import failed";
-          errorCount += 1;
-
-          await deps.repository.insertReportRow({
-            batch_id: batchId,
-            parent_row_id: txReportRowId,
-            row_kind: "line_item",
-            source_row_index: rowIndex,
-            source_line_index: lineIndex,
-            status: "error",
-            message: lineMessage,
-            transaction_id: tx.transactionId,
-            line_item_id: null,
-            payload: lineItem,
-          });
-
-          lineResults.push({
-            line_index: lineIndex,
-            status: "error",
-            message: lineMessage,
-            line_item_id: null,
-          });
         }
       }
 

@@ -51,6 +51,7 @@ function createRepositoryMock(batch: Record<string, unknown> | null): {
         replaced_synthetic_line_items: false,
         has_only_synthetic_line_items: false,
         has_real_line_items: false,
+        blocked_by_manual_edit: false,
       }),
       insertOrResolveTransaction: async () => {
         throw new Error("unused");
