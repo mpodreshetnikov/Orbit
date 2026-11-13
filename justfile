@@ -221,16 +221,10 @@ test-unit-coverage:
   deno test --allow-env --allow-read --config supabase/functions/deno.json --coverage=.coverage/deno supabase/functions
   node scripts/just/coverage-report.cjs
 
-# Mutation testing (Stryker). Advisory — not part of quality / ci-fast / PR Quality Gates.
-# See docs/design/common/mutation-testing.md.
+# Mutation testing (Stryker). Required PR Quality Gates step — incremental only.
+# See docs/design/common/mutation-testing.md. No-op exit 0 when no mutable Vitest files changed.
 test-mutation:
   node scripts/just/run-mutation.cjs
-
-test-mutation-baseline:
-  node scripts/just/run-mutation.cjs --baseline
-
-test-mutation-full:
-  node scripts/just/run-mutation.cjs --full
 
 # Run end-to-end product flow checks in deterministic no-external-LLM mode where applicable.
 test-e2e:

@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  ALL_AUTHOR_EMAILS,
   EXTRA_REJECTED_AGENT_MAILBOXES,
+  OWNER_CLAIM_EMAILS,
+  displayNameForEmail,
+  findParticipantByEmail,
+  findParticipantByLogin,
+  isParticipantLogin,
+  normalizeEmail,
   participantAuthorProblem,
   participantOwnerProblem,
 } from "./participants.cjs";
@@ -14,27 +21,71 @@ describe("participant allowlist (D9/D14)", () => {
 
   it("matches claim emails case-insensitively via lowercased OWNER_CLAIM_EMAILS", () => {
     expect(participantOwnerProblem("MPodreshetnikov@Gmail.COM")).toBeNull();
+    expect(OWNER_CLAIM_EMAILS.has("mpodreshetnikov@gmail.com")).toBe(true);
+    expect(OWNER_CLAIM_EMAILS.has("MPodreshetnikov@Gmail.COM")).toBe(false);
   });
 
-  it("refuses agent as executor/owner", () => {
-    expect(participantOwnerProblem("cursoragent@cursor.com")).toMatch(/agent/i);
+  it("normalizeEmail trims, lowercases, and stringifies nullish", () => {
+    expect(normalizeEmail("  A@B.C  ")).toBe("a@b.c");
+    expect(normalizeEmail(null)).toBe("");
+    expect(normalizeEmail(undefined)).toBe("");
+  });
+
+  it("findParticipantByEmail matches case-insensitively and rejects unknown", () => {
+    expect(findParticipantByEmail("MPodreshetnikov@Gmail.COM")?.login).toBe("mpodreshetnikov");
+    expect(findParticipantByEmail("nobody@example.com")).toBeNull();
+  });
+
+  it("findParticipantByLogin and isParticipantLogin are case-insensitive", () => {
+    expect(findParticipantByLogin("MPODRESHETNIKOV")?.name).toBe("Maxim Podreshetnikov");
+    expect(findParticipantByLogin("Kot-kAkos")?.name).toBe("Igor");
+    expect(isParticipantLogin("mpodreshetnikov")).toBe(true);
+    expect(isParticipantLogin("nope")).toBe(false);
+    expect(isParticipantLogin(null)).toBe(false);
+  });
+
+  it("displayNameForEmail resolves Maxim and returns null for unknown", () => {
+    expect(displayNameForEmail("mpodreshetnikov@gmail.com")).toBe("Maxim Podreshetnikov");
+    expect(displayNameForEmail("ghost@example.com")).toBeNull();
+  });
+
+  it("refuses empty owner and agent mailboxes with exact problem text", () => {
+    expect(participantOwnerProblem("")).toBe("'owner' is required and must be a participant email");
+    expect(participantOwnerProblem("   ")).toBe(
+      "'owner' is required and must be a participant email",
+    );
+    expect(participantOwnerProblem("cursoragent@cursor.com")).toBe(
+      "'owner' is 'cursoragent@cursor.com' — an agent mailbox. Pass a participant email (Maxim/Igor).",
+    );
     expect(EXTRA_REJECTED_AGENT_MAILBOXES).toContain("cursoragent@cursor.com");
+    expect(EXTRA_REJECTED_AGENT_MAILBOXES).toContain("cursor@cursor.com");
   });
 
-  it("refuses a foreign human mailbox not on the allowlist", () => {
-    expect(participantOwnerProblem("alice@example.com")).toMatch(/allowlist/i);
-  });
-
-  it("keeps Igor email as an explicit TODO (does not invent an address)", () => {
-    expect(participantOwnerProblem("igor@example.com")).toMatch(/D14|allowlist/i);
+  it("refuses a foreign human mailbox with Igor TODO guidance", () => {
+    const msg = participantOwnerProblem("alice@example.com");
+    expect(msg).toContain("'owner' is 'alice@example.com' — not on the participant allowlist.");
+    expect(msg).toContain("Known claim emails: mpodreshetnikov@gmail.com.");
+    expect(msg).toContain("D14: Igor email unknown until onboarding");
   });
 
   it("allows Maxim GitHub noreply for authorship only", () => {
     expect(
       participantAuthorProblem("44291329+mpodreshetnikov@users.noreply.github.com"),
     ).toBeNull();
-    expect(participantOwnerProblem("44291329+mpodreshetnikov@users.noreply.github.com")).toMatch(
-      /allowlist|D14|noreply|participant/i,
+    expect(ALL_AUTHOR_EMAILS.has("44291329+mpodreshetnikov@users.noreply.github.com")).toBe(true);
+    expect(participantOwnerProblem("44291329+mpodreshetnikov@users.noreply.github.com")).toContain(
+      "not on the participant allowlist",
+    );
+  });
+
+  it("refuses empty and agent authors with exact text", () => {
+    expect(participantAuthorProblem("")).toBe("commit author/committer email is empty");
+    expect(participantAuthorProblem("cursoragent@cursor.com")).toBe(
+      "'cursoragent@cursor.com' is an agent mailbox; commits must use a participant identity",
+    );
+    expect(participantAuthorProblem("x+cursoragent@example.com")).toMatch(/agent mailbox/);
+    expect(participantAuthorProblem("alice@example.com")).toBe(
+      "'alice@example.com' is not a participant author email. Allowlist: mpodreshetnikov@gmail.com, 44291329+mpodreshetnikov@users.noreply.github.com.",
     );
   });
 });

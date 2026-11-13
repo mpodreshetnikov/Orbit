@@ -396,6 +396,12 @@ jobs:
           # must pass under this zone (T-261113-qgz).
           TZ: Asia/Krasnoyarsk
         run: just test-unit-coverage && just coverage-check
+      - name: Mutation (incremental, required)
+        env:
+          TZ: Asia/Krasnoyarsk
+          STRYKER_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || 'origin/main' }}
+          CI: "true"
+        run: just test-mutation
 
   extension-release-bundle:
     needs: [secrets-scan, quality-gates]

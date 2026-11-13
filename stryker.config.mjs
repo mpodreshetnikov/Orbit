@@ -7,10 +7,9 @@
  *   - pgTAP SQL under supabase/tests — not JS/TS
  *   - mobile/ Jest-expo package — separate package; use its own lane later
  *
- * Modes (see just recipes):
- *   - incremental (default CI/local): mutate only files changed vs base branch
- *   - full: mutate the full Vitest surface (slow; baseline / scheduled)
- * Thresholds do not break CI — reports are advisory until a ratchet is agreed.
+ * Mode: incremental only (`just test-mutation` vs STRYKER_BASE / origin/main).
+ * Required Quality Gates step. Stryker thresholds.break is null (overall score
+ * includes NoCoverage); Orbit enforces mutationScoreCovered === 100 in run-mutation.cjs.
  */
 /** @type {import('@stryker-mutator/api/core').PartialStrykerOptions} */
 const config = {
@@ -34,6 +33,11 @@ const config = {
     "!**/database.types.ts",
   ],
   ignoreStatic: true,
+  // StringLiteral mutants only rewrite log/CLI message text; they do not change
+  // control flow. Exclude them so the covered gate measures behavioral mutants.
+  mutator: {
+    excludedMutations: ["StringLiteral"],
+  },
   // Do not ignore supabase/functions: Vitest parity tests (e.g. ocr-failure.test.ts)
   // read Edge Function sources from disk. mutate globs already omit that tree.
   ignorePatterns: [
@@ -56,9 +60,11 @@ const config = {
     fileName: "reports/mutation/mutation.json",
   },
   thresholds: {
-    // Advisory baseline: never fail the fast PR gate. Raise later via ratchet.
-    high: 80,
-    low: 60,
+    // Advisory bands only. break is null because Stryker's break uses overall
+    // mutationScore (incl. NoCoverage). Orbit's hard gate is mutationScoreCovered
+    // via scripts/just/mutation-summary.cjs → evaluateCoveredMutationGate.
+    high: 100,
+    low: 100,
     break: null,
   },
   timeoutMS: 60_000,

@@ -4,13 +4,13 @@ Canonical for how Orbit runs mutation testing on JS/TS unit surfaces, and what i
 
 ## Commands
 
-| ID                       | Recipe                        | Role                                                                                                                                   |
-| ------------------------ | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `test-mutation`          | `just test-mutation`          | Incremental: mutate Vitest-covered files changed vs `STRYKER_BASE` (default `origin/main`).                                            |
-| `test-mutation-baseline` | `just test-mutation-baseline` | Critical-path file set for a fast honest score (money compact/spend-draft, draft HTML, participants, categorize filters, cron window). |
-| `test-mutation-full`     | `just test-mutation-full`     | Full Vitest mutate surface from `stryker.config.mjs` (slow).                                                                           |
+| ID              | Recipe               | Role                                                                                                       |
+| --------------- | -------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `test-mutation` | `just test-mutation` | Incremental: mutate Vitest-covered files changed vs `STRYKER_BASE` (default `origin/main`). Required gate. |
 
-None of these are part of `quality`, `ci-fast`, or the PR **Quality Gates** job. CI may run `test-mutation` as an **advisory** workflow that never blocks merge.
+No baseline/full recipes. For a one-off full-surface run, invoke Stryker directly against `stryker.config.mjs` mutate globs — not a product command.
+
+`test-mutation` is part of the PR **Quality Gates** job. Exit **0** (no-op) when the diff has no mutable Vitest-covered files.
 
 ## Surfaces
 
@@ -31,15 +31,28 @@ Stryker writes:
 
 - `reports/mutation/mutation.html` — human report
 - `reports/mutation/mutation.json` — raw Stryker JSON
-- `reports/mutation/mutation-summary.json` — Orbit summary (`schemaVersion: 1`, `mode`, `mutationScore`, counts, `files`)
+- `reports/mutation/mutation-summary.json` — Orbit summary (`schemaVersion: 1`, `mode`, scores, counts, `files`)
 
-Scores match Stryker: `Ignored` and invalid (`RuntimeError` / `CompileError`) mutants stay in diagnostic counts but are excluded from both score denominators.
+Scores match Stryker Mutation Testing Elements (v8/v9):
 
-`reports/mutation/` is gitignored except a committed baseline snapshot under `scripts/just/mutation-baseline.json` when a score is recorded.
+- `mutationScore` = `(killed + timeout) / (killed + survived + noCoverage + timeout)`
+- `mutationScoreCovered` = `(killed + timeout) / (killed + survived + timeout)`
 
-## Thresholds
+`Ignored` and invalid (`RuntimeError` / `CompileError`) stay diagnostic-only (out of both denominators).
 
-`stryker.config.mjs` sets `thresholds.break: null` so a low score never fails the fast PR gate. `high`/`low` are advisory bands only. A future ratchet (like coverage) needs an explicit task.
+`reports/mutation/` is gitignored.
+
+## Thresholds / gate
+
+Stryker `thresholds.break` is **null**. Stryker’s own break uses overall `mutationScore`, which counts `NoCoverage` against the score — that would force every line to be covered by a test just to pass mutation, overlapping the line-coverage floor (75% now; ORB-64 → 80%).
+
+Orbit’s hard Quality Gates check is in `scripts/just/mutation-summary.cjs` → `evaluateCoveredMutationGate` (invoked by `scripts/just/run-mutation.cjs` after Stryker JSON is written). Unit tests: `mutation-summary.test.ts`, `run-mutation.test.ts`.
+
+- **Pass** when `mutationScoreCovered === 100` (equivalently: `survived === 0` on covered mutants).
+- **Pass** on incremental skip (no mutable Vitest files in the diff).
+- **NoCoverage** mutants do not fail the mutation gate (line-coverage floors own that: 75% now; ORB-64 → 80%).
+
+`stryker.config.mjs` sets `thresholds.break: null` and excludes `StringLiteral` mutants (log/CLI message text only). Use `// Stryker disable next-line` only for proven equivalent or unreachable behavioral mutants, with a short reason.
 
 ## Timezone
 

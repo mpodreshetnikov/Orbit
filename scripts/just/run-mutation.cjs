@@ -1,51 +1,50 @@
 #!/usr/bin/env node
 /**
- * Run Stryker in incremental (changed files) or full mode.
+ * Run Stryker incremental mutation vs STRYKER_BASE / origin/main.
  *
- * Usage:
- *   node scripts/just/run-mutation.cjs              # incremental vs STRYKER_BASE / origin/main
- *   node scripts/just/run-mutation.cjs --full       # full Vitest mutate surface
- *   node scripts/just/run-mutation.cjs --baseline   # critical-path mutate set for a quick score
+ * Usage: node scripts/just/run-mutation.cjs
  *
- * Never part of `quality` / `ci-fast` / PR Quality Gates. Exit 0 even when score is low
- * (thresholds.break is null); non-zero only when Stryker itself fails to run.
+ * Required PR Quality Gates step (`just test-mutation`).
+ * Hard gate: mutationScoreCovered === 100 (no survivors). NoCoverage is allowed.
+ * Stryker thresholds.break is null (overall mutationScore includes NoCoverage).
+ * Exit 0 when no mutable Vitest-covered files changed (no-op skip).
  */
 "use strict";
 
 const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
-const { summarizeMutantStatuses } = require("./mutation-summary.cjs");
+const { summarizeMutantStatuses, evaluateCoveredMutationGate } = require("./mutation-summary.cjs");
 
 const root = path.resolve(__dirname, "../..");
-const args = process.argv.slice(2);
-const full = args.includes("--full");
-const baseline = args.includes("--baseline");
 
-// Vitest-covered critical paths only. Deno categorize/window and SQL RPCs are
-// closed with Deno/pgTAP tests (Stryker has no Deno runner here).
-const BASELINE_MUTATE = [
-  "src/lib/mcp/money/transactions.ts",
-  "src/lib/mcp/money/spend-draft.ts",
-  "src/lib/mcp/apps/spend-draft-page.ts",
-  "src/lib/mcp/apps/category-draft-page.ts",
-  "src/lib/mcp/apps/checkup-draft-page.ts",
-  "src/lib/mcp/apps/record-draft-page.ts",
-  "scripts/just/participants.cjs",
-];
+/**
+ * @param {{ base?: string }} [opts]
+ * @param {Record<string, string | undefined>} [env]
+ */
+function resolveBase(opts = {}, env = process.env) {
+  if (opts.base != null) return opts.base;
+  return env.STRYKER_BASE || "origin/main";
+}
 
-function changedFiles(baseRef) {
-  const result = spawnSync(
-    "git",
-    ["diff", "--name-only", "--diff-filter=ACMR", `${baseRef}...HEAD`],
-    {
-      cwd: root,
-      encoding: "utf8",
-    },
-  );
+/** @param {Record<string, string | undefined>} [env] */
+function resolveTz(env = process.env) {
+  return env.TZ || "Asia/Krasnoyarsk";
+}
+
+function gitDiffFailedMessage(result) {
+  if (result.stderr) return result.stderr;
+  if (result.stdout) return result.stdout;
+  return "git diff failed";
+}
+
+function changedFiles(baseRef, spawn = spawnSync) {
+  const result = spawn("git", ["diff", "--name-only", "--diff-filter=ACMR", `${baseRef}...HEAD`], {
+    cwd: root,
+    encoding: "utf8",
+  });
   if (result.status !== 0) {
-    console.error(result.stderr || result.stdout || "git diff failed");
-    process.exit(result.status ?? 1);
+    throw new Error(gitDiffFailedMessage(result));
   }
   return result.stdout
     .split("\n")
@@ -54,15 +53,10 @@ function changedFiles(baseRef) {
 }
 
 function isMutable(file) {
+  // Allowlist only: denylists for mobile/e2e/supabase would be equivalent mutants
+  // (those paths already fail the prefixes below).
   if (!/\.(ts|tsx|js|cjs|mjs)$/.test(file)) return false;
   if (/\.(test|spec)\.(ts|tsx)$/.test(file) || /_test\.ts$/.test(file)) return false;
-  if (file.startsWith("mobile/") || file.startsWith("e2e/") || file.startsWith("ios/"))
-    return false;
-  if (file.startsWith("supabase/db/") || file.startsWith("supabase/migrations/")) return false;
-  if (file.startsWith("supabase/tests/")) return false;
-  // Deno edge sources are listed for baseline awareness but Stryker cannot run Deno tests;
-  // skip them in incremental Vitest mode unless they are under a Vitest project (they are not).
-  if (file.startsWith("supabase/functions/")) return false;
   return (
     file.startsWith("src/") ||
     file.startsWith("browserExtension/") ||
@@ -71,18 +65,8 @@ function isMutable(file) {
   );
 }
 
-function resolveMutate() {
-  if (full) return null; // use stryker.config.mjs mutate globs
-  if (baseline) return BASELINE_MUTATE.filter((file) => fs.existsSync(path.join(root, file)));
-
-  const base = process.env.STRYKER_BASE || "origin/main";
-  const files = changedFiles(base).filter(isMutable);
-  if (files.length === 0) {
-    console.log(`run-mutation: no mutable Vitest-covered files changed vs ${base}; skipping.`);
-    writeSkipReport(base);
-    process.exit(0);
-  }
-  return files;
+function resolveMutate(baseRef, spawn = spawnSync) {
+  return changedFiles(baseRef, spawn).filter(isMutable);
 }
 
 function writeSkipReport(base) {
@@ -94,6 +78,8 @@ function writeSkipReport(base) {
     base,
     generatedAt: new Date().toISOString(),
     mutationScore: null,
+    mutationScoreCovered: 100,
+    survived: 0,
     files: [],
     note: "No mutable Vitest-covered files in the diff; Stryker was not run.",
   };
@@ -101,48 +87,92 @@ function writeSkipReport(base) {
     path.join(dir, "mutation-summary.json"),
     `${JSON.stringify(payload, null, 2)}\n`,
   );
+  return payload;
 }
 
-function writeSummaryFromStrykerJson() {
+function writeSummaryFromStrykerJson(fsModule = fs) {
   const reportPath = path.join(root, "reports/mutation/mutation.json");
   const summaryPath = path.join(root, "reports/mutation/mutation-summary.json");
-  if (!fs.existsSync(reportPath)) return;
-  const report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
+  if (!fsModule.existsSync(reportPath)) return null;
+  const report = JSON.parse(fsModule.readFileSync(reportPath, "utf8"));
   const files = report.files ? Object.keys(report.files) : [];
   const counts = summarizeMutantStatuses(report.files ?? {});
   const payload = {
     schemaVersion: 1,
-    mode: full ? "full" : baseline ? "baseline" : "incremental",
+    mode: "incremental",
     generatedAt: new Date().toISOString(),
     ...counts,
     files,
   };
-  fs.writeFileSync(summaryPath, `${JSON.stringify(payload, null, 2)}\n`);
+  fsModule.writeFileSync(summaryPath, `${JSON.stringify(payload, null, 2)}\n`);
   console.log(
-    `run-mutation: wrote ${path.relative(root, summaryPath)} (score=${counts.mutationScore}, covered=${counts.mutationScoreCovered})`,
+    `run-mutation: wrote ${path.relative(root, summaryPath)} (score=${counts.mutationScore}, covered=${counts.mutationScoreCovered}, survived=${counts.survived})`,
   );
+  return payload;
 }
 
-const mutate = resolveMutate();
-const strykerArgs = ["stryker", "run"];
-if (mutate) {
-  // One --mutate with a comma-separated glob list — repeated flags were collapsing to a single file.
-  strykerArgs.push("--mutate", mutate.join(","));
+/**
+ * @returns {number} exit code
+ */
+function runMutation(opts = {}) {
+  const spawn = opts.spawn ?? spawnSync;
+  const base = resolveBase(opts);
+  let mutate;
+  try {
+    mutate = resolveMutate(base, spawn);
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : err);
+    return 1;
+  }
+  if (mutate.length === 0) {
+    console.log(`run-mutation: no mutable Vitest-covered files changed vs ${base}; skipping.`);
+    writeSkipReport(base);
+    return 0;
+  }
+
+  const strykerArgs = ["stryker", "run", "--mutate", mutate.join(",")];
   console.log(`run-mutation: mutating ${mutate.length} file(s):\n  ${mutate.join("\n  ")}`);
-} else {
-  console.log("run-mutation: full mutate surface from stryker.config.mjs");
+
+  const result = spawn("npx", strykerArgs, {
+    cwd: root,
+    stdio: "inherit",
+    env: { ...process.env, TZ: resolveTz() },
+  });
+
+  const summary = writeSummaryFromStrykerJson();
+
+  if (result.error) {
+    return 2;
+  }
+  // Stryker thresholds.break is null; non-zero here is runner/setup failure.
+  if (result.status == null) {
+    return 1;
+  }
+  if (result.status !== 0) {
+    return result.status;
+  }
+
+  const gate = evaluateCoveredMutationGate(summary);
+  if (!gate.ok) {
+    console.error(`run-mutation: ${gate.reason}`);
+    return 1;
+  }
+  return 0;
 }
 
-const result = spawnSync("npx", strykerArgs, {
-  cwd: root,
-  stdio: "inherit",
-  env: { ...process.env, TZ: process.env.TZ || "Asia/Krasnoyarsk" },
-});
+module.exports = {
+  changedFiles,
+  isMutable,
+  resolveMutate,
+  resolveBase,
+  resolveTz,
+  gitDiffFailedMessage,
+  runMutation,
+  writeSkipReport,
+  writeSummaryFromStrykerJson,
+};
 
-writeSummaryFromStrykerJson();
-
-if (result.status !== 0) {
-  console.error("run-mutation: Stryker exited non-zero (runner/setup failure).");
-  process.exit(result.status ?? 1);
+// Stryker disable next-line all: CLI entry — unreachable when the module is imported by tests
+if (require.main === module) {
+  process.exit(runMutation());
 }
-process.exit(0);
