@@ -43,4 +43,4 @@ Scores match Stryker: `Ignored` and invalid (`RuntimeError` / `CompileError`) mu
 
 ## Timezone
 
-Mutation and unit lanes default `TZ=Asia/Krasnoyarsk` (owner locale; no DST) so date formatting tests match CI. Unit recipes go through `scripts/just/run-vitest.cjs` so the default works under just's Windows PowerShell shell as well as POSIX.
+Mutation and unit lanes default `TZ=Asia/Krasnoyarsk` (owner locale; no DST) so date formatting tests match CI. Unit recipes go through `scripts/just/run-vitest.cjs`, which sets `TZ` and spawns Node against the local Vitest CLI (no shell/`cmd.exe`) so the default works under just's Windows PowerShell shell as well as POSIX.

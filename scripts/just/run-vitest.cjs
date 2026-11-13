@@ -3,21 +3,19 @@
  * Cross-platform Vitest launcher: defaults TZ to Asia/Krasnoyarsk (owner locale).
  * Avoids POSIX-only `TZ=… cmd` prefixes that break just's windows-shell (PowerShell).
  *
- * Spawns PATH-resolved `npx` / `npx.cmd` only (never absolute paths from process.execPath
- * or ComSpec) so CodeQL does not flag shell commands built from environment values.
+ * Spawns Node directly against the local Vitest CLI — no shell, cmd.exe, npx, or ComSpec.
  */
-const { spawnSync } = require("child_process");
+const { spawnSync } = require("node:child_process");
+const path = require("node:path");
 
 const env = { ...process.env, TZ: process.env.TZ || "Asia/Krasnoyarsk" };
-const vitestArgs = process.argv.slice(2);
-
-const result =
-  process.platform === "win32"
-    ? spawnSync("cmd.exe", ["/d", "/s", "/c", "npx.cmd", "vitest", ...vitestArgs], {
-        stdio: "inherit",
-        env,
-      })
-    : spawnSync("npx", ["vitest", ...vitestArgs], { stdio: "inherit", env });
+const vitestRoot = path.dirname(require.resolve("vitest/package.json"));
+const vitestCli = path.join(vitestRoot, "vitest.mjs");
+const result = spawnSync(process.execPath, [vitestCli, ...process.argv.slice(2)], {
+  stdio: "inherit",
+  env,
+  cwd: path.resolve(__dirname, "../.."),
+});
 
 if (result.error) {
   console.error(result.error);
