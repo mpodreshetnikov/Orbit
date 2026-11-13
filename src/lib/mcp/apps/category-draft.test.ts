@@ -309,3 +309,11 @@ describe("registerCategoryDraftApp", () => {
     expect(category.applyCategoryDraft).not.toHaveBeenCalled();
   });
 });
+
+describe("CATEGORY_DRAFT_HTML client script", () => {
+  it("ships a script that parses", () => {
+    const start = CATEGORY_DRAFT_HTML.indexOf("<script>") + "<script>".length;
+    const script = CATEGORY_DRAFT_HTML.slice(start, CATEGORY_DRAFT_HTML.lastIndexOf("</script>"));
+    expect(() => new Function(script)).not.toThrow();
+  });
+});

@@ -14,45 +14,6 @@ const money = vi.hoisted(() => ({
   getMoneyTransactionDetails: vi.fn(),
   searchMoneyLineItems: vi.fn(),
   resolveCategoryFilter: vi.fn(),
-  compactTransactionsFromPage: (page: {
-    transactions: Array<{
-      line_items: Array<{ category?: { canonical_key?: string | null } | null }>;
-      [key: string]: unknown;
-    }>;
-    feedRows?: Array<{ line_item_count?: number; category_ids?: string[] }>;
-  }) =>
-    page.transactions.map((transaction, index) => {
-      const { line_items, ...rest } = transaction;
-      const row = page.feedRows?.[index];
-      return {
-        ...rest,
-        line_item_count: row?.line_item_count ?? line_items.length,
-        category_keys: [
-          ...new Set(
-            line_items
-              .map((item) => item.category?.canonical_key)
-              .filter((key): key is string => typeof key === "string" && key.length > 0),
-          ),
-        ],
-      };
-    }),
-  toCompactTransaction: (transaction: {
-    line_items: Array<{ category?: { canonical_key?: string | null } | null }>;
-    [key: string]: unknown;
-  }) => {
-    const { line_items, ...rest } = transaction;
-    return {
-      ...rest,
-      line_item_count: line_items.length,
-      category_keys: [
-        ...new Set(
-          line_items
-            .map((item) => item.category?.canonical_key)
-            .filter((key): key is string => typeof key === "string" && key.length > 0),
-        ),
-      ],
-    };
-  },
 }));
 const rules = vi.hoisted(() => ({
   listMoneyCategoryRules: vi.fn(),
@@ -61,7 +22,26 @@ const spending = vi.hoisted(() => ({ fetchMoneySpendingReport: vi.fn() }));
 const regen = vi.hoisted(() => ({ readTimezonePreference: vi.fn() }));
 const person = vi.hoisted(() => ({ resolvePerson: vi.fn(), listPeople: vi.fn() }));
 
-vi.mock("../money/transactions", () => money);
+// Keep real compactTransactionsFromPage / toCompactTransaction — a local stub hid
+// feedRows/categoryById behaviour (T-261113-qgz).
+vi.mock("../money/transactions", async () => {
+  const actual =
+    await vi.importActual<typeof import("../money/transactions")>("../money/transactions");
+  return {
+    ...actual,
+    MONEY_FEED_MAX_LIMIT: money.MONEY_FEED_MAX_LIMIT,
+    MONEY_MCP_DEFAULT_LIMIT: money.MONEY_MCP_DEFAULT_LIMIT,
+    MONEY_MCP_DETAIL_MAX_IDS: money.MONEY_MCP_DETAIL_MAX_IDS,
+    MONEY_MCP_LINE_SEARCH_DEFAULT_LIMIT: money.MONEY_MCP_LINE_SEARCH_DEFAULT_LIMIT,
+    MONEY_MCP_LINE_SEARCH_MAX_LIMIT: money.MONEY_MCP_LINE_SEARCH_MAX_LIMIT,
+    listMoneyTransactions: money.listMoneyTransactions,
+    listMoneyCategories: money.listMoneyCategories,
+    listMoneyAccounts: money.listMoneyAccounts,
+    getMoneyTransactionDetails: money.getMoneyTransactionDetails,
+    searchMoneyLineItems: money.searchMoneyLineItems,
+    resolveCategoryFilter: money.resolveCategoryFilter,
+  };
+});
 vi.mock("../money/category-rules", () => rules);
 vi.mock("../money/spending-report", () => spending);
 vi.mock("@/lib/medications/regenerate-dose-events", () => regen);
@@ -131,14 +111,71 @@ function feedPage(
   transactions: Array<Record<string, unknown> & { line_items: unknown[] }> = [TRANSACTION],
   total = 1,
 ) {
+  const categoryById = new Map<
+    string,
+    {
+      id: string;
+      parent_id: string | null;
+      canonical_category_id: string;
+      category_kind: "canonical" | "custom";
+      system_key: string | null;
+      name_en: string;
+      name_ru: string;
+      sort_order: number;
+      created_by: string | null;
+      depth: number;
+      slug: string | null;
+      archived_at: string | null;
+    }
+  >([
+    [
+      "food",
+      {
+        id: "food",
+        parent_id: null,
+        canonical_category_id: "food",
+        category_kind: "canonical",
+        system_key: "food",
+        name_en: "Food",
+        name_ru: "Еда",
+        sort_order: 1,
+        created_by: null,
+        depth: 1,
+        slug: "food",
+        archived_at: null,
+      },
+    ],
+    [
+      "coffee",
+      {
+        id: "coffee",
+        parent_id: null,
+        canonical_category_id: "food",
+        category_kind: "custom",
+        system_key: null,
+        name_en: "Coffee",
+        name_ru: "Кофе",
+        sort_order: 2,
+        created_by: null,
+        depth: 1,
+        slug: "coffee",
+        archived_at: null,
+      },
+    ],
+  ]);
   return {
     total,
     transactions,
     feedRows: transactions.map((transaction) => ({
       line_item_count: transaction.line_items.length,
-      category_ids: [],
+      category_ids: transaction.line_items
+        .map((item) => {
+          const category = (item as { category?: { id?: string } | null }).category;
+          return typeof category?.id === "string" ? category.id : null;
+        })
+        .filter((id): id is string => Boolean(id)),
     })),
-    categoryById: new Map(),
+    categoryById,
   };
 }
 

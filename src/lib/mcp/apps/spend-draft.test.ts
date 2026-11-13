@@ -336,3 +336,11 @@ describe("the spend card", () => {
     expect(SPEND_DRAFT_HTML).toContain("late.error");
   });
 });
+
+describe("SPEND_DRAFT_HTML client script", () => {
+  it("ships a script that parses", () => {
+    const start = SPEND_DRAFT_HTML.indexOf("<script>") + "<script>".length;
+    const script = SPEND_DRAFT_HTML.slice(start, SPEND_DRAFT_HTML.lastIndexOf("</script>"));
+    expect(() => new Function(script)).not.toThrow();
+  });
+});

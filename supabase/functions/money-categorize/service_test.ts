@@ -855,6 +855,56 @@ Deno.test(
 );
 
 Deno.test(
+  "applyMoneyCategoryRulePipelineService skips locked items before LLM without forceOverwrite",
+  async () => {
+    const { deps, state } = createDeps({
+      rules: [
+        createRule({
+          id: "rule-llm",
+          name: "LLM",
+          rule_kind: "llm_categorization",
+          sort_order: 1,
+          config: { prompt: "categorize" },
+        }),
+      ],
+      contexts: {
+        "line-locked": createContext({
+          lineItemId: "line-locked",
+          title: "Locked latte",
+          locked: true,
+          currentCategoryId: "cat-coffee",
+          currentCategoryKind: "custom",
+          currentCanonicalCategoryId: "cat-food",
+          currentCanonicalSystemKey: "food",
+        }),
+      },
+      batchCategorize: async () => {
+        throw new Error("LLM must not run for a locked line item");
+      },
+    });
+
+    const result = await applyMoneyCategoryRulePipelineService(
+      {
+        lineItemIds: ["line-locked"],
+        personId: "person-1",
+        forceOverwriteLocked: false,
+        triggerSource: "single_line_item_replay",
+      },
+      deps,
+    );
+
+    assertEquals(result.count, 1);
+    assertEquals(result.runs[0]?.final_category_id, "cat-coffee");
+    assertEquals(
+      result.runs[0]?.decision_reason,
+      "Line item is locked by a manual category assignment",
+    );
+    assertEquals(state.batchCalls.length, 0);
+    assertEquals(state.createdSteps.length, 0);
+  },
+);
+
+Deno.test(
   "applyMoneyCategoryRulePipelineService does not retry a failed Jev batch as single-item calls",
   async () => {
     const lineItemIds = ["line-1", "line-2", "line-3", "line-4"];
