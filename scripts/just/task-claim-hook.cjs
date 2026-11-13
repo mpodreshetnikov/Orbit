@@ -384,10 +384,14 @@ function verdictNow() {
 }
 
 function isAgentSession(env = process.env) {
+  // Match agent-env-check: local Claude (CLAUDECODE / AI_AGENT=claude-code_*) is an agent too.
+  const aiAgent = typeof env.AI_AGENT === "string" ? env.AI_AGENT : "";
   return (
     env.CURSOR_AGENT === "1" ||
     env.CURSOR_CODE_REMOTE === "true" ||
     env.CLAUDE_CODE_REMOTE === "true" ||
+    env.CLAUDECODE === "1" ||
+    aiAgent.startsWith("claude-code_") ||
     Boolean(env.CODEX_THREAD_ID || env.CODEX_SESSION_ID || env.CODEX_CI === "1") ||
     (typeof env.CODEX_SANDBOX === "string" && env.CODEX_SANDBOX.length > 0)
   );

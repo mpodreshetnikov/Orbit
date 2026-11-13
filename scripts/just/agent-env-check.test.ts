@@ -192,7 +192,10 @@ describe("the check", () => {
 
   it("passes a Claude cloud session whose environment ran the documented block", () => {
     const home = homeFromDocumentedBlock();
-    expect(check({ env: { CLAUDE_CODE_REMOTE: "true" }, home }).ok).toBe(true);
+    // Dual-repo (orbit-tasks) is asserted separately; this fixture only covers harness hooks.
+    expect(check({ env: { CLAUDE_CODE_REMOTE: "true" }, home, requireDualRepo: false }).ok).toBe(
+      true,
+    );
   });
 
   it("refuses when the Claude block names a bridge that is not there", () => {

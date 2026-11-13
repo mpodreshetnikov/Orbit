@@ -13,6 +13,7 @@ const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
 const {
+  ALL_AUTHOR_EMAILS,
   displayNameForEmail,
   findParticipantByEmail,
   participantAuthorProblem,
@@ -22,10 +23,42 @@ const {
 
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 
-const AGENT_TRAILER_RE = /^(Co-authored-by|Co-Authored-By|Claude-Session):\s*.+$/gim;
-
 function git(root, args) {
   return spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+}
+
+function normalizeLooseEmail(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase();
+}
+
+/** Co-authored-by identities that are agent mailboxes — human co-authors stay. */
+function isAgentCoAuthorIdentity(identity) {
+  const text = String(identity ?? "").trim();
+  if (!text) return false;
+  const emailMatch = /<([^>]+)>/.exec(text);
+  const email = normalizeLooseEmail(emailMatch ? emailMatch[1] : "");
+  if (email) {
+    if (EXTRA_REJECTED_AGENT_MAILBOXES.includes(email)) return true;
+    if (email.includes("cursoragent@")) return true;
+    if (email.endsWith("@anthropic.com")) return true;
+    if (email.endsWith("@cursor.com") && !ALL_AUTHOR_EMAILS.has(email)) return true;
+    // Participant noreply (Maxim) is human; other noreply agent boxes are not.
+    if (ALL_AUTHOR_EMAILS.has(email)) return false;
+    if (email.includes("noreply") && email !== "noreply@github.com") return true;
+    return false;
+  }
+  // Name-only trailers: strip known agent labels.
+  return /cursor\s*agent/i.test(text) || /^claude(\b|$)/i.test(text);
+}
+
+function lineIsAgentTrailer(line) {
+  const trimmed = String(line).trim();
+  if (/^Claude-Session:/i.test(trimmed)) return true;
+  const co = /^Co-authored-by:\s*(.+)$/i.exec(trimmed);
+  if (!co) return false;
+  return isAgentCoAuthorIdentity(co[1]);
 }
 
 function readMarker(repoRoot = REPO_ROOT) {
@@ -44,13 +77,14 @@ function readMarker(repoRoot = REPO_ROOT) {
 
 function locateRegistry(repoRoot = REPO_ROOT, env = process.env) {
   if (env.ORBIT_TASKS_ROOT) return path.resolve(env.ORBIT_TASKS_ROOT);
+  if (env.ORBIT_TASKS_REGISTRY) return path.resolve(env.ORBIT_TASKS_REGISTRY);
   const sibling = path.resolve(repoRoot, "..", "orbit-tasks");
   if (fs.existsSync(path.join(sibling, "docs", "tasks"))) return sibling;
-  const linked = path.join(repoRoot, "docs", "tasks");
+  // docs/tasks → <registry>/docs/tasks; ascend two levels to the repo root (task-claim-hook).
   try {
-    if (fs.lstatSync(linked).isSymbolicLink()) {
-      return path.resolve(path.dirname(fs.realpathSync(linked)));
-    }
+    const linked = fs.realpathSync(path.join(repoRoot, "docs", "tasks"));
+    const root = path.resolve(linked, "..", "..");
+    if (fs.existsSync(path.join(root, "docs", "tasks", "README.md"))) return root;
   } catch {
     /* absent */
   }
@@ -74,15 +108,19 @@ function taskOwnerFromRegistry(taskId, registryRoot) {
 }
 
 function stripAgentTrailers(message) {
-  return String(message)
-    .replace(AGENT_TRAILER_RE, "")
+  const kept = String(message)
+    .split(/\n/)
+    .filter((line) => !lineIsAgentTrailer(line));
+  return kept
+    .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trimEnd();
 }
 
 function messageHasAgentTrailer(message) {
-  AGENT_TRAILER_RE.lastIndex = 0;
-  return AGENT_TRAILER_RE.test(String(message));
+  return String(message)
+    .split(/\n/)
+    .some((line) => lineIsAgentTrailer(line));
 }
 
 function isCursorCloud(env = process.env) {
@@ -269,12 +307,13 @@ if (require.main === module) {
 }
 
 module.exports = {
-  AGENT_TRAILER_RE,
   applyRewriteEnv,
   checkRange,
+  isAgentCoAuthorIdentity,
   isAgentSession,
   isCursorCloud,
   isGithubMergeCommitter,
+  lineIsAgentTrailer,
   locateRegistry,
   messageHasAgentTrailer,
   parseIdent,

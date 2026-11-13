@@ -138,4 +138,16 @@ describe("human-authorship trailers (D13)", () => {
     expect(messageHasAgentTrailer(raw)).toBe(true);
     expect(stripAgentTrailers(raw)).not.toMatch(/Co-authored-by/i);
   });
+
+  it("keeps legitimate human Co-authored-by trailers", () => {
+    const raw = "Subject\n\nCo-authored-by: Maxim Podreshetnikov <mpodreshetnikov@gmail.com>\n";
+    expect(messageHasAgentTrailer(raw)).toBe(false);
+    expect(stripAgentTrailers(raw)).toContain("Co-authored-by: Maxim Podreshetnikov");
+  });
+
+  it("still strips Claude-Session trailers", () => {
+    const raw = "Subject\n\nClaude-Session: abc\n";
+    expect(messageHasAgentTrailer(raw)).toBe(true);
+    expect(stripAgentTrailers(raw)).not.toMatch(/Claude-Session/i);
+  });
 });

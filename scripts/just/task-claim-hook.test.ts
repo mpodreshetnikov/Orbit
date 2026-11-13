@@ -12,6 +12,7 @@ const {
   preSnapshotPath,
   statePathFor,
   writePreSnapshot,
+  isAgentSession,
   isRegistryPath,
   locateRegistry,
   message,
@@ -29,6 +30,7 @@ const {
     registryRoot: string | null;
     statusOf: (id: string) => string | null;
   }) => { verdict: string; id?: string; status?: string };
+  isAgentSession: (env?: Record<string, string | undefined>) => boolean;
   isRegistryPath: (filePath: string, repoRoot?: string) => boolean;
   locateRegistry: (repoRoot: string, env: Record<string, string>) => string | null;
   message: (result: { verdict: string; id?: string; status?: string }, filePath: string) => string;
@@ -566,6 +568,12 @@ describe("the pre-commit end", () => {
     expect(commitThroughGlobalHooks(code, { ORBIT_TASKS_REGISTRY: registry })).not.toContain(
       "task-claim (pre-commit)",
     );
+  });
+
+  it("treats local Claude (CLAUDECODE / AI_AGENT=claude-code_*) as an agent session", () => {
+    expect(isAgentSession({ CLAUDECODE: "1" })).toBe(true);
+    expect(isAgentSession({ AI_AGENT: "claude-code_2-0" })).toBe(true);
+    expect(isAgentSession({})).toBe(false);
   });
 
   it("hard-fails an unclaimed commit in an agent/cloud session (D9)", () => {

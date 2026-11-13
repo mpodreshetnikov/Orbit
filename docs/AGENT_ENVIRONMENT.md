@@ -70,10 +70,13 @@ cat > ~/.claude/settings.json <<'JSON'
 }}
 JSON
 
-# Git: a repository's own .githooks/pre-commit, for commits made without Claude Code's hooks.
+# Git: a repository's own .githooks, for commits made without Claude Code's hooks.
+# Forwards pre-commit, pre-push, and commit-msg (D13 authorship) when present.
 mkdir -p ~/.git-hooks
-printf '#!/bin/sh\nh="$(git rev-parse --show-toplevel)/.githooks/pre-commit"\n[ -x "$h" ] && exec "$h" "$@"\nexit 0\n' > ~/.git-hooks/pre-commit
-chmod +x ~/.git-hooks/pre-commit
+for hook in pre-commit pre-push commit-msg; do
+  printf '#!/bin/sh\nh="$(git rev-parse --show-toplevel)/.githooks/%s"\n[ -x "$h" ] && exec "$h" "$@"\nexit 0\n' "$hook" > ~/.git-hooks/"$hook"
+  chmod +x ~/.git-hooks/"$hook"
+done
 git config --global core.hooksPath ~/.git-hooks
 ```
 

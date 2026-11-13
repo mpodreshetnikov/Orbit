@@ -59,6 +59,17 @@ jobs:
           node scripts/just/human-authorship.cjs --check-range \
             "${{ github.event.pull_request.base.sha }}" \
             "${{ github.event.pull_request.head.sha }}"
+      - name: Spec / second-participant approve (D7)
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          # Enforced when a claim marker + reachable registry are present (dual-repo CI).
+          # Without them the step is a no-op success (claim/authorship gates still apply).
+          if [[ -n "${ORBIT_TASKS_ROOT:-}" || -e docs/tasks || -d ../orbit-tasks/docs/tasks ]]; then
+            node scripts/just/spec-approve.cjs --check-claimed
+          else
+            echo "spec-approve: registry not in this job — skipped (local pre-push still enforces)"
+          fi
       # Impact detection runs before the heavy toolchain setup, so a change that needs neither the
       # database nor the functions can skip installing Deno and the Supabase CLI along with the
       # lanes that need them. change-impact.cjs uses only Node built-ins and git, so it runs
