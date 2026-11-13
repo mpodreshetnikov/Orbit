@@ -171,20 +171,24 @@ export function ruleSummary(
 
   const parts = rule.filters.map((filter) => {
     const field = fields.get(filter.field) ?? filter.field;
-    const operator = operators.get(filter.operator) ?? filter.operator;
+    const rawOperator = operators.get(filter.operator) ?? filter.operator;
+    const operator =
+      rawOperator.length > 0
+        ? rawOperator.charAt(0).toLocaleLowerCase() + rawOperator.slice(1)
+        : rawOperator;
     if (filter.operator === "range") {
-      return `${field} ${operator} ${filter.min ?? "..."} - ${filter.max ?? "..."}`;
+      return `${field}: ${operator} ${filter.min ?? "..."} - ${filter.max ?? "..."}`;
     }
     if (SET_OPERATORS.has(filter.operator)) {
-      return `${field} ${operator} ${(filter.values ?? []).map((value) => `'${value}'`).join(", ")}`;
+      return `${field}: ${operator} ${(filter.values ?? []).map((value) => `'${value}'`).join(", ")}`;
     }
     if (filter.operator === "is_empty" || filter.operator === "is_not_empty") {
-      return `${field} ${operator}`;
+      return `${field}: ${operator}`;
     }
     if (filter.field === "current_category_id" && typeof filter.value === "string") {
-      return `${field} ${operator} '${categoryNameById.get(filter.value) ?? filter.value}'`;
+      return `${field}: ${operator} '${categoryNameById.get(filter.value) ?? filter.value}'`;
     }
-    return `${field} ${operator} '${String(filter.value ?? "")}'`;
+    return `${field}: ${operator} '${String(filter.value ?? "")}'`;
   });
   const joiner = rule.match_mode === "all" ? t("money.ruleSummaryAnd") : t("money.ruleSummaryOr");
   return parts.join(` ${joiner} `);
@@ -216,6 +220,8 @@ export interface RuleFilterDraft {
   max: string;
 }
 
+export type MoneyLlmProvider = "jev" | "openrouter";
+
 export interface RuleForm {
   id: string | null;
   name: string;
@@ -227,8 +233,16 @@ export interface RuleForm {
   scopeFilter: MoneyCategoryRuleScopeFilter;
   stopProcessing: boolean;
   prompt: string;
+  llmProvider: MoneyLlmProvider;
   fallbackSystemKey: string;
   filters: RuleFilterDraft[];
+}
+
+/** Legacy rules without `provider` stay on OpenRouter; only explicit `jev` selects Jev. */
+export function resolveRuleLlmProvider(
+  config: Record<string, unknown> | null | undefined,
+): MoneyLlmProvider {
+  return config?.provider === "jev" ? "jev" : "openrouter";
 }
 
 function normalizeDraftOperator(
@@ -310,6 +324,7 @@ export function emptyRuleForm(): RuleForm {
     scopeFilter: "all_line_items",
     stopProcessing: false,
     prompt: "",
+    llmProvider: "jev",
     fallbackSystemKey: "uncategorized",
     filters: [],
   };
@@ -327,6 +342,7 @@ export function ruleFormOf(rule: MoneyCategoryRule): RuleForm {
     scopeFilter: rule.scope_filter,
     stopProcessing: rule.stop_processing,
     prompt: typeof rule.config.prompt === "string" ? rule.config.prompt : "",
+    llmProvider: resolveRuleLlmProvider(rule.config),
     fallbackSystemKey:
       typeof rule.config.target_system_key === "string"
         ? rule.config.target_system_key
@@ -342,8 +358,11 @@ export function rulePayload(
 ): CreateMoneyCategoryRuleInput | UpdateMoneyCategoryRuleInput {
   const config: Record<string, unknown> = {};
 
-  if (form.ruleKind === "llm_categorization" && form.prompt.trim()) {
-    config.prompt = form.prompt.trim();
+  if (form.ruleKind === "llm_categorization") {
+    config.provider = form.llmProvider;
+    if (form.prompt.trim()) {
+      config.prompt = form.prompt.trim();
+    }
   }
 
   if (form.ruleKind === "fallback_uncategorized") {

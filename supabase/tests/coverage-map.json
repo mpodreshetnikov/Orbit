@@ -88,6 +88,9 @@
     "supabase/db/functions/money_get_budget_report.sql": [
       "supabase/tests/functions/money_budget_reporting_test.sql"
     ],
+    "supabase/db/functions/money_list_line_item_discrepancies.sql": [
+      "supabase/tests/functions/money_line_item_discrepancies_test.sql"
+    ],
     "supabase/db/functions/money_get_spending_report.sql": [
       "supabase/tests/functions/money_spending_report_test.sql"
     ],
@@ -258,7 +261,8 @@
       "supabase/tests/policies/money_domain_rls_access_test.sql"
     ],
     "supabase/db/policies/money_line_items.sql": [
-      "supabase/tests/policies/money_domain_rls_access_test.sql"
+      "supabase/tests/policies/money_domain_rls_access_test.sql",
+      "supabase/tests/functions/money_line_item_placeholder_backfill_test.sql"
     ],
     "supabase/db/policies/money_mcc_canonical_category_map.sql": [
       "supabase/tests/policies/money_domain_rls_access_test.sql"

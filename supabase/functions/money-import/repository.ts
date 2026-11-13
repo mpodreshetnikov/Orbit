@@ -213,6 +213,7 @@ export interface MoneyImportRepository {
     replaced_synthetic_line_items: boolean;
     has_only_synthetic_line_items: boolean;
     has_real_line_items: boolean;
+    blocked_by_manual_edit: boolean;
   }>;
   insertOrResolveTransaction(
     row: CanonicalTransactionRowInput,
@@ -922,7 +923,9 @@ export function createSupabaseMoneyImportRepository(
     if (transactionIds.length === 0) return [];
     const { data, error } = await getAdminClient()
       .from("money_line_items")
-      .select("transaction_id, raw_payload")
+      .select(
+        "id, transaction_id, raw_payload, is_placeholder, category_locked_by_user, assignment_method",
+      )
       .in("transaction_id", transactionIds);
     if (error || !data) return [];
     return data as Array<Record<string, unknown>>;
@@ -999,6 +1002,7 @@ export function createSupabaseMoneyImportRepository(
       if (!transactionId) continue;
       const existing = lineItemsByTransactionId.get(transactionId) ?? [];
       existing.push({
+        is_placeholder: row.is_placeholder === true,
         raw_payload:
           row.raw_payload && typeof row.raw_payload === "object"
             ? (row.raw_payload as Record<string, unknown>)
@@ -1774,9 +1778,11 @@ export function createSupabaseMoneyImportRepository(
     replaced_synthetic_line_items: boolean;
     has_only_synthetic_line_items: boolean;
     has_real_line_items: boolean;
+    blocked_by_manual_edit: boolean;
   }> {
     const existingLineItems = await listLineItemsByTransactionIds([transactionId]);
     const normalizedLineItems = existingLineItems.map((lineItem) => ({
+      is_placeholder: lineItem.is_placeholder === true,
       raw_payload:
         lineItem.raw_payload && typeof lineItem.raw_payload === "object"
           ? (lineItem.raw_payload as Record<string, unknown>)
@@ -1784,14 +1790,49 @@ export function createSupabaseMoneyImportRepository(
     }));
     const hasOnlySyntheticLineItems = hasOnlySyntheticImportLineItems(normalizedLineItems);
     const hasRealLineItems = hasRealImportLineItems(normalizedLineItems);
+    const blockedByManualEdit = existingLineItems.some(
+      (lineItem) =>
+        lineItem.category_locked_by_user === true || lineItem.assignment_method === "manual",
+    );
 
-    if (hasOnlySyntheticLineItems) {
-      const { error: deleteError } = await getAdminClient()
-        .from("money_line_items")
-        .delete()
-        .eq("transaction_id", transactionId);
-      if (deleteError) {
-        throw new Error(deleteError.message || "Failed to replace synthetic line items");
+    let replacedSyntheticLineItems = false;
+    if (!blockedByManualEdit) {
+      const lineSource = (lineItem: Record<string, unknown>): string | null => {
+        const rawPayload =
+          lineItem.raw_payload && typeof lineItem.raw_payload === "object"
+            ? (lineItem.raw_payload as Record<string, unknown>)
+            : null;
+        return normalizeText(rawPayload?.source)?.toLowerCase() ?? null;
+      };
+      const isPlaceholderRow = (lineItem: Record<string, unknown>): boolean => {
+        if (lineItem.is_placeholder === true) return true;
+        const source = lineSource(lineItem);
+        return source === "fallback" || source === "dom_fallback";
+      };
+      const placeholderIds = existingLineItems
+        .filter(isPlaceholderRow)
+        .map((lineItem) => normalizeText(lineItem.id))
+        .filter((value): value is string => Boolean(value));
+      // Preserve categorized balancing lines when real receipt composition already
+      // exists. Only clear balancing when stubs are being replaced (recalc).
+      const balancingIds =
+        placeholderIds.length > 0
+          ? existingLineItems
+              .filter((lineItem) => lineSource(lineItem) === "balancing")
+              .map((lineItem) => normalizeText(lineItem.id))
+              .filter((value): value is string => Boolean(value))
+          : [];
+      const idsToDelete = [...placeholderIds, ...balancingIds];
+
+      if (idsToDelete.length > 0) {
+        const { error: deleteError } = await getAdminClient()
+          .from("money_line_items")
+          .delete()
+          .in("id", idsToDelete);
+        if (deleteError) {
+          throw new Error(deleteError.message || "Failed to replace synthetic line items");
+        }
+        replacedSyntheticLineItems = placeholderIds.length > 0;
       }
     }
 
@@ -1808,9 +1849,10 @@ export function createSupabaseMoneyImportRepository(
     }
 
     return {
-      replaced_synthetic_line_items: hasOnlySyntheticLineItems,
+      replaced_synthetic_line_items: replacedSyntheticLineItems,
       has_only_synthetic_line_items: hasOnlySyntheticLineItems,
       has_real_line_items: hasRealLineItems,
+      blocked_by_manual_edit: blockedByManualEdit,
     };
   }
 
@@ -1902,6 +1944,7 @@ export function createSupabaseMoneyImportRepository(
       assignment_method: "import" as const,
       raw_payload: asRecord(lineItem.raw_payload),
       import_hash: importHash,
+      is_placeholder: lineItem.is_placeholder === true,
     };
 
     const { data, error } = await getAdminClient()

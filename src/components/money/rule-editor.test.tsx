@@ -44,6 +44,19 @@ vi.mock("@/lib/date-locale", () => ({
   useIntlLocale: () => "en-US",
 }));
 
+vi.mock("@/lib/money-categorize-client", () => ({
+  callMoneyCategorizeAction: vi.fn(async (action: Record<string, unknown>) => {
+    if (action.action === "llm_provider_status") {
+      return {
+        jev: { configured: true },
+        openrouter: { configured: false },
+        default_provider: "jev",
+      };
+    }
+    throw new Error(`Unexpected money-categorize action: ${String(action.action)}`);
+  }),
+}));
+
 vi.mock("@/hooks", () => ({
   useCreateMoneyCategoryRule: (...args: unknown[]) => hookMocks.useCreateMoneyCategoryRule(...args),
   useMoneyAccounts: (...args: unknown[]) => hookMocks.useMoneyAccounts(...args),
@@ -323,9 +336,8 @@ describe("MoneyRuleEditor", () => {
     await user.click(screen.getAllByText(/Food \/ Еда/)[0]);
     await user.click(screen.getByRole("button", { name: "money.ruleAddFilter" }));
 
-    const filterCards = screen.getAllByText(/money.ruleExampleValue/);
-    const filterCard = filterCards[0]?.closest(".rounded-xl") as HTMLElement | null;
-    expect(filterCard).not.toBeNull();
+    const filterCard = screen.getAllByTestId("rule-filter-row")[0] as HTMLElement | undefined;
+    expect(filterCard).toBeTruthy();
     if (!filterCard) return;
 
     await user.click(within(filterCard).getByText("money.ruleOperatorRegex"));
@@ -344,9 +356,8 @@ describe("MoneyRuleEditor", () => {
     await user.type(screen.getByLabelText("money.ruleName"), "Coffee match");
     await user.click(screen.getByRole("button", { name: "money.ruleAddFilter" }));
 
-    const filterCards = screen.getAllByText(/money.ruleExampleValue/);
-    const filterCard = filterCards[0]?.closest(".rounded-xl") as HTMLElement | null;
-    expect(filterCard).not.toBeNull();
+    const filterCard = screen.getAllByTestId("rule-filter-row")[0] as HTMLElement | undefined;
+    expect(filterCard).toBeTruthy();
     if (!filterCard) return;
 
     await user.click(within(filterCard).getByText("money.ruleOperatorContainsAnyOfSet"));
@@ -485,7 +496,9 @@ describe("MoneyRuleEditor", () => {
     );
 
     expect(screen.getByRole("button", { name: "common.save" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: /money.ruleSaveAndPreviewExample/i })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: /money.ruleCheckSaveAndRun|money.ruleCheckAction/i }),
+    ).toBeDisabled();
     expect(screen.getByText("money.rulePreviewResult")).toBeInTheDocument();
   });
 
@@ -506,7 +519,9 @@ describe("MoneyRuleEditor", () => {
     const valueInput = screen.getByLabelText("money.ruleFilterValue");
     await user.clear(valueInput);
     await user.type(valueInput, "dish");
-    const previewButton = screen.getByRole("button", { name: /money.ruleSaveAndPreviewExample/i });
+    const previewButton = screen.getByRole("button", {
+      name: /money.ruleCheckSaveAndRun|money.ruleSaveAndPreviewExample/i,
+    });
     expect(previewButton).toBeInTheDocument();
     await user.click(previewButton);
 
@@ -551,14 +566,19 @@ describe("MoneyRuleEditor", () => {
     const promptInput = screen.getByLabelText("money.rulePrompt");
     await user.clear(promptInput);
     await user.type(promptInput, "New prompt");
-    await user.click(screen.getByRole("button", { name: /money.ruleRunExample/i }));
+    await user.click(
+      screen.getByRole("button", {
+        name: /money.ruleCheckSaveAndRun|money.ruleCheckAction|money.ruleRunExample/i,
+      }),
+    );
 
     await waitFor(() => {
       expect(updateRuleMutateAsync).toHaveBeenCalledWith({
         id: "rule-1",
         updates: expect.objectContaining({
           rule_kind: "llm_categorization",
-          config: { prompt: "New prompt" },
+          // Legacy rules without provider stay on OpenRouter until the editor opts into Jev.
+          config: { provider: "openrouter", prompt: "New prompt" },
         }),
       });
     });

@@ -4,12 +4,11 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { Check, ChevronsUpDown, Info, Loader2, Play, Sparkles } from "lucide-react";
+import { ArrowLeft, Check, ChevronsUpDown, Loader2, Play } from "lucide-react";
 import { toast } from "sonner";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Command,
@@ -53,16 +52,14 @@ import type {
   CreateMoneyCategoryRuleInput,
   MoneyCategoryRule,
   MoneyCategoryRuleFilterOperator,
-  MoneyCategoryRuleKind,
-  MoneyCategoryRuleMatchMode,
   MoneyCategoryRuleRun,
   MoneyCategoryRuleScopeFilter,
   MoneyLineItem,
   UpdateMoneyCategoryRuleInput,
 } from "@/types";
+import { callMoneyCategorizeAction } from "@/lib/money-categorize-client";
 import {
   emptyRuleForm,
-  isSmartRuleKind,
   RULE_FILTER_FIELDS,
   RULE_FILTER_OPERATORS,
   ruleCategoryLabel,
@@ -71,6 +68,7 @@ import {
   ruleFormProblem,
   ruleNumberInput,
   rulePayload,
+  type MoneyLlmProvider,
   type RuleForm,
 } from "@/types/money-rules";
 import {
@@ -78,6 +76,12 @@ import {
   MONEY_CATEGORY_RULE_MATCH_MODES,
   MONEY_CATEGORY_RULE_SCOPE_FILTERS,
 } from "@/types";
+
+type LlmProviderStatus = {
+  jev: { configured: boolean };
+  openrouter: { configured: boolean };
+  default_provider: MoneyLlmProvider;
+};
 
 interface MoneyRuleEditorProps {
   mode: "create" | "edit";
@@ -103,20 +107,6 @@ function Field({
         {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
       </div>
       {children}
-    </div>
-  );
-}
-
-function Tip({ title, body }: { title: string; body: string }) {
-  return (
-    <div className="rounded-lg border border-dashed bg-muted/30 p-3">
-      <div className="flex items-start gap-2">
-        <Info className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-        <div className="space-y-1">
-          <p className="text-sm font-medium">{title}</p>
-          <p className="text-xs leading-5 text-muted-foreground">{body}</p>
-        </div>
-      </div>
     </div>
   );
 }
@@ -150,9 +140,12 @@ export function MoneyRuleEditor({
   const [hasLocalChanges, setHasLocalChanges] = useState(false);
   const [previewRun, setPreviewRun] = useState<MoneyCategoryRuleRun | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [llmProviderStatus, setLlmProviderStatus] = useState<LlmProviderStatus | null>(null);
+  const [llmProviderStatusError, setLlmProviderStatusError] = useState<string | null>(null);
   const [transactionPickerOpen, setTransactionPickerOpen] = useState(false);
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   const [fallbackPickerOpen, setFallbackPickerOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const [exampleTransactionId, setExampleTransactionId] = useState<string | null>(
     initialExampleTransactionId,
   );
@@ -189,7 +182,26 @@ export function MoneyRuleEditor({
   }, [initialExampleLineItemId]);
 
   useEffect(() => {
-    if (!exampleTransaction?.line_items?.length) return;
+    if (form.ruleKind !== "llm_categorization") return;
+    let cancelled = false;
+    void callMoneyCategorizeAction<LlmProviderStatus>({ action: "llm_provider_status" })
+      .then((status) => {
+        if (cancelled) return;
+        setLlmProviderStatus(status);
+        setLlmProviderStatusError(null);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setLlmProviderStatus(null);
+        setLlmProviderStatusError(describeMoneyCategoryPipelineError(error, t));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [form.ruleKind, t]);
+
+  useEffect(() => {
+    if (!exampleTransactionId || !exampleTransaction?.line_items?.length) return;
 
     const existingLineItem = exampleTransaction.line_items.find(
       (item) => item.id === exampleLineItemId,
@@ -197,7 +209,7 @@ export function MoneyRuleEditor({
     if (!existingLineItem) {
       setExampleLineItemId(exampleTransaction.line_items[0]?.id ?? null);
     }
-  }, [exampleTransaction, exampleLineItemId]);
+  }, [exampleTransaction, exampleLineItemId, exampleTransactionId]);
 
   const selectedExampleLineItem = useMemo(
     () => exampleTransaction?.line_items?.find((item) => item.id === exampleLineItemId) ?? null,
@@ -248,15 +260,19 @@ export function MoneyRuleEditor({
     () =>
       (transactions ?? []).map((transaction) => {
         const merchant = transaction.merchant_name || t("money.transactionFallback");
-        const postedAt = new Intl.DateTimeFormat(intlLocale, {
-          year: "numeric",
-          month: "short",
-          day: "numeric",
-        }).format(new Date(transaction.posted_at));
+        const postedDate = transaction.posted_at ? new Date(transaction.posted_at) : null;
+        const postedAt =
+          postedDate && !Number.isNaN(postedDate.getTime())
+            ? new Intl.DateTimeFormat(intlLocale, {
+                year: "numeric",
+                month: "short",
+                day: "numeric",
+              }).format(postedDate)
+            : "";
         const amount = formatMoney(transaction.amount, transaction.currency, intlLocale);
         return {
           id: transaction.id,
-          label: `${merchant} - ${amount} - ${postedAt}`,
+          label: postedAt ? `${merchant} - ${amount} - ${postedAt}` : `${merchant} - ${amount}`,
           description: transaction.comment ?? transaction.source_category_name ?? transaction.id,
         };
       }),
@@ -333,23 +349,6 @@ export function MoneyRuleEditor({
         return "--";
     }
   };
-
-  const smartRuleTip = useMemo(() => {
-    switch (form.ruleKind) {
-      case "mcc_map":
-        return t("money.ruleKindTipmcc_map");
-      case "source_category_map":
-        return t("money.ruleKindTipsource_category_map");
-      case "llm_categorization":
-        return t("money.ruleKindTipllm_categorization");
-      case "fallback_uncategorized":
-        return t("money.ruleKindTipfallback_uncategorized");
-      default:
-        return t("money.ruleKindTipdirect");
-    }
-  }, [form.ruleKind, t]);
-
-  const scopeTip = useMemo(() => t(`money.ruleScopeTip${form.scopeFilter}`), [form.scopeFilter, t]);
 
   const validateForm = () => {
     if (!personId) return false;
@@ -477,6 +476,11 @@ export function MoneyRuleEditor({
     selectedExampleLineItem,
   ]);
 
+  const previewButtonLabel =
+    !form.id || hasLocalChanges ? t("money.ruleCheckSaveAndRun") : t("money.ruleCheckAction");
+  const headerTitle =
+    mode === "edit" ? form.name.trim() || t("money.editRule") : t("money.addRule");
+
   if (!personId) {
     return (
       <div className="flex h-48 items-center justify-center rounded-lg border border-dashed text-sm text-muted-foreground">
@@ -485,274 +489,389 @@ export function MoneyRuleEditor({
     );
   }
 
+  const startingCategoryId = selectedExampleLineItem?.category_id ?? null;
+  const finalCategoryId = previewRun?.final_category_id ?? null;
+  const whyText = previewRun?.steps?.[0]?.decision_reason ?? null;
+
   return (
-    <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
-      <div className="space-y-6">
-        <Card>
-          <CardHeader className="space-y-2">
-            <CardTitle>{mode === "edit" ? t("money.editRule") : t("money.addRule")}</CardTitle>
-            <p className="text-sm text-muted-foreground">
-              {selectedPersonName
-                ? `${t("money.rulePerson")}: ${selectedPersonName}`
-                : t("person.selectPrompt")}
-            </p>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="grid gap-4 md:grid-cols-2">
-              <Field label={t("money.ruleName")}>
-                <Input
-                  aria-label={t("money.ruleName")}
-                  value={form.name}
-                  onChange={(event) =>
-                    updateForm((current) => ({ ...current, name: event.target.value }))
-                  }
-                />
-              </Field>
+    <div className="space-y-5">
+      <div className="sticky top-0 z-20 -mx-1 border-b border-border/60 bg-background/95 px-1 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+        <div className="flex flex-wrap items-center gap-3">
+          <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" asChild>
+            <Link href="/money/rules" aria-label={t("common.back")}>
+              <ArrowLeft className="h-4 w-4" />
+            </Link>
+          </Button>
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate text-xl font-semibold tracking-tight">{headerTitle}</h1>
+            {selectedPersonName ? (
+              <Badge variant="secondary" className="mt-1 font-normal">
+                {selectedPersonName}
+              </Badge>
+            ) : null}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm">
+              <Checkbox
+                id="rule-enabled-header"
+                checked={form.enabled}
+                onCheckedChange={(checked) =>
+                  updateForm((current) => ({ ...current, enabled: checked === true }))
+                }
+              />
+              <span>{t("money.ruleEnabled")}</span>
+            </label>
+            <Button variant="ghost" asChild>
+              <Link href="/money/rules">{t("common.cancel")}</Link>
+            </Button>
+            <Button type="button" onClick={() => void handlePersistRule(false)} disabled={isSaving}>
+              {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              {t("common.save")}
+            </Button>
+          </div>
+        </div>
+      </div>
 
-              <Field label={t("money.ruleKind")} hint={t("money.ruleKindHint")}>
-                <Select
-                  value={form.ruleKind}
-                  onValueChange={(value) =>
-                    updateForm((current) => ({
-                      ...current,
-                      ruleKind: value as MoneyCategoryRuleKind,
-                      targetCategoryId: value === "direct" ? current.targetCategoryId : "",
-                    }))
-                  }
-                >
-                  <SelectTrigger aria-label={t("money.ruleKind")}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {MONEY_CATEGORY_RULE_KINDS.map((kind) => (
-                      <SelectItem key={kind} value={kind}>
-                        {t(`money.ruleKind${kind}`)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(340px,0.85fr)]">
+        <div className="space-y-8">
+          <section className="space-y-4">
+            <div>
+              <h2 className="text-sm font-semibold tracking-wide text-foreground/80">
+                {t("money.ruleSectionBasics")}
+              </h2>
+            </div>
 
-              <div className="md:col-span-2">
-                <Tip
-                  title={
-                    isSmartRuleKind(form.ruleKind)
-                      ? t("money.ruleSmartTipTitle")
-                      : t("money.ruleDirectTipTitle")
-                  }
-                  body={smartRuleTip}
-                />
+            <Field label={t("money.ruleName")}>
+              <Input
+                aria-label={t("money.ruleName")}
+                value={form.name}
+                onChange={(event) =>
+                  updateForm((current) => ({ ...current, name: event.target.value }))
+                }
+              />
+            </Field>
+
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">{t("money.ruleKind")}</Label>
+              <div
+                className="grid gap-2 sm:grid-cols-2"
+                role="radiogroup"
+                aria-label={t("money.ruleKind")}
+              >
+                {MONEY_CATEGORY_RULE_KINDS.map((kind) => {
+                  const selected = form.ruleKind === kind;
+                  return (
+                    <button
+                      key={kind}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      className={cn(
+                        "rounded-xl border px-3 py-3 text-left transition-colors",
+                        selected
+                          ? "border-foreground/30 bg-muted/50 shadow-sm"
+                          : "hover:bg-muted/30",
+                      )}
+                      onClick={() =>
+                        updateForm((current) => ({
+                          ...current,
+                          ruleKind: kind,
+                          targetCategoryId: kind === "direct" ? current.targetCategoryId : "",
+                          llmProvider:
+                            kind === "llm_categorization" &&
+                            current.ruleKind !== "llm_categorization"
+                              ? "jev"
+                              : current.llmProvider,
+                        }))
+                      }
+                    >
+                      <p className="text-sm font-medium">{t(`money.ruleKind${kind}`)}</p>
+                      <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                        {t(`money.ruleKindTip${kind}`)}
+                      </p>
+                    </button>
+                  );
+                })}
               </div>
+            </div>
 
-              <div className="md:col-span-2">
-                <Field label={t("money.ruleDescription")}>
+            {form.ruleKind === "direct" ? (
+              <Field label={t("money.ruleTargetCategory")}>
+                <Popover open={categoryPickerOpen} onOpenChange={setCategoryPickerOpen}>
+                  <PopoverAnchor asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full justify-between"
+                      aria-label={t("money.ruleTargetCategory")}
+                      aria-expanded={categoryPickerOpen}
+                      onClick={() => setCategoryPickerOpen((open) => !open)}
+                    >
+                      <span className="truncate">
+                        {form.targetCategoryId
+                          ? getCategoryLabelById(form.targetCategoryId)
+                          : t("money.ruleTargetCategoryPlaceholder")}
+                      </span>
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverAnchor>
+                  <PopoverContent
+                    className="w-[var(--radix-popover-trigger-width)] p-0"
+                    align="start"
+                    onEscapeKeyDown={() => closePopover(setCategoryPickerOpen, false)}
+                    onFocusOutside={() => closePopover(setCategoryPickerOpen, false)}
+                    onPointerDownOutside={() => closePopover(setCategoryPickerOpen, false)}
+                  >
+                    <Command>
+                      <CommandInput placeholder={t("money.ruleSearchCategories")} />
+                      <CommandList className="max-h-64">
+                        <CommandEmpty>{t("common.noResults")}</CommandEmpty>
+                        <CommandGroup>
+                          {sortedCategories.map((category) => (
+                            <CommandItem
+                              key={category.id}
+                              value={`${category.name_en} ${category.name_ru} ${category.system_key ?? ""}`}
+                              onSelect={() => {
+                                updateForm((current) => ({
+                                  ...current,
+                                  targetCategoryId: category.id,
+                                }));
+                                setCategoryPickerOpen(false);
+                              }}
+                            >
+                              <Check
+                                className={cn(
+                                  "mr-2 h-4 w-4",
+                                  form.targetCategoryId === category.id
+                                    ? "opacity-100"
+                                    : "opacity-0",
+                                )}
+                              />
+                              <span className="truncate">{ruleCategoryLabel(category)}</span>
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+              </Field>
+            ) : null}
+
+            {form.ruleKind === "fallback_uncategorized" ? (
+              <Field label={t("money.ruleFallbackTarget")}>
+                <Popover open={fallbackPickerOpen} onOpenChange={setFallbackPickerOpen}>
+                  <PopoverAnchor asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full justify-between"
+                      aria-label={t("money.ruleFallbackTarget")}
+                      aria-expanded={fallbackPickerOpen}
+                      onClick={() => setFallbackPickerOpen((open) => !open)}
+                    >
+                      <span className="truncate">
+                        {form.fallbackSystemKey
+                          ? (canonicalOptions.find(
+                              (option) => option.system_key === form.fallbackSystemKey,
+                            )?.name_en ?? form.fallbackSystemKey)
+                          : t("money.ruleFallbackTargetPlaceholder")}
+                      </span>
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverAnchor>
+                  <PopoverContent
+                    className="w-[var(--radix-popover-trigger-width)] p-0"
+                    align="start"
+                    onEscapeKeyDown={() => closePopover(setFallbackPickerOpen, false)}
+                    onFocusOutside={() => closePopover(setFallbackPickerOpen, false)}
+                    onPointerDownOutside={() => closePopover(setFallbackPickerOpen, false)}
+                  >
+                    <Command>
+                      <CommandInput placeholder={t("money.ruleSearchCategories")} />
+                      <CommandList className="max-h-64">
+                        <CommandEmpty>{t("common.noResults")}</CommandEmpty>
+                        <CommandGroup>
+                          {canonicalOptions.map((category) => (
+                            <CommandItem
+                              key={category.id}
+                              value={`${category.name_en} ${category.name_ru} ${category.system_key ?? ""}`}
+                              onSelect={() => {
+                                updateForm((current) => ({
+                                  ...current,
+                                  fallbackSystemKey: category.system_key ?? "uncategorized",
+                                }));
+                                setFallbackPickerOpen(false);
+                              }}
+                            >
+                              <Check
+                                className={cn(
+                                  "mr-2 h-4 w-4",
+                                  form.fallbackSystemKey === category.system_key
+                                    ? "opacity-100"
+                                    : "opacity-0",
+                                )}
+                              />
+                              <span className="truncate">{ruleCategoryLabel(category)}</span>
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+              </Field>
+            ) : null}
+
+            {form.ruleKind === "llm_categorization" ? (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">{t("money.ruleLlmProvider")}</Label>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {(
+                      [
+                        [
+                          "jev",
+                          t("money.ruleLlmProviderJev"),
+                          t("money.ruleLlmProviderJevBlurb"),
+                          true,
+                        ],
+                        [
+                          "openrouter",
+                          t("money.ruleLlmProviderOpenRouter"),
+                          t("money.ruleLlmProviderOpenRouterBlurb"),
+                          false,
+                        ],
+                      ] as const
+                    ).map(([value, title, blurb, recommended]) => {
+                      const selected = form.llmProvider === value;
+                      const configured = llmProviderStatus?.[value]?.configured;
+                      return (
+                        <button
+                          key={value}
+                          type="button"
+                          className={cn(
+                            "rounded-xl border px-3 py-3 text-left transition-colors",
+                            selected
+                              ? "border-foreground/30 bg-muted/50 shadow-sm"
+                              : "hover:bg-muted/30",
+                          )}
+                          onClick={() =>
+                            updateForm((current) => ({
+                              ...current,
+                              llmProvider: value,
+                            }))
+                          }
+                        >
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-sm font-medium">{title}</p>
+                            {recommended ? (
+                              <Badge variant="secondary" className="font-normal">
+                                {t("money.ruleLlmProviderRecommended")}
+                              </Badge>
+                            ) : null}
+                          </div>
+                          <p className="mt-1 text-xs leading-5 text-muted-foreground">{blurb}</p>
+                          {llmProviderStatus ? (
+                            <p
+                              className={cn(
+                                "mt-2 text-xs",
+                                configured ? "text-emerald-700" : "text-amber-800",
+                              )}
+                            >
+                              {configured
+                                ? t("money.ruleLlmProviderReady")
+                                : t("money.ruleLlmProviderNeedsSetup")}
+                            </p>
+                          ) : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {llmProviderStatusError ? (
+                    <Alert>
+                      <AlertTitle>{t("common.error")}</AlertTitle>
+                      <AlertDescription>{llmProviderStatusError}</AlertDescription>
+                    </Alert>
+                  ) : null}
+                  {llmProviderStatus && !llmProviderStatus[form.llmProvider].configured ? (
+                    <p className="text-xs text-amber-800">{t("money.ruleLlmProviderNeedsSetup")}</p>
+                  ) : null}
+                </div>
+
+                <Field label={t("money.rulePrompt")}>
                   <Textarea
-                    value={form.description}
+                    aria-label={t("money.rulePrompt")}
+                    value={form.prompt}
+                    placeholder={t("money.rulePromptPlaceholder")}
+                    className="min-h-[88px]"
                     onChange={(event) =>
-                      updateForm((current) => ({ ...current, description: event.target.value }))
+                      updateForm((current) => ({ ...current, prompt: event.target.value }))
                     }
                   />
                 </Field>
               </div>
+            ) : null}
+          </section>
 
-              {form.ruleKind === "direct" ? (
-                <Field
-                  label={t("money.ruleTargetCategory")}
-                  hint={t("money.ruleTargetCategoryHint")}
-                >
-                  <Popover open={categoryPickerOpen} onOpenChange={setCategoryPickerOpen}>
-                    <PopoverAnchor asChild>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="w-full justify-between"
-                        aria-label={t("money.ruleTargetCategory")}
-                        aria-expanded={categoryPickerOpen}
-                        onClick={() => setCategoryPickerOpen((open) => !open)}
-                      >
-                        <span className="truncate">
-                          {form.targetCategoryId
-                            ? getCategoryLabelById(form.targetCategoryId)
-                            : t("money.ruleTargetCategoryPlaceholder")}
-                        </span>
-                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                      </Button>
-                    </PopoverAnchor>
-                    <PopoverContent
-                      className="w-[var(--radix-popover-trigger-width)] p-0"
-                      align="start"
-                      onEscapeKeyDown={() => closePopover(setCategoryPickerOpen, false)}
-                      onFocusOutside={() => closePopover(setCategoryPickerOpen, false)}
-                      onPointerDownOutside={() => closePopover(setCategoryPickerOpen, false)}
-                    >
-                      <Command>
-                        <CommandInput placeholder={t("money.ruleSearchCategories")} />
-                        <CommandList className="max-h-64">
-                          <CommandEmpty>{t("common.noResults")}</CommandEmpty>
-                          <CommandGroup>
-                            {sortedCategories.map((category) => (
-                              <CommandItem
-                                key={category.id}
-                                value={`${category.name_en} ${category.name_ru} ${category.system_key ?? ""}`}
-                                onSelect={() => {
-                                  updateForm((current) => ({
-                                    ...current,
-                                    targetCategoryId: category.id,
-                                  }));
-                                  setCategoryPickerOpen(false);
-                                }}
-                              >
-                                <Check
-                                  className={cn(
-                                    "mr-2 h-4 w-4",
-                                    form.targetCategoryId === category.id
-                                      ? "opacity-100"
-                                      : "opacity-0",
-                                  )}
-                                />
-                                <span className="truncate">{ruleCategoryLabel(category)}</span>
-                              </CommandItem>
-                            ))}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
-                </Field>
-              ) : null}
-
-              {form.ruleKind === "fallback_uncategorized" ? (
-                <Field
-                  label={t("money.ruleFallbackTarget")}
-                  hint={t("money.ruleFallbackTargetHint")}
-                >
-                  <Popover open={fallbackPickerOpen} onOpenChange={setFallbackPickerOpen}>
-                    <PopoverAnchor asChild>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="w-full justify-between"
-                        aria-label={t("money.ruleFallbackTarget")}
-                        aria-expanded={fallbackPickerOpen}
-                        onClick={() => setFallbackPickerOpen((open) => !open)}
-                      >
-                        <span className="truncate">
-                          {form.fallbackSystemKey
-                            ? (canonicalOptions.find(
-                                (option) => option.system_key === form.fallbackSystemKey,
-                              )?.name_en ?? form.fallbackSystemKey)
-                            : t("money.ruleFallbackTargetPlaceholder")}
-                        </span>
-                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                      </Button>
-                    </PopoverAnchor>
-                    <PopoverContent
-                      className="w-[var(--radix-popover-trigger-width)] p-0"
-                      align="start"
-                      onEscapeKeyDown={() => closePopover(setFallbackPickerOpen, false)}
-                      onFocusOutside={() => closePopover(setFallbackPickerOpen, false)}
-                      onPointerDownOutside={() => closePopover(setFallbackPickerOpen, false)}
-                    >
-                      <Command>
-                        <CommandInput placeholder={t("money.ruleSearchCategories")} />
-                        <CommandList className="max-h-64">
-                          <CommandEmpty>{t("common.noResults")}</CommandEmpty>
-                          <CommandGroup>
-                            {canonicalOptions.map((category) => (
-                              <CommandItem
-                                key={category.id}
-                                value={`${category.name_en} ${category.name_ru} ${category.system_key ?? ""}`}
-                                onSelect={() => {
-                                  updateForm((current) => ({
-                                    ...current,
-                                    fallbackSystemKey: category.system_key ?? "uncategorized",
-                                  }));
-                                  setFallbackPickerOpen(false);
-                                }}
-                              >
-                                <Check
-                                  className={cn(
-                                    "mr-2 h-4 w-4",
-                                    form.fallbackSystemKey === category.system_key
-                                      ? "opacity-100"
-                                      : "opacity-0",
-                                  )}
-                                />
-                                <span className="truncate">{ruleCategoryLabel(category)}</span>
-                              </CommandItem>
-                            ))}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
-                </Field>
-              ) : null}
-
-              <Field label={t("money.ruleMatchMode")} hint={t("money.ruleMatchModeHint")}>
-                <Select
-                  value={form.matchMode}
-                  onValueChange={(value) =>
-                    updateForm((current) => ({
-                      ...current,
-                      matchMode: value as MoneyCategoryRuleMatchMode,
-                    }))
-                  }
-                >
-                  <SelectTrigger aria-label={t("money.ruleMatchMode")}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {MONEY_CATEGORY_RULE_MATCH_MODES.map((matchMode) => (
-                      <SelectItem key={matchMode} value={matchMode}>
-                        {t(`money.ruleMatch${matchMode}`)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-
-              <Field label={t("money.ruleScopeFilter")} hint={scopeTip}>
-                <Select
-                  value={form.scopeFilter}
-                  onValueChange={(value) =>
-                    updateForm((current) => ({
-                      ...current,
-                      scopeFilter: value as MoneyCategoryRuleScopeFilter,
-                    }))
-                  }
-                >
-                  <SelectTrigger aria-label={t("money.ruleScopeFilter")}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {MONEY_CATEGORY_RULE_SCOPE_FILTERS.map((scopeFilter) => (
-                      <SelectItem key={scopeFilter} value={scopeFilter}>
-                        {t(`money.ruleScope${scopeFilter}`)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
+          <section className="space-y-4">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold tracking-wide text-foreground/80">
+                  {t("money.ruleSectionWhen")}
+                </h2>
+              </div>
             </div>
 
-            {form.ruleKind === "llm_categorization" ? (
-              <Field label={t("money.rulePrompt")} hint={t("money.rulePromptHint")}>
-                <Textarea
-                  aria-label={t("money.rulePrompt")}
-                  value={form.prompt}
-                  onChange={(event) =>
-                    updateForm((current) => ({ ...current, prompt: event.target.value }))
-                  }
-                />
-              </Field>
-            ) : null}
+            <Field label={t("money.ruleScopeFilter")}>
+              <Select
+                value={form.scopeFilter}
+                onValueChange={(value) =>
+                  updateForm((current) => ({
+                    ...current,
+                    scopeFilter: value as MoneyCategoryRuleScopeFilter,
+                  }))
+                }
+              >
+                <SelectTrigger aria-label={t("money.ruleScopeFilter")}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {MONEY_CATEGORY_RULE_SCOPE_FILTERS.map((scopeFilter) => (
+                    <SelectItem key={scopeFilter} value={scopeFilter}>
+                      {t(`money.ruleScope${scopeFilter}`)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
 
-            <div className="space-y-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="space-y-1">
-                  <h2 className="text-sm font-medium">{t("money.ruleFilters")}</h2>
-                  <p className="text-xs text-muted-foreground">{t("money.ruleFiltersHint")}</p>
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-sm font-medium">{t("money.ruleFilters")}</h3>
+                  <div className="inline-flex rounded-lg border p-0.5">
+                    {MONEY_CATEGORY_RULE_MATCH_MODES.map((matchMode) => (
+                      <button
+                        key={matchMode}
+                        type="button"
+                        className={cn(
+                          "rounded-md px-2.5 py-1 text-xs transition-colors",
+                          form.matchMode === matchMode
+                            ? "bg-foreground text-background"
+                            : "text-muted-foreground hover:text-foreground",
+                        )}
+                        onClick={() =>
+                          updateForm((current) => ({
+                            ...current,
+                            matchMode,
+                          }))
+                        }
+                      >
+                        {t(`money.ruleMatch${matchMode}`)}
+                      </button>
+                    ))}
+                  </div>
                 </div>
                 <Button
                   type="button"
@@ -770,180 +889,146 @@ export function MoneyRuleEditor({
               </div>
 
               {form.filters.length === 0 ? (
-                <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-                  {t("money.ruleNoFiltersHint")}
-                </div>
+                <p className="text-sm text-muted-foreground">{t("money.ruleNoFiltersHint")}</p>
               ) : null}
 
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {form.filters.map((filter) => (
-                  <div key={filter.id} className="rounded-xl border p-4">
-                    <div className="grid gap-4 lg:grid-cols-2">
-                      <Field label={t("money.ruleFilterField")}>
-                        <Select
-                          value={filter.field}
-                          onValueChange={(value) =>
-                            updateForm((current) => ({
-                              ...current,
-                              filters: current.filters.map((item) =>
-                                item.id === filter.id ? { ...item, field: value } : item,
-                              ),
-                            }))
-                          }
+                  <div
+                    key={filter.id}
+                    data-testid="rule-filter-row"
+                    className="rounded-xl border px-3 py-3"
+                  >
+                    <div className="grid min-w-0 gap-2 lg:grid-cols-[minmax(130px,0.9fr)_minmax(200px,1.3fr)_minmax(0,1.3fr)_auto]">
+                      <Select
+                        value={filter.field}
+                        onValueChange={(value) =>
+                          updateForm((current) => ({
+                            ...current,
+                            filters: current.filters.map((item) =>
+                              item.id === filter.id ? { ...item, field: value } : item,
+                            ),
+                          }))
+                        }
+                      >
+                        <SelectTrigger
+                          aria-label={t("money.ruleFilterField")}
+                          className="w-full min-w-0 [&>span]:truncate"
                         >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {RULE_FILTER_FIELDS.map((option) => (
-                              <SelectItem key={option.value} value={option.value}>
-                                {t(option.labelKey)}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </Field>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {RULE_FILTER_FIELDS.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {t(option.labelKey)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
 
-                      <Field label={t("money.ruleFilterOperator")}>
-                        <Select
-                          value={filter.operator}
-                          onValueChange={(value) =>
+                      <Select
+                        value={filter.operator}
+                        onValueChange={(value) =>
+                          updateForm((current) => ({
+                            ...current,
+                            filters: current.filters.map((item) =>
+                              item.id === filter.id
+                                ? { ...item, operator: value as MoneyCategoryRuleFilterOperator }
+                                : item,
+                            ),
+                          }))
+                        }
+                      >
+                        <SelectTrigger
+                          aria-label={t("money.ruleFilterOperator")}
+                          className="w-full min-w-0 [&>span]:truncate"
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {RULE_FILTER_OPERATORS.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {t(option.labelKey)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+
+                      {filter.operator === "contains_any_in_set" ||
+                      filter.operator === "equals_any_in_set" ? (
+                        <Input
+                          aria-label={t("money.ruleFilterValues")}
+                          className="min-w-0"
+                          value={filter.values}
+                          onChange={(event) =>
                             updateForm((current) => ({
                               ...current,
                               filters: current.filters.map((item) =>
                                 item.id === filter.id
-                                  ? { ...item, operator: value as MoneyCategoryRuleFilterOperator }
+                                  ? { ...item, values: event.target.value }
                                   : item,
                               ),
                             }))
                           }
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {RULE_FILTER_OPERATORS.map((option) => (
-                              <SelectItem key={option.value} value={option.value}>
-                                {t(option.labelKey)}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </Field>
-
-                      {filter.operator === "contains_any_in_set" ||
-                      filter.operator === "equals_any_in_set" ? (
-                        <div className="lg:col-span-2">
-                          <Field
-                            label={t("money.ruleFilterValues")}
-                            hint={
-                              filter.operator === "contains_any_in_set"
-                                ? t("money.ruleOperatorTipcontains_any_in_set")
-                                : t("money.ruleOperatorTipequals_any_in_set")
+                        />
+                      ) : filter.operator === "range" ? (
+                        <div className="grid min-w-0 grid-cols-2 gap-2">
+                          <Input
+                            aria-label={t("money.ruleFilterMin")}
+                            inputMode="decimal"
+                            value={filter.min}
+                            onChange={(event) =>
+                              updateForm((current) => ({
+                                ...current,
+                                filters: current.filters.map((item) =>
+                                  item.id === filter.id
+                                    ? { ...item, min: ruleNumberInput(event.target.value) }
+                                    : item,
+                                ),
+                              }))
                             }
-                          >
-                            <Input
-                              value={filter.values}
-                              onChange={(event) =>
-                                updateForm((current) => ({
-                                  ...current,
-                                  filters: current.filters.map((item) =>
-                                    item.id === filter.id
-                                      ? { ...item, values: event.target.value }
-                                      : item,
-                                  ),
-                                }))
-                              }
-                            />
-                          </Field>
-                        </div>
-                      ) : null}
-
-                      {filter.operator === "range" ? (
-                        <>
-                          <Field
-                            label={t("money.ruleFilterMin")}
-                            hint={t("money.ruleOperatorTiprange")}
-                          >
-                            <Input
-                              inputMode="decimal"
-                              value={filter.min}
-                              onChange={(event) =>
-                                updateForm((current) => ({
-                                  ...current,
-                                  filters: current.filters.map((item) =>
-                                    item.id === filter.id
-                                      ? { ...item, min: ruleNumberInput(event.target.value) }
-                                      : item,
-                                  ),
-                                }))
-                              }
-                            />
-                          </Field>
-                          <Field
-                            label={t("money.ruleFilterMax")}
-                            hint={t("money.ruleOperatorTiprange")}
-                          >
-                            <Input
-                              inputMode="decimal"
-                              value={filter.max}
-                              onChange={(event) =>
-                                updateForm((current) => ({
-                                  ...current,
-                                  filters: current.filters.map((item) =>
-                                    item.id === filter.id
-                                      ? { ...item, max: ruleNumberInput(event.target.value) }
-                                      : item,
-                                  ),
-                                }))
-                              }
-                            />
-                          </Field>
-                        </>
-                      ) : null}
-
-                      {filter.operator !== "contains_any_in_set" &&
-                      filter.operator !== "equals_any_in_set" &&
-                      filter.operator !== "range" &&
-                      filter.operator !== "is_empty" &&
-                      filter.operator !== "is_not_empty" ? (
-                        <div className="lg:col-span-2">
-                          <Field
-                            label={t("money.ruleFilterValue")}
-                            hint={
-                              filter.operator === "regex"
-                                ? t("money.ruleOperatorTipregex")
-                                : undefined
+                          />
+                          <Input
+                            aria-label={t("money.ruleFilterMax")}
+                            inputMode="decimal"
+                            value={filter.max}
+                            onChange={(event) =>
+                              updateForm((current) => ({
+                                ...current,
+                                filters: current.filters.map((item) =>
+                                  item.id === filter.id
+                                    ? { ...item, max: ruleNumberInput(event.target.value) }
+                                    : item,
+                                ),
+                              }))
                             }
-                          >
-                            <Input
-                              aria-label={t("money.ruleFilterValue")}
-                              value={filter.value}
-                              onChange={(event) =>
-                                updateForm((current) => ({
-                                  ...current,
-                                  filters: current.filters.map((item) =>
-                                    item.id === filter.id
-                                      ? { ...item, value: event.target.value }
-                                      : item,
-                                  ),
-                                }))
-                              }
-                            />
-                          </Field>
+                          />
                         </div>
-                      ) : null}
+                      ) : filter.operator === "is_empty" || filter.operator === "is_not_empty" ? (
+                        <div />
+                      ) : (
+                        <Input
+                          aria-label={t("money.ruleFilterValue")}
+                          className="min-w-0"
+                          value={filter.value}
+                          onChange={(event) =>
+                            updateForm((current) => ({
+                              ...current,
+                              filters: current.filters.map((item) =>
+                                item.id === filter.id
+                                  ? { ...item, value: event.target.value }
+                                  : item,
+                              ),
+                            }))
+                          }
+                        />
+                      )}
 
-                      <div className="lg:col-span-2 rounded-lg bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-                        {t("money.ruleExampleValue")}: {getExampleFieldValue(filter.field)}
-                      </div>
-                    </div>
-
-                    <div className="mt-3 flex justify-end">
                       <Button
                         type="button"
                         variant="ghost"
                         size="sm"
+                        className="justify-self-end"
                         onClick={() =>
                           updateForm((current) => ({
                             ...current,
@@ -954,30 +1039,40 @@ export function MoneyRuleEditor({
                         {t("money.ruleRemoveFilter")}
                       </Button>
                     </div>
+                    <div className="mt-2">
+                      <Badge variant="outline" className="font-normal">
+                        {t("money.ruleExampleValue")}: {getExampleFieldValue(filter.field)}
+                      </Badge>
+                    </div>
                   </div>
                 ))}
               </div>
             </div>
+          </section>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="rounded-lg border p-3">
-                <div className="flex items-start gap-3">
-                  <Checkbox
-                    id="rule-enabled"
-                    checked={form.enabled}
-                    onCheckedChange={(checked) =>
-                      updateForm((current) => ({ ...current, enabled: checked === true }))
+          <section className="space-y-3 border-t pt-4">
+            <button
+              type="button"
+              className="flex w-full items-center justify-between text-left text-sm font-semibold tracking-wide text-foreground/80"
+              onClick={() => setMoreOpen((open) => !open)}
+            >
+              <span>{t("money.ruleSectionMore")}</span>
+              <span className="text-xs font-normal text-muted-foreground">
+                {moreOpen ? t("money.ruleSectionMoreHide") : t("money.ruleSectionMoreShow")}
+              </span>
+            </button>
+            {moreOpen ? (
+              <div className="space-y-4">
+                <Field label={t("money.ruleDescription")} hint={t("money.ruleDescriptionHint")}>
+                  <Textarea
+                    value={form.description}
+                    className="min-h-[72px]"
+                    onChange={(event) =>
+                      updateForm((current) => ({ ...current, description: event.target.value }))
                     }
                   />
-                  <div className="space-y-1">
-                    <Label htmlFor="rule-enabled">{t("money.ruleEnabled")}</Label>
-                    <p className="text-xs text-muted-foreground">{t("money.ruleEnabledHint")}</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-lg border p-3">
-                <div className="flex items-start gap-3">
+                </Field>
+                <label className="flex items-start gap-3 rounded-xl border px-3 py-3">
                   <Checkbox
                     id="rule-stop-processing"
                     checked={form.stopProcessing}
@@ -988,118 +1083,134 @@ export function MoneyRuleEditor({
                       }))
                     }
                   />
-                  <div className="space-y-1">
-                    <Label htmlFor="rule-stop-processing">{t("money.ruleStopProcessing")}</Label>
-                    <p className="text-xs text-muted-foreground">
-                      {t("money.ruleStopProcessingHint")}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap justify-end gap-2">
-              <Button variant="ghost" asChild>
-                <Link href="/money/rules">{t("common.cancel")}</Link>
-              </Button>
-              <Button
-                type="button"
-                onClick={() => void handlePersistRule(false)}
-                disabled={isSaving}
-              >
-                {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                {t("common.save")}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="space-y-6">
-        <Card>
-          <CardHeader className="space-y-2">
-            <CardTitle>{t("money.ruleExampleTitle")}</CardTitle>
-            <p className="text-sm text-muted-foreground">{t("money.ruleExampleHint")}</p>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <Field label={t("money.ruleExampleTransaction")}>
-              <Popover open={transactionPickerOpen} onOpenChange={setTransactionPickerOpen}>
-                <PopoverAnchor asChild>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="w-full justify-between"
-                    aria-expanded={transactionPickerOpen}
-                    onClick={() => setTransactionPickerOpen((open) => !open)}
-                  >
-                    <span className="truncate">
-                      {exampleTransactionId
-                        ? (transactionOptions.find((option) => option.id === exampleTransactionId)
-                            ?.label ?? exampleTransactionId)
-                        : t("money.ruleExampleTransactionPlaceholder")}
+                  <span className="space-y-1">
+                    <span className="block text-sm font-medium">
+                      {t("money.ruleStopProcessing")}
                     </span>
-                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                  </Button>
-                </PopoverAnchor>
-                <PopoverContent
-                  className="w-[var(--radix-popover-trigger-width)] p-0"
-                  align="start"
-                  onEscapeKeyDown={() => closePopover(setTransactionPickerOpen, false)}
-                  onFocusOutside={() => closePopover(setTransactionPickerOpen, false)}
-                  onPointerDownOutside={() => closePopover(setTransactionPickerOpen, false)}
+                    <span className="block text-xs text-muted-foreground">
+                      {t("money.ruleStopProcessingHint")}
+                    </span>
+                  </span>
+                </label>
+              </div>
+            ) : null}
+          </section>
+        </div>
+
+        <aside className="xl:sticky xl:top-20 xl:self-start">
+          <div className="space-y-4 rounded-2xl border bg-card/40 p-4 shadow-sm">
+            <div className="space-y-1">
+              <h2 className="text-sm font-semibold">{t("money.ruleCheckTitle")}</h2>
+              <p className="text-xs leading-5 text-muted-foreground">{t("money.ruleCheckHint")}</p>
+            </div>
+
+            <Popover open={transactionPickerOpen} onOpenChange={setTransactionPickerOpen}>
+              <PopoverAnchor asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full justify-between"
+                  aria-label={t("money.ruleExampleTransaction")}
+                  aria-expanded={transactionPickerOpen}
+                  onClick={() => setTransactionPickerOpen((open) => !open)}
                 >
-                  <Command>
-                    <CommandInput placeholder={t("money.searchTransactions")} />
-                    <CommandList className="max-h-72">
-                      <CommandEmpty>{t("common.noResults")}</CommandEmpty>
-                      <CommandGroup>
-                        {transactionOptions.map((option) => (
-                          <CommandItem
-                            key={option.id}
-                            value={`${option.label} ${option.description}`}
-                            onSelect={() => {
-                              setExampleTransactionId(option.id);
-                              setTransactionPickerOpen(false);
-                              setPreviewRun(null);
-                            }}
-                          >
-                            <Check
-                              className={cn(
-                                "mr-2 h-4 w-4",
-                                exampleTransactionId === option.id ? "opacity-100" : "opacity-0",
-                              )}
-                            />
-                            <div className="min-w-0">
-                              <p className="truncate">{option.label}</p>
-                              <p className="truncate text-xs text-muted-foreground">
-                                {option.description}
-                              </p>
-                            </div>
-                          </CommandItem>
-                        ))}
-                      </CommandGroup>
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-            </Field>
+                  <span className="truncate">
+                    {exampleTransactionId
+                      ? (transactionOptions.find((option) => option.id === exampleTransactionId)
+                          ?.label ?? exampleTransactionId)
+                      : t("money.ruleExampleTransactionPlaceholder")}
+                  </span>
+                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverAnchor>
+              <PopoverContent
+                className="w-[var(--radix-popover-trigger-width)] p-0"
+                align="start"
+                onEscapeKeyDown={() => closePopover(setTransactionPickerOpen, false)}
+                onFocusOutside={() => closePopover(setTransactionPickerOpen, false)}
+                onPointerDownOutside={() => closePopover(setTransactionPickerOpen, false)}
+              >
+                <Command>
+                  <CommandInput placeholder={t("money.searchTransactions")} />
+                  <CommandList className="max-h-72">
+                    <CommandEmpty>{t("common.noResults")}</CommandEmpty>
+                    <CommandGroup>
+                      {transactionOptions.map((option) => (
+                        <CommandItem
+                          key={option.id}
+                          value={`${option.label} ${option.description}`}
+                          onSelect={() => {
+                            setExampleTransactionId(option.id);
+                            setTransactionPickerOpen(false);
+                            setPreviewRun(null);
+                          }}
+                        >
+                          <Check
+                            className={cn(
+                              "mr-2 h-4 w-4",
+                              exampleTransactionId === option.id ? "opacity-100" : "opacity-0",
+                            )}
+                          />
+                          <div className="min-w-0">
+                            <p className="truncate">{option.label}</p>
+                            <p className="truncate text-xs text-muted-foreground">
+                              {option.description}
+                            </p>
+                          </div>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
 
             {exampleTransactionLoading ? (
-              <div className="flex items-center gap-2 rounded-lg border p-3 text-sm text-muted-foreground">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
                 {t("common.loading")}
               </div>
             ) : null}
 
-            {exampleTransaction?.line_items?.length ? (
-              <div className="space-y-2">
-                <div className="space-y-1">
-                  <Label>{t("money.ruleExampleLineItem")}</Label>
-                  <p className="text-xs text-muted-foreground">
-                    {t("money.ruleExampleLineItemHint")}
-                  </p>
+            {exampleTransactionId && selectedExampleLineItem && exampleTransaction ? (
+              <div className="rounded-xl border bg-background px-3 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">
+                      {exampleTransaction.merchant_name || t("money.transactionFallback")}
+                    </p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {selectedExampleLineItem.title}
+                    </p>
+                    {exampleTransaction.posted_at &&
+                    !Number.isNaN(new Date(exampleTransaction.posted_at).getTime()) ? (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {new Intl.DateTimeFormat(intlLocale, {
+                          year: "numeric",
+                          month: "short",
+                          day: "numeric",
+                        }).format(new Date(exampleTransaction.posted_at))}
+                      </p>
+                    ) : null}
+                  </div>
+                  <Badge variant="outline">
+                    {formatMoney(
+                      selectedExampleLineItem.amount,
+                      exampleTransaction.currency,
+                      intlLocale,
+                    )}
+                  </Badge>
                 </div>
-                <div className="space-y-2">
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {getCategoryLabelById(selectedExampleLineItem.category_id)}
+                </p>
+              </div>
+            ) : null}
+
+            {exampleTransaction?.line_items && exampleTransaction.line_items.length > 1 ? (
+              <div className="space-y-2">
+                <Label className="text-xs">{t("money.ruleExampleLineItem")}</Label>
+                <div className="space-y-1.5">
                   {exampleTransaction.line_items.map((lineItem) => {
                     const isSelected = lineItem.id === exampleLineItemId;
                     return (
@@ -1107,8 +1218,8 @@ export function MoneyRuleEditor({
                         key={lineItem.id}
                         type="button"
                         className={cn(
-                          "w-full rounded-lg border px-3 py-3 text-left transition-colors",
-                          isSelected ? "border-primary bg-primary/5" : "hover:bg-muted/40",
+                          "w-full rounded-lg border px-2.5 py-2 text-left text-sm transition-colors",
+                          isSelected ? "border-foreground/30 bg-muted/40" : "hover:bg-muted/30",
                         )}
                         onClick={() => {
                           setExampleLineItemId(lineItem.id);
@@ -1116,119 +1227,89 @@ export function MoneyRuleEditor({
                           autoRunHandledRef.current = false;
                         }}
                       >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-medium">{lineItem.title}</p>
-                            <p className="truncate text-xs text-muted-foreground">
-                              {getCategoryLabelById(lineItem.category_id)}
-                            </p>
-                          </div>
-                          <Badge variant={isSelected ? "default" : "outline"}>
-                            {formatMoney(lineItem.amount, exampleTransaction.currency, intlLocale)}
-                          </Badge>
-                        </div>
+                        <span className="truncate font-medium">{lineItem.title}</span>
                       </button>
                     );
                   })}
                 </div>
               </div>
-            ) : exampleTransactionId && !exampleTransactionLoading ? (
-              <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-                {t("money.ruleExampleNoLineItems")}
-              </div>
+            ) : exampleTransactionId && !exampleTransactionLoading && !selectedExampleLineItem ? (
+              <p className="text-sm text-muted-foreground">{t("money.ruleExampleNoLineItems")}</p>
             ) : null}
 
             {!form.id && exampleLineItemId ? (
-              <Tip
-                title={t("money.ruleExampleCreateTipTitle")}
-                body={t("money.ruleExampleCreateTipBody")}
-              />
+              <p className="text-xs text-muted-foreground">{t("money.ruleExampleCreateTipBody")}</p>
             ) : null}
-
             {form.id && hasLocalChanges && exampleLineItemId ? (
-              <Tip
-                title={t("money.ruleExampleDirtyTipTitle")}
-                body={t("money.ruleExampleDirtyTipBody")}
-              />
+              <p className="text-xs text-muted-foreground">{t("money.ruleExampleDirtyTipBody")}</p>
             ) : null}
-          </CardContent>
-        </Card>
 
-        <Card>
-          <CardHeader className="space-y-3">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="space-y-2">
-                <CardTitle>{t("money.rulePreviewResult")}</CardTitle>
-                <p className="text-sm text-muted-foreground">
-                  {t("money.rulePreviewSingleRuleHint")}
-                </p>
-              </div>
-              {exampleLineItemId ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => void handleRunExample()}
-                  disabled={isBusy}
-                >
-                  {isPreviewing ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : form.ruleKind === "llm_categorization" ? (
-                    <Play className="mr-2 h-4 w-4" />
-                  ) : (
-                    <Sparkles className="mr-2 h-4 w-4" />
-                  )}
-                  {form.id && form.ruleKind === "llm_categorization"
-                    ? t("money.ruleRunExample")
-                    : t("money.ruleSaveAndPreviewExample")}
-                </Button>
-              ) : null}
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {previewError ? (
-              <Alert variant="destructive">
-                <AlertTitle>
-                  {translateOrFallback(t, "money.rulePreviewErrorTitle", "Preview unavailable")}
-                </AlertTitle>
-                <AlertDescription>{previewError}</AlertDescription>
-              </Alert>
-            ) : previewRun ? (
-              <>
-                <div className="flex flex-wrap gap-2">
-                  <Badge variant="outline">
-                    {t("money.ruleTriggerSource")}: {previewRun.trigger_source}
-                  </Badge>
-                  <Badge variant={previewRun.final_category_id ? "default" : "secondary"}>
-                    {getCategoryLabelById(previewRun.final_category_id)}
-                  </Badge>
-                </div>
-                <div className="space-y-2">
-                  {previewRun.steps.map((step) => (
-                    <div
-                      key={`${step.rule_id}-${step.sort_order}`}
-                      className="rounded-lg border p-3"
-                    >
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-medium">
-                          {step.rule_name ?? t(`money.ruleKind${step.rule_kind}`)}
-                        </span>
-                        <Badge variant="outline">{t(`money.ruleKind${step.rule_kind}`)}</Badge>
-                        <Badge variant={step.changed_category ? "default" : "secondary"}>
-                          {step.changed_category
-                            ? t("money.ruleChangedCategory")
-                            : t("money.ruleNoChange")}
-                        </Badge>
-                      </div>
-                      <p className="mt-2 text-sm text-muted-foreground">{step.decision_reason}</p>
+            <Button
+              type="button"
+              className="w-full"
+              onClick={() => void handleRunExample()}
+              disabled={!exampleLineItemId || isBusy}
+            >
+              {isPreviewing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Play className="mr-2 h-4 w-4" />
+              )}
+              {previewButtonLabel}
+            </Button>
+
+            <div className="space-y-3 border-t pt-3">
+              <h3 className="text-sm font-medium">{t("money.rulePreviewResult")}</h3>
+              {previewError ? (
+                <Alert variant="destructive">
+                  <AlertTitle>
+                    {translateOrFallback(t, "money.rulePreviewErrorTitle", "Preview unavailable")}
+                  </AlertTitle>
+                  <AlertDescription>{previewError}</AlertDescription>
+                </Alert>
+              ) : previewRun ? (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                    <div className="rounded-lg border px-2.5 py-2">
+                      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                        {t("money.ruleBefore")}
+                      </p>
+                      <p className="mt-1 text-sm font-medium">
+                        {getCategoryLabelById(startingCategoryId)}
+                      </p>
                     </div>
-                  ))}
+                    <span className="text-muted-foreground">→</span>
+                    <div className="rounded-lg border px-2.5 py-2">
+                      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                        {t("money.ruleAfter")}
+                      </p>
+                      <p className="mt-1 text-sm font-medium">
+                        {getCategoryLabelById(finalCategoryId)}
+                      </p>
+                    </div>
+                  </div>
+                  <Badge
+                    variant={
+                      previewRun.steps.some((s) => s.changed_category) ? "default" : "secondary"
+                    }
+                  >
+                    {previewRun.steps.some((s) => s.changed_category)
+                      ? t("money.ruleChangedCategory")
+                      : t("money.ruleNoChange")}
+                  </Badge>
+                  {whyText ? (
+                    <p className="text-sm text-muted-foreground">
+                      <span className="font-medium text-foreground">{t("money.ruleWhy")}: </span>
+                      {whyText}
+                    </p>
+                  ) : null}
                 </div>
-              </>
-            ) : (
-              <p className="text-sm text-muted-foreground">{t("money.rulePreviewEmpty")}</p>
-            )}
-          </CardContent>
-        </Card>
+              ) : (
+                <p className="text-sm text-muted-foreground">{t("money.rulePreviewEmpty")}</p>
+              )}
+            </div>
+          </div>
+        </aside>
       </div>
     </div>
   );

@@ -54,6 +54,8 @@ export interface ImportLineItem {
   amount: number;
   quantity?: number | null;
   unit?: string | null;
+  /** True when this is a synthetic whole-transaction stub, not a real receipt line. */
+  is_placeholder?: boolean;
   raw_payload?: Record<string, unknown> | null;
 }
 

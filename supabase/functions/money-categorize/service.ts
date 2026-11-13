@@ -799,8 +799,22 @@ async function resolveLlmDecisions(
     }
 
     for (const evaluation of unresolved) {
+      const lineItemId = evaluation.indexedItem.item.options.lineItemId;
+      if (rule.config?.provider === "jev") {
+        // Missing item after a successful Jev pool response: abstain, do not bill again.
+        decisions.set(lineItemId, {
+          result: createMissingLlmResult(lineItemId, "Jev batch response omitted this line item"),
+          batched: true,
+          batchSize: evaluations.length,
+          model: batchResult.model ?? null,
+          promptTokens: batchResult.promptTokens ?? null,
+          completionTokens: batchResult.completionTokens ?? null,
+          fallbackMode: "jev_partial_omit_no_retry",
+        });
+        continue;
+      }
       decisions.set(
-        evaluation.indexedItem.item.options.lineItemId,
+        lineItemId,
         await resolveSingleLlmDecision(
           evaluation,
           rule,
@@ -812,7 +826,26 @@ async function resolveLlmDecisions(
     }
 
     return decisions;
-  } catch {
+  } catch (error) {
+    // Jev already fans out per item; retrying after cancel would duplicate billable
+    // TypeSafe calls (M3). Record abstain + error and keep the existing category.
+    const provider = rule.config?.provider;
+    if (provider === "jev") {
+      const message = error instanceof Error ? error.message : "Jev batch failed";
+      for (const evaluation of evaluations) {
+        const lineItemId = evaluation.indexedItem.item.options.lineItemId;
+        decisions.set(lineItemId, {
+          result: createMissingLlmResult(lineItemId, message),
+          batched: true,
+          batchSize: evaluations.length,
+          model: null,
+          promptTokens: null,
+          completionTokens: null,
+          fallbackMode: "jev_batch_error_no_retry",
+        });
+      }
+      return decisions;
+    }
     for (const evaluation of evaluations) {
       decisions.set(
         evaluation.indexedItem.item.options.lineItemId,

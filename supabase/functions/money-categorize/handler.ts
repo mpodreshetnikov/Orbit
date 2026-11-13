@@ -36,7 +36,11 @@ function normalizeText(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-export function createMoneyCategorizeHandler(deps = createDefaultMoneyCategorizeDeps()) {
+type MoneyCategorizeHandlerDeps = ReturnType<typeof createDefaultMoneyCategorizeDeps>;
+
+export function createMoneyCategorizeHandler(
+  deps: MoneyCategorizeHandlerDeps = createDefaultMoneyCategorizeDeps(),
+) {
   return async function handleMoneyCategorizeRequest(req: Request): Promise<Response> {
     const context = createEdgeRequestContext(req, "money-categorize");
     const telemetry = createEdgeTelemetry(context);
@@ -61,6 +65,10 @@ export function createMoneyCategorizeHandler(deps = createDefaultMoneyCategorize
       if (!action) return jsonResponse({ error: "action is required" }, 400);
 
       telemetry.info("money_categorize_action_received", { action });
+
+      if (action === "llm_provider_status") {
+        return jsonResponse(deps.getLlmProviderStatus(), 200);
+      }
 
       if (action === "preview_pipeline") {
         const payload = await previewMoneyCategoryRulePipelineService(

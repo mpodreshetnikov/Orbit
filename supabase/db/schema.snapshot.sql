@@ -692,7 +692,8 @@ CREATE TABLE "public"."money_line_items" (
     "category_locked_by_user" boolean DEFAULT false NOT NULL,
     "last_category_rule_id" "uuid",
     "last_category_rule_run_id" "uuid",
-    "category_assigned_at" timestamp with time zone
+    "category_assigned_at" timestamp with time zone,
+    "is_placeholder" boolean DEFAULT false NOT NULL
 );
 
 
@@ -2243,6 +2244,13 @@ CREATE INDEX "idx_money_line_items_beneficiary_person_id" ON "public"."money_lin
 --
 
 CREATE INDEX "idx_money_line_items_category_id" ON "public"."money_line_items" USING "btree" ("category_id");
+
+
+--
+-- Name: idx_money_line_items_placeholder; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_money_line_items_placeholder" ON "public"."money_line_items" USING "btree" ("transaction_id") WHERE "is_placeholder";
 
 
 --
