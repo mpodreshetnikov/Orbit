@@ -60,7 +60,7 @@ describe("ruleSummary", () => {
       { field: "custom", operator: "equals", value: null },
     ];
     expect(ruleSummary(rule({ filters }), t, names)).toBe(
-      "Line-item amount is between 1 - ... и Merchant name equals any of set 'a', 'b' и MCC is empty и Current category равно 'Food / Еда' и custom равно ''",
+      "Line-item amount: is between 1 - ... и Merchant name: equals any of set 'a', 'b' и MCC: is empty и Current category: равно 'Food / Еда' и custom: равно ''",
     );
     expect(
       ruleSummary(
@@ -71,7 +71,7 @@ describe("ruleSummary", () => {
         t,
         names,
       ),
-    ).toBe("MCC is empty или MCC contains '5'");
+    ).toBe("MCC: is empty или MCC: contains '5'");
   });
 });
 

@@ -171,20 +171,24 @@ export function ruleSummary(
 
   const parts = rule.filters.map((filter) => {
     const field = fields.get(filter.field) ?? filter.field;
-    const operator = operators.get(filter.operator) ?? filter.operator;
+    const rawOperator = operators.get(filter.operator) ?? filter.operator;
+    const operator =
+      rawOperator.length > 0
+        ? rawOperator.charAt(0).toLocaleLowerCase() + rawOperator.slice(1)
+        : rawOperator;
     if (filter.operator === "range") {
-      return `${field} ${operator} ${filter.min ?? "..."} - ${filter.max ?? "..."}`;
+      return `${field}: ${operator} ${filter.min ?? "..."} - ${filter.max ?? "..."}`;
     }
     if (SET_OPERATORS.has(filter.operator)) {
-      return `${field} ${operator} ${(filter.values ?? []).map((value) => `'${value}'`).join(", ")}`;
+      return `${field}: ${operator} ${(filter.values ?? []).map((value) => `'${value}'`).join(", ")}`;
     }
     if (filter.operator === "is_empty" || filter.operator === "is_not_empty") {
-      return `${field} ${operator}`;
+      return `${field}: ${operator}`;
     }
     if (filter.field === "current_category_id" && typeof filter.value === "string") {
-      return `${field} ${operator} '${categoryNameById.get(filter.value) ?? filter.value}'`;
+      return `${field}: ${operator} '${categoryNameById.get(filter.value) ?? filter.value}'`;
     }
-    return `${field} ${operator} '${String(filter.value ?? "")}'`;
+    return `${field}: ${operator} '${String(filter.value ?? "")}'`;
   });
   const joiner = rule.match_mode === "all" ? t("money.ruleSummaryAnd") : t("money.ruleSummaryOr");
   return parts.join(` ${joiner} `);

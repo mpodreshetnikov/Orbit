@@ -899,7 +899,7 @@ export function MoneyRuleEditor({
                     data-testid="rule-filter-row"
                     className="rounded-xl border px-3 py-3"
                   >
-                    <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.4fr)_auto]">
+                    <div className="grid min-w-0 gap-2 lg:grid-cols-[minmax(130px,0.9fr)_minmax(200px,1.3fr)_minmax(0,1.3fr)_auto]">
                       <Select
                         value={filter.field}
                         onValueChange={(value) =>
@@ -911,7 +911,10 @@ export function MoneyRuleEditor({
                           }))
                         }
                       >
-                        <SelectTrigger aria-label={t("money.ruleFilterField")}>
+                        <SelectTrigger
+                          aria-label={t("money.ruleFilterField")}
+                          className="w-full min-w-0 [&>span]:truncate"
+                        >
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -936,7 +939,10 @@ export function MoneyRuleEditor({
                           }))
                         }
                       >
-                        <SelectTrigger aria-label={t("money.ruleFilterOperator")}>
+                        <SelectTrigger
+                          aria-label={t("money.ruleFilterOperator")}
+                          className="w-full min-w-0 [&>span]:truncate"
+                        >
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -952,6 +958,7 @@ export function MoneyRuleEditor({
                       filter.operator === "equals_any_in_set" ? (
                         <Input
                           aria-label={t("money.ruleFilterValues")}
+                          className="min-w-0"
                           value={filter.values}
                           onChange={(event) =>
                             updateForm((current) => ({
@@ -965,7 +972,7 @@ export function MoneyRuleEditor({
                           }
                         />
                       ) : filter.operator === "range" ? (
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid min-w-0 grid-cols-2 gap-2">
                           <Input
                             aria-label={t("money.ruleFilterMin")}
                             inputMode="decimal"
@@ -1002,6 +1009,7 @@ export function MoneyRuleEditor({
                       ) : (
                         <Input
                           aria-label={t("money.ruleFilterValue")}
+                          className="min-w-0"
                           value={filter.value}
                           onChange={(event) =>
                             updateForm((current) => ({
