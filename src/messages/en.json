@@ -1075,12 +1075,20 @@
         "record": "Document"
       },
       "extractionField": {
-        "observation.status": "status",
-        "finding.severity": "severity",
-        "finding.laterality": "side",
-        "finding.finding_date": "date",
-        "condition.status": "status",
-        "record.record_date": "document date"
+        "observation": {
+          "status": "status"
+        },
+        "finding": {
+          "severity": "severity",
+          "laterality": "side",
+          "finding_date": "date"
+        },
+        "condition": {
+          "status": "status"
+        },
+        "record": {
+          "record_date": "document date"
+        }
       },
       "extractionDetail": {
         "missing_analyte_label": "the analyte had no name",
