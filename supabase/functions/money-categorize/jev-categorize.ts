@@ -1,11 +1,11 @@
 import { decideJevCategoryApplication } from "./jev-confidence.ts";
+import { buildLlmCategorizeItemContext } from "./llm-context.ts";
 import type {
   MoneyCategorizeCandidateCategory,
   MoneyCategorizeLlmBatchRequest,
   MoneyCategorizeLlmBatchRequestItem,
   MoneyCategorizeLlmBatchResult,
   MoneyCategorizeLlmBatchResultItem,
-  MoneyCategoryRuleContext,
 } from "./service.ts";
 
 export interface JevMoneyCategorizeDeps {
@@ -76,50 +76,27 @@ export function buildChoiceCriteria(
 }
 
 /**
- * Maximum available transaction/line fields for Jev state (no secrets), plus the
- * eligible category list so companion Noul can see the same options as Choice (M2).
+ * Full parent/sibling categorize context for Jev state (no secrets), structured as
+ * `target_line_item` vs `receipt_sibling_items`, plus eligible categories for Noul (M2).
  */
 export function buildJevState(
   item: MoneyCategorizeLlmBatchRequestItem,
   eligibleCategories: Record<string, string>,
 ): Record<string, unknown> {
-  const ctx: MoneyCategoryRuleContext = item.context;
-  return compactRecord({
-    line_item_id: item.lineItemId,
-    current_category_id: item.currentCategoryId,
-    current_canonical_system_key: item.currentCanonicalSystemKey,
-    line_item_title: ctx.line_item.title,
-    line_item_amount: ctx.line_item.amount,
-    line_item_quantity: ctx.line_item.quantity,
-    line_item_unit: ctx.line_item.unit,
-    line_status: ctx.line_item.line_status,
-    line_raw_payload: ctx.line_item.raw_payload,
-    transaction_id: ctx.transaction.id,
-    posted_at: ctx.transaction.posted_at,
-    amount: ctx.transaction.amount,
-    currency: ctx.transaction.currency,
-    transaction_type: ctx.transaction.transaction_type,
-    status: ctx.transaction.status,
-    merchant_name: ctx.transaction.merchant_name,
-    mcc: ctx.transaction.mcc,
-    comment: ctx.transaction.comment,
-    source_comment: ctx.transaction.source_comment,
-    source: ctx.transaction.source,
-    source_category_id: ctx.transaction.source_category_id,
-    source_category_name: ctx.transaction.source_category_name,
-    cashback_amount: ctx.transaction.cashback_amount,
-    is_transfer: ctx.transaction.is_transfer,
-    account_source: ctx.account.source,
-    account_kind: ctx.account.account_kind,
-    normalized_line_item_title: ctx.derived.normalized_line_item_title,
-    normalized_merchant_name: ctx.derived.normalized_merchant_name,
-    has_receipt_metadata: ctx.derived.has_receipt_metadata,
-    // Shared with Choice so Noul any_fit evaluates against the real option list.
-    eligible_categories: Object.entries(eligibleCategories).map(([id, label]) => ({
-      id,
-      label,
-    })),
-  });
+  const itemContext = buildLlmCategorizeItemContext(item);
+  const { receipt_sibling_items: siblingItems, ...rest } = itemContext;
+  return {
+    ...compactRecord({
+      ...rest,
+      // Shared with Choice so Noul any_fit evaluates against the real option list.
+      eligible_categories: Object.entries(eligibleCategories).map(([id, label]) => ({
+        id,
+        label,
+      })),
+    }),
+    // Keep explicit [] for single-line receipts (compactRecord would drop it).
+    receipt_sibling_items: Array.isArray(siblingItems) ? siblingItems : [],
+  };
 }
 
 function buildQuestions(
@@ -127,8 +104,9 @@ function buildQuestions(
   userPrompt: string | null,
 ): Record<string, unknown> {
   const instructions = [
-    "Выбери одну категорию Orbit для этой банковской строки транзакции.",
-    "Учитывай merchant, сумму, MCC, комментарий, название строки и категорию банка если есть.",
+    "Выбери одну категорию Orbit только для state.target_line_item.",
+    "state.receipt_sibling_items — соседние строки того же чека; используй их как контекст, не классифицируй их.",
+    "Учитывай merchant, карту/счёт, бренд, сумму, MCC, комментарий, raw_payload и текущую категорию если есть.",
     userPrompt ? `Дополнительная инструкция пользователя: ${userPrompt}` : null,
   ]
     .filter((part): part is string => Boolean(part))
@@ -143,7 +121,7 @@ function buildQuestions(
     any_fit: {
       type: "noul",
       instructions:
-        "Подходит ли хотя бы одна из категорий из state.eligible_categories уверенно? Нет — если перевод себе, данных недостаточно, или ни одна опция не подходит.",
+        "Подходит ли хотя бы одна из категорий из state.eligible_categories уверенно для target_line_item? Нет — если перевод себе, данных недостаточно, или ни одна опция не подходит.",
     },
   };
 }
