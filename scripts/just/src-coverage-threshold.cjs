@@ -12,8 +12,8 @@ function normalizePath(filePath) {
   return filePath.replace(/\\/g, "/").toLowerCase();
 }
 
-function isSrcEntry(key) {
-  const relativePath = path.isAbsolute(key) ? path.relative(REPO_ROOT, key) : key;
+function isSrcEntry(key, repoRoot = REPO_ROOT) {
+  const relativePath = path.isAbsolute(key) ? path.relative(repoRoot, key) : key;
   const normalized = normalizePath(relativePath);
   return normalized.startsWith("src/");
 }
@@ -27,23 +27,17 @@ function formatPct(value) {
   return value.toFixed(2);
 }
 
-function fail(message) {
-  console.error(`[src-coverage-threshold] ${message}`);
-  process.exit(1);
-}
-
-function main() {
-  if (!fs.existsSync(COVERAGE_SUMMARY_PATH)) {
-    fail(
-      "missing coverage/coverage-summary.json; run `just test-unit-coverage` before `just coverage-check`.",
-    );
-  }
-
-  const summary = JSON.parse(fs.readFileSync(COVERAGE_SUMMARY_PATH, "utf8"));
-  const entries = Object.entries(summary).filter(([key]) => key !== "total" && isSrcEntry(key));
+/**
+ * @param {Record<string, any>} summary
+ * @param {string} [repoRoot]
+ * @returns {{ ok: true, linePct: number, branchPct: number, linesCovered: number, linesTotal: number, branchesCovered: number, branchesTotal: number } | { ok: false, message: string }}
+ */
+function evaluateSrcCoverage(summary, repoRoot = REPO_ROOT) {
+  // "total" is not under src/, so isSrcEntry already drops the istanbul rollup key.
+  const entries = Object.entries(summary).filter(([key]) => isSrcEntry(key, repoRoot));
 
   if (entries.length === 0) {
-    fail("no src/** coverage entries found in coverage-summary.json.");
+    return { ok: false, message: "no src/** coverage entries found in coverage-summary.json." };
   }
 
   let linesCovered = 0;
@@ -61,24 +55,71 @@ function main() {
   const linePct = pct(linesCovered, linesTotal);
   const branchPct = pct(branchesCovered, branchesTotal);
 
-  console.log(
-    `[src-coverage-threshold] src/** lines=${formatPct(linePct)}% (${linesCovered}/${linesTotal})`,
-  );
-  console.log(
-    `[src-coverage-threshold] src/** branches=${formatPct(branchPct)}% (${branchesCovered}/${branchesTotal})`,
-  );
-
   if (linePct + 0.0001 < MIN_LINES_PCT) {
-    fail(`lines threshold failed: ${formatPct(linePct)}% < ${MIN_LINES_PCT}%`);
+    return {
+      ok: false,
+      message: `lines threshold failed: ${formatPct(linePct)}% < ${MIN_LINES_PCT}%`,
+    };
   }
 
   if (branchPct + 0.0001 < MIN_BRANCHES_PCT) {
-    fail(`branches threshold failed: ${formatPct(branchPct)}% < ${MIN_BRANCHES_PCT}%`);
+    return {
+      ok: false,
+      message: `branches threshold failed: ${formatPct(branchPct)}% < ${MIN_BRANCHES_PCT}%`,
+    };
   }
 
+  return {
+    ok: true,
+    linePct,
+    branchPct,
+    linesCovered,
+    linesTotal,
+    branchesCovered,
+    branchesTotal,
+  };
+}
+
+function fail(message) {
+  console.error(`[src-coverage-threshold] ${message}`);
+  process.exit(1);
+}
+
+function main() {
+  if (!fs.existsSync(COVERAGE_SUMMARY_PATH)) {
+    fail(
+      "missing coverage/coverage-summary.json; run `just test-unit-coverage` before `just coverage-check`.",
+    );
+  }
+
+  const summary = JSON.parse(fs.readFileSync(COVERAGE_SUMMARY_PATH, "utf8"));
+  const result = evaluateSrcCoverage(summary);
+
+  if (!result.ok) {
+    fail(result.message);
+  }
+
+  console.log(
+    `[src-coverage-threshold] src/** lines=${formatPct(result.linePct)}% (${result.linesCovered}/${result.linesTotal})`,
+  );
+  console.log(
+    `[src-coverage-threshold] src/** branches=${formatPct(result.branchPct)}% (${result.branchesCovered}/${result.branchesTotal})`,
+  );
   console.log(
     `[src-coverage-threshold] passed: lines>=${MIN_LINES_PCT}% and branches>=${MIN_BRANCHES_PCT}%`,
   );
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  MIN_LINES_PCT,
+  MIN_BRANCHES_PCT,
+  isSrcEntry,
+  pct,
+  formatPct,
+  evaluateSrcCoverage,
+  main,
+};

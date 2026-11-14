@@ -51,31 +51,19 @@ function writeBaseline(summary) {
   );
 }
 
-function main() {
-  const updateBaseline = process.argv.includes("--update-baseline");
-  const enforceBaseline = process.argv.includes("--enforce-baseline");
-  const summary = loadJson(SUMMARY_PATH);
-
-  if (!summary) {
-    console.error(
-      "[coverage-ratchet] missing coverage/combined-summary.json; run coverage-report first",
-    );
-    process.exit(1);
-  }
-
-  if (updateBaseline) {
-    writeBaseline(summary);
-    return;
-  }
-
+/**
+ * Compare summary metrics to minimum targets (and optional baseline).
+ * @returns {string[]} failure messages
+ */
+function evaluateRatchet(summary, opts = {}) {
   const failures = [];
-  if (enforceBaseline) {
-    const baseline = loadJson(BASELINE_PATH);
-    if (!baseline || !baseline.metrics) {
-      console.error("[coverage-ratchet] missing baseline; run coverage-ratchet --update-baseline");
-      process.exit(1);
-    }
+  const baseline = opts.baseline;
+  const enforceBaseline = Boolean(opts.enforceBaseline);
 
+  if (enforceBaseline) {
+    if (!baseline || !baseline.metrics) {
+      return ["missing baseline; run coverage-ratchet --update-baseline"];
+    }
     for (const [metric, baselineValue] of Object.entries(baseline.metrics)) {
       const currentValue = Number(getByPath(summary, metric) || 0);
       if (Number.isNaN(currentValue)) {
@@ -99,6 +87,29 @@ function main() {
     }
   }
 
+  return failures;
+}
+
+function main() {
+  const updateBaseline = process.argv.includes("--update-baseline");
+  const enforceBaseline = process.argv.includes("--enforce-baseline");
+  const summary = loadJson(SUMMARY_PATH);
+
+  if (!summary) {
+    console.error(
+      "[coverage-ratchet] missing coverage/combined-summary.json; run coverage-report first",
+    );
+    process.exit(1);
+  }
+
+  if (updateBaseline) {
+    writeBaseline(summary);
+    return;
+  }
+
+  const baseline = enforceBaseline ? loadJson(BASELINE_PATH) : null;
+  const failures = evaluateRatchet(summary, { enforceBaseline, baseline });
+
   if (failures.length > 0) {
     for (const failure of failures) {
       console.error(`[coverage-ratchet] ${failure}`);
@@ -113,4 +124,15 @@ function main() {
   console.log("[coverage-ratchet] coverage meets minimum targets");
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  MINIMUM_TARGETS,
+  TRACKED_METRICS,
+  getByPath,
+  evaluateRatchet,
+  writeBaseline,
+  main,
+};
