@@ -7,6 +7,14 @@ Deno.test("isNotificationWindowForUser matches same-day windows", () => {
   assertEquals(isNotificationWindowForUser(now, "08:00", null), false);
 });
 
+Deno.test("isNotificationWindowForUser uses half-open end (< not <=) at +30 minutes", () => {
+  // Window is [start, start+30). At exactly +30 the user is outside — catches a <= regression.
+  const atEnd = new Date(2026, 1, 21, 9, 30, 0, 0);
+  assertEquals(isNotificationWindowForUser(atEnd, "09:00", null), false);
+  const justInside = new Date(2026, 1, 21, 9, 29, 0, 0);
+  assertEquals(isNotificationWindowForUser(justInside, "09:00", null), true);
+});
+
 Deno.test("isNotificationWindowForUser handles windows crossing midnight", () => {
   const now = new Date(2026, 1, 21, 0, 5, 0, 0);
   assertEquals(isNotificationWindowForUser(now, "23:45", null), true);

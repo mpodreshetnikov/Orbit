@@ -1,8 +1,17 @@
 import React from "react";
+import { format } from "date-fns";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import MoneyImportAttentionPage from "./page";
 import { reloadPage } from "@/lib/money/extension-bridge";
+
+/** Match page.tsx formatMoment / formatDay under whatever TZ the lane sets (CI: Asia/Krasnoyarsk). */
+function fmtMoment(iso: string): string {
+  return format(new Date(iso), "dd.MM.yyyy HH:mm");
+}
+function fmtDay(iso: string): string {
+  return format(new Date(iso), "dd.MM.yyyy");
+}
 
 // The startup probes are patient by design -- about twelve seconds of real time -- and a test
 // cannot wait that long for silence; the schedule is shortened, and the reload stood in for.
@@ -212,7 +221,9 @@ describe("MoneyImportAttentionPage", () => {
     expect(card.getAttribute("data-stale")).toBe("true");
     expect(screen.getByText("money.accountSourceTbank")).toBeTruthy();
     expect(
-      screen.getByText('money.importAttentionStale:{"days":2,"date":"01.09.2026 09:30"}'),
+      screen.getByText(
+        `money.importAttentionStale:{"days":2,"date":"${fmtMoment("2026-09-01T09:30:00.000Z")}"}`,
+      ),
     ).toBeTruthy();
     // The threshold the extension keeps is what the settings show.
     expect(
@@ -426,13 +437,13 @@ describe("MoneyImportAttentionPage", () => {
     expect(liveLine.textContent?.startsWith(prefix)).toBe(true);
     expect(JSON.parse(liveLine.textContent!.slice(prefix.length))).toEqual({
       origin: "money.importAttentionLiveOriginRequested",
-      window: 'money.importAttentionWindowIncremental:{"from":"04.09.2026","to":"07.09.2026"}',
+      window: `money.importAttentionWindowIncremental:{"from":"${fmtDay("2026-09-04T00:00:00.000Z")}","to":"${fmtDay("2026-09-07T15:00:00.000Z")}"}`,
       phase: "money.importPhase.parse_enriching_operations",
       percent: 42,
       count: 'money.importAttentionLiveRunCount:{"count":12}',
     });
     expect(screen.getByTestId("money-import-attention-last-tbank_web").textContent).toBe(
-      'money.importAttentionLastAttemptFailed:{"date":"07.09.2026 14:52","error":"T-Bank did not stay on the operations page"}',
+      `money.importAttentionLastAttemptFailed:{"date":"${fmtMoment("2026-09-07T14:52:00.000Z")}","error":"T-Bank did not stay on the operations page"}`,
     );
     // The next-run line waits: a run in flight is the answer to "when".
     expect(screen.queryByText(/importAttentionNextAfter/)).toBeNull();
@@ -447,10 +458,12 @@ describe("MoneyImportAttentionPage", () => {
       expect(screen.queryByTestId("money-import-attention-live-tbank_web")).toBeNull(),
     );
     expect(screen.getByTestId("money-import-attention-last-tbank_web").textContent).toBe(
-      'money.importAttentionLastAttemptOk:{"date":"07.09.2026 15:03"}',
+      `money.importAttentionLastAttemptOk:{"date":"${fmtMoment("2026-09-07T15:03:00.000Z")}"}`,
     );
     expect(
-      screen.getByText('money.importAttentionNextAfter:{"date":"08.09.2026 11:03"}'),
+      screen.getByText(
+        `money.importAttentionNextAfter:{"date":"${fmtMoment("2026-09-08T11:03:00.000Z")}"}`,
+      ),
     ).toBeTruthy();
     await vi.advanceTimersByTimeAsync(3_000 + 200);
     expect(extension.attentionCalls()).toBe(3);

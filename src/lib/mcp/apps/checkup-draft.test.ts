@@ -226,3 +226,11 @@ describe("the checkup card", () => {
     expect(CHECKUP_DRAFT_HTML).toContain("late.error");
   });
 });
+
+describe("CHECKUP_DRAFT_HTML client script", () => {
+  it("ships a script that parses", () => {
+    const start = CHECKUP_DRAFT_HTML.indexOf("<script>") + "<script>".length;
+    const script = CHECKUP_DRAFT_HTML.slice(start, CHECKUP_DRAFT_HTML.lastIndexOf("</script>"));
+    expect(() => new Function(script)).not.toThrow();
+  });
+});
