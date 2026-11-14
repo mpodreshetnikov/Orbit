@@ -12,6 +12,8 @@
 
 # testing
 /coverage
+reports/mutation
+.stryker-tmp
 .coverage
 coverage
 .playwright-cli
