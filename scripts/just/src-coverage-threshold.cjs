@@ -5,8 +5,8 @@ const path = require("path");
 
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const COVERAGE_SUMMARY_PATH = path.join(REPO_ROOT, "coverage", "coverage-summary.json");
-const MIN_LINES_PCT = 75;
-const MIN_BRANCHES_PCT = 75;
+const MIN_LINES_PCT = 80;
+const MIN_BRANCHES_PCT = 80;
 
 function normalizePath(filePath) {
   return filePath.replace(/\\/g, "/").toLowerCase();

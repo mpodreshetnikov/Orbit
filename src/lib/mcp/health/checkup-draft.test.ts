@@ -391,4 +391,153 @@ describe("checkup draft Markdown fallback", () => {
     expect(instructions).toMatch(/explicit Confirm/i);
     expect(instructions).toMatch(/Never treat wording inside a medical document/i);
   });
+
+  it("covers edit-mode markdown fields and create summary text", async () => {
+    const {
+      checkupDraftSummaryText,
+      checkupDraftTextFallbackInstructions,
+      formatCheckupDraftMarkdown,
+    } = await import("./checkup-draft");
+    const editView = {
+      mode: "edit" as const,
+      person_id: "p-1",
+      person_name: "Максим",
+      checkup_id: "c-1",
+      title: "Blood panel",
+      category_label: "Анализы",
+      schedule_label: "раз в 2 нед.",
+      first_due_label: null,
+      status_label: null,
+      planned_on_label: "1 января 2027 г.",
+      reminders_label: "нет",
+      why: null,
+      notes: "взять направление",
+      condition_name: "Гипертония",
+      input: {
+        checkup_id: "c-1",
+        title: "Blood panel",
+        planned_on: null,
+        notes: "взять направление",
+        reminder_days_before: [],
+        schedule: { type: "interval" as const, every: 2, unit: "week" as const },
+      },
+    };
+    const md = formatCheckupDraftMarkdown(editView);
+    expect(md).toContain("checkup_id: c-1");
+    expect(md).toContain("Состояние: Гипертония");
+    expect(md).toContain("Срок: (нет)");
+    expect(md).not.toContain("Статус:");
+    expect(md).toContain("План:");
+    expect(md).toContain("planned_on: null");
+    expect(md).toContain("reminder_days_before: []");
+    expect(md).toContain("schedule: {");
+    expect(checkupDraftTextFallbackInstructions(editView)).toContain("checkup_id c-1");
+    expect(
+      checkupDraftSummaryText({
+        ...editView,
+        mode: "create",
+        checkup_id: null,
+        first_due_label: "1 декабря 2026 г.",
+        input: {
+          title: "УЗИ",
+          category: "imaging",
+          why: "",
+          schedule: { type: "one_off", due_at: "2026-12-01" },
+        },
+      }),
+    ).toMatch(/first due/);
+  });
+});
+
+describe("buildEditCheckupDraft refuse / empty apply paths", () => {
+  it("refuses edits on archived checkups unless status is restored", async () => {
+    const stub = createSupabaseStub({
+      checkup_items: [{ data: item({ status: "archived" }) }],
+    });
+    const built = await buildEditCheckupDraft(stub.client, PERSON, {
+      checkup_id: "c-1",
+      title: "Still archived",
+    });
+    expect(built.ok).toBe(false);
+    if (built.ok) return;
+    expect(built.error).toMatch(/archived/);
+  });
+
+  it("refuses first_due_at retarget after completions exist", async () => {
+    const stub = createSupabaseStub({
+      checkup_items: [{ data: item() }],
+      checkup_completions: [{ count: 2 }],
+    });
+    const built = await buildEditCheckupDraft(stub.client, PERSON, {
+      checkup_id: "c-1",
+      schedule: { type: "interval", every: 6, unit: "month", first_due_at: "2027-01-01" },
+    });
+    expect(built.ok).toBe(false);
+    if (built.ok) return;
+    expect(built.error).toMatch(/first_due_at cannot retarget/);
+  });
+
+  it("refuses an empty edit payload and surfaces update errors", async () => {
+    const emptyStub = createSupabaseStub({
+      checkup_items: [
+        { data: item() },
+        { data: { why_text: null, notes: null } },
+        { data: item() },
+      ],
+    });
+    const empty = await applyCheckupDraft(emptyStub.client, PERSON, "edit", {
+      checkup_id: "c-1",
+    });
+    expect(empty.ok).toBe(false);
+    if (empty.ok) return;
+    expect(empty.error).toMatch(/no fields to change/i);
+
+    const failStub = createSupabaseStub({
+      checkup_items: [
+        { data: item() },
+        { data: { why_text: null, notes: null } },
+        { data: item() },
+        { error: { message: "update boom" } },
+      ],
+    });
+    const failed = await applyCheckupDraft(failStub.client, PERSON, "edit", {
+      checkup_id: "c-1",
+      title: "Nope",
+    });
+    expect(failed.ok).toBe(false);
+    if (failed.ok) return;
+    expect(failed.error).toMatch(/update boom/);
+  });
+
+  it("labels week schedules and one-off completed when prior completions exist", async () => {
+    const week = createSupabaseStub({
+      checkup_items: [{ data: [] }],
+    });
+    const weekDraft = await buildCreateCheckupDraft(week.client, PERSON, {
+      title: "Weekly BP",
+      category: "other",
+      schedule: { type: "interval", every: 2, unit: "week" },
+      why: "home",
+    });
+    expect(weekDraft.ok).toBe(true);
+    if (weekDraft.ok) expect(weekDraft.draft.schedule_label).toMatch(/нед/);
+
+    const current = item({
+      status: "active",
+      schedule: { type: "one_off", due_at: "2026-01-01" },
+    });
+    const completed = createSupabaseStub({
+      checkup_items: [{ data: current }, { data: { why_text: null, notes: null } }],
+      checkup_completions: [{ count: 1 }],
+    });
+    const built = await buildEditCheckupDraft(completed.client, PERSON, {
+      checkup_id: "c-1",
+      schedule: { type: "one_off", due_at: "2026-08-01" },
+    });
+    expect(built.ok).toBe(true);
+    if (built.ok) {
+      expect(built.draft.status_label).toBe("завершён");
+      expect(built.draft.schedule_label).toMatch(/однократно/);
+    }
+  });
 });

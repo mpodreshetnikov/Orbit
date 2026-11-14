@@ -25,10 +25,10 @@ HTML asserts) are a standing failure mode.
 
 ## Coverage floor
 
-- Web / unit lanes today: **≥75%** lines and branches (`src-coverage-threshold` / `coverage-check`).
-  See also the pass criteria in `docs/QUALITY.md`.
-- Raising the floor to **80%** is tracked separately (`T-261113-tww` / ORB-64) and must wait until
-  mutation survivors shrink — do not pad weak tests only to hit a higher floor.
+- Web / unit lanes (`src/**` Vitest): **≥80%** lines and branches (`src-coverage-threshold` /
+  `coverage-check`). Per-function aggregates stay at **≥75%**. See also the pass criteria in
+  `docs/QUALITY.md`.
+- Do not pad weak tests only to hit the floor — raise coverage with meaningful oracles.
 
 ## Mutation (`test-mutation`)
 
@@ -38,7 +38,7 @@ When `test-mutation` is available on the tree:
 - Hard threshold: **`mutationScoreCovered` = 100%** — every mutant on lines already covered by
   tests must be killed.
 - Uncovered lines are **not** held to that 100% killed bar; they are limited by the coverage floor
-  above (75% now; 80% after `T-261113-tww`).
+  above (80% lines/branches on `src/**`).
 - There is **no** advisory mutation lane, **no** nightly/full side run, and **no** separate
   baseline/full command IDs to prefer over `test-mutation`.
 - Do not treat `coverage-check` green alone as proof. Report survivors on covered lines if any.

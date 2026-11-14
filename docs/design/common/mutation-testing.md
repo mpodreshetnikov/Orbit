@@ -44,13 +44,13 @@ Scores match Stryker Mutation Testing Elements (v8/v9):
 
 ## Thresholds / gate
 
-Stryker `thresholds.break` is **null**. Stryker’s own break uses overall `mutationScore`, which counts `NoCoverage` against the score — that would force every line to be covered by a test just to pass mutation, overlapping the line-coverage floor (75% now; ORB-64 → 80%).
+Stryker `thresholds.break` is **null**. Stryker’s own break uses overall `mutationScore`, which counts `NoCoverage` against the score — that would force every line to be covered by a test just to pass mutation, overlapping the line-coverage floor (80% lines/branches on `src/**`).
 
 Orbit’s hard Quality Gates check is in `scripts/just/mutation-summary.cjs` → `evaluateCoveredMutationGate` (invoked by `scripts/just/run-mutation.cjs` after Stryker JSON is written). Unit tests: `mutation-summary.test.ts`, `run-mutation.test.ts`.
 
 - **Pass** when `mutationScoreCovered === 100` (equivalently: `survived === 0` on covered mutants).
 - **Pass** on incremental skip (no mutable Vitest files in the diff).
-- **NoCoverage** mutants do not fail the mutation gate (line-coverage floors own that: 75% now; ORB-64 → 80%).
+- **NoCoverage** mutants do not fail the mutation gate (line-coverage floors own that: 80% lines/branches on `src/**`).
 
 `stryker.config.mjs` sets `thresholds.break: null` and excludes `StringLiteral` mutants (log/CLI message text only). Use `// Stryker disable next-line` only for proven equivalent or unreachable behavioral mutants, with a short reason.
 

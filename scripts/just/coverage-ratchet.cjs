@@ -19,7 +19,7 @@ const TRACKED_METRICS = [
 ];
 
 const MINIMUM_TARGETS = {
-  "vitest.lines_pct": 75,
+  "vitest.lines_pct": 80,
   "deno.lines_pct": 75,
   "db.totals.function_mapping_ratio_pct": 75,
   "db.totals.policy_mapping_ratio_pct": 75,

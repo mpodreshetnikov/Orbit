@@ -574,4 +574,120 @@ describe("use-regimens", () => {
       }),
     ).rejects.toThrow("inventory rpc failed");
   });
+
+  it("surfaces dose/inventory query errors and refill snooze rpc paths", async () => {
+    const queryError = createQueryBuilder({
+      data: null,
+      error: { message: "dose query failed" },
+    });
+    createClientMock.mockReturnValue({ from: vi.fn(() => queryError) });
+
+    const { useDoseEventsForPerson, useDoseEventsForRegimen, useInventoryTransactions } =
+      await import("./use-regimens");
+    const personDoses = renderHookWithQueryClient(() =>
+      useDoseEventsForPerson("person-1", "2026-01-01T00:00:00.000Z", "2026-01-02T00:00:00.000Z"),
+    );
+    const regimenDoses = renderHookWithQueryClient(() => useDoseEventsForRegimen("reg-1"));
+    const inventory = renderHookWithQueryClient(() => useInventoryTransactions("reg-1"));
+
+    await waitFor(() => expect(personDoses.result.current.isError).toBe(true));
+    await waitFor(() => expect(regimenDoses.result.current.isError).toBe(true));
+    await waitFor(() => expect(inventory.result.current.isError).toBe(true));
+
+    const rpc = vi
+      .fn()
+      .mockResolvedValueOnce({ data: "2026-02-01", error: null })
+      .mockResolvedValueOnce({ data: null, error: null })
+      .mockResolvedValueOnce({ data: null, error: { message: "snooze set failed" } })
+      .mockResolvedValueOnce({ data: null, error: { message: "mark taken failed" } })
+      .mockResolvedValueOnce({ data: null, error: { message: "skip failed" } })
+      .mockResolvedValueOnce({ data: null, error: { message: "undo failed" } })
+      .mockResolvedValueOnce({ data: null, error: { message: "resolution failed" } })
+      .mockResolvedValueOnce({ data: null, error: { message: "snooze dose failed" } });
+    createClientMock.mockReturnValue({
+      from: vi.fn(() => createQueryBuilder({ data: [], error: null })),
+      rpc,
+    });
+
+    const {
+      useMarkDoseSkipped,
+      useMarkDoseTaken,
+      useMedicationRefillSnooze,
+      useSetMedicationRefillSnooze,
+      useSnoozeDose,
+      useUndoDoseIntake,
+      useUpdateDoseEventResolutionDetails,
+    } = await import("./use-regimens");
+
+    const snoozeQuery = renderHookWithQueryClient(() => useMedicationRefillSnooze("reg-1"));
+    await waitFor(() => expect(snoozeQuery.result.current.isSuccess).toBe(true));
+    expect(snoozeQuery.result.current.data).toBe("2026-02-01");
+
+    const setSnooze = renderHookWithQueryClient(() => useSetMedicationRefillSnooze());
+    await act(async () => {
+      await setSnooze.result.current.mutateAsync({ regimenId: "reg-1", snoozeUntil: null });
+    });
+    expect(rpc).toHaveBeenCalledWith("set_medication_refill_snooze", {
+      p_regimen_id: "reg-1",
+      p_snooze_until: null,
+    });
+
+    await expect(
+      setSnooze.result.current.mutateAsync({ regimenId: "reg-1", snoozeUntil: "2026-03-01" }),
+    ).rejects.toThrow("snooze set failed");
+
+    const markTaken = renderHookWithQueryClient(() => useMarkDoseTaken());
+    const markSkipped = renderHookWithQueryClient(() => useMarkDoseSkipped());
+    const undo = renderHookWithQueryClient(() => useUndoDoseIntake());
+    const resolution = renderHookWithQueryClient(() => useUpdateDoseEventResolutionDetails());
+    const snoozeDose = renderHookWithQueryClient(() => useSnoozeDose());
+
+    await expect(markTaken.result.current.mutateAsync({ doseEventId: "dose-1" })).rejects.toThrow(
+      "mark taken failed",
+    );
+    await expect(
+      markSkipped.result.current.mutateAsync({ doseEventId: "dose-2", note: "n" }),
+    ).rejects.toThrow("skip failed");
+    await expect(undo.result.current.mutateAsync({ doseEventId: "dose-3" })).rejects.toThrow(
+      "undo failed",
+    );
+    await expect(
+      resolution.result.current.mutateAsync({ doseEventId: "dose-4", amountTaken: null }),
+    ).rejects.toThrow("resolution failed");
+    await expect(
+      snoozeDose.result.current.mutateAsync({
+        doseEventId: "dose-5",
+        authUserId: "auth-1",
+        minutesFromNow: 30,
+      }),
+    ).rejects.toThrow("snooze dose failed");
+  });
+
+  it("propagates archive future-event delete and unarchive update errors", async () => {
+    const regimensOk = createQueryBuilder({ data: null, error: null });
+    const doseDeleteFail = createQueryBuilder({
+      data: null,
+      error: { message: "future events delete failed" },
+    });
+    createClientMock.mockReturnValue({
+      from: vi.fn((table: string) => {
+        if (table === "med_regimens") return regimensOk;
+        if (table === "med_dose_events") return doseDeleteFail;
+        return createQueryBuilder({ data: null, error: null });
+      }),
+    });
+    const { useArchiveRegimen, useUnarchiveRegimen } = await import("./use-regimens");
+    const archive = renderHookWithQueryClient(() => useArchiveRegimen());
+    await expect(
+      archive.result.current.mutateAsync({ id: "reg-1", personId: "person-1" }),
+    ).rejects.toThrow("future events delete failed");
+
+    createClientMock.mockReturnValue({
+      from: vi.fn(() => createQueryBuilder({ data: null, error: { message: "unarchive failed" } })),
+    });
+    const unarchive = renderHookWithQueryClient(() => useUnarchiveRegimen());
+    await expect(
+      unarchive.result.current.mutateAsync({ id: "reg-1", personId: "person-1" }),
+    ).rejects.toThrow("unarchive failed");
+  });
 });
