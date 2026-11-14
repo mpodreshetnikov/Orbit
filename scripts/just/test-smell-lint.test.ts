@@ -150,12 +150,9 @@ describe("test-smell-lint", () => {
   });
 
   it("ignores expect() tokens that appear only inside string literals in a live case", () => {
-    const source = [
-      'it("t", () => {',
-      '  const s = "expect(1).toBeTruthy();";',
-      "});",
-      "",
-    ].join("\n");
+    const source = ['it("t", () => {', '  const s = "expect(1).toBeTruthy();";', "});", ""].join(
+      "\n",
+    );
     expect(analyzeFile("str-expect.test.ts", source)).toEqual([]);
   });
 
@@ -362,10 +359,7 @@ describe("test-smell-lint helpers", () => {
 
     const cleanDir = mkdtempSync(join(tmpdir(), "smell-clean-"));
     temps.push(cleanDir);
-    writeFileSync(
-      join(cleanDir, "ok.test.ts"),
-      'it("ok", () => { expect(1).toBe(1); });\n',
-    );
+    writeFileSync(join(cleanDir, "ok.test.ts"), 'it("ok", () => { expect(1).toBe(1); });\n');
     const clean = run({ roots: [cleanDir], fail: true });
     expect(clean.findings).toEqual([]);
     expect(clean.exitCode).toBe(0);

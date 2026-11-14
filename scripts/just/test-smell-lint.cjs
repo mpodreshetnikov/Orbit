@@ -20,7 +20,6 @@
  */
 // Stryker disable Regex: equivalent scanner character-class/quantifier mutants on Vitest-shaped sources
 
-
 const fs = require("node:fs");
 const path = require("node:path");
 
