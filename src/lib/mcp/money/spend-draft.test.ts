@@ -41,6 +41,7 @@ function createClient(handlers: {
   existing?: Record<string, unknown> | null;
   existingError?: { message: string } | null;
   lines?: Array<Record<string, unknown>>;
+  linesError?: { message: string } | null;
   rpc?: { data: unknown; error: null | { message: string } };
 }) {
   return {
@@ -79,7 +80,10 @@ function createClient(handlers: {
           insert: async () => handlers.insertLines ?? { error: null },
           select() {
             return {
-              eq: async () => ({ data: handlers.lines ?? [], error: null }),
+              eq: async () => ({
+                data: handlers.lines ?? [],
+                error: handlers.linesError ?? null,
+              }),
             };
           },
         };
@@ -89,6 +93,37 @@ function createClient(handlers: {
     rpc: async () => handlers.rpc ?? { data: null, error: { message: "no rpc" } },
   } as never;
 }
+
+const EXISTING_TX = {
+  id: "tx-9",
+  payer_person_id: "p-1",
+  account_id: "a-1",
+  posted_at: "2026-11-01T09:00:00.000Z",
+  amount: -100,
+  currency: "RUB",
+  transaction_type: "expense",
+  merchant_name: "Магазин",
+  comment: null,
+};
+
+const EXISTING_LINE = {
+  id: "li-1",
+  title: "Хлеб",
+  amount: -100,
+  quantity: 2,
+  unit: "шт",
+  line_status: "final",
+  related_line_item_id: null,
+  category_id: "c-food",
+  beneficiary_person_id: null,
+  assignment_method: "rule",
+  assignment_rule_id: "rule-1",
+  assignment_confidence: 0.9,
+  category_locked_by_user: false,
+  last_category_rule_id: "rule-1",
+  last_category_rule_run_id: "run-1",
+  category_assigned_at: "2026-11-01T09:00:00.000Z",
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -313,6 +348,125 @@ describe("buildEditSpendDraft", () => {
       { transaction_id: "tx-9" },
     );
     expect(built.ok).toBe(false);
+  });
+
+  it("lists each changed field in summary", async () => {
+    accounts.listMoneyAccounts.mockResolvedValue([
+      ACCOUNT,
+      {
+        id: "a-2",
+        account_label: "Карта",
+        account_kind: "debit",
+        currency: "RUB",
+        source: "manual",
+        is_active: true,
+      },
+    ]);
+    const built = await buildEditSpendDraft(
+      createClient({
+        existing: EXISTING_TX,
+        lines: [EXISTING_LINE],
+      }),
+      PERSON,
+      {
+        transaction_id: "tx-9",
+        account_id: "a-2",
+        posted_at: "2026-11-02T12:00:00.000Z",
+        amount: -150,
+        currency: "USD",
+        transaction_type: "refund",
+        merchant_name: "Магазин у дома",
+        comment: "возврат",
+        line_items: [{ title: "Хлеб", amount: -150, category_id: "c-food" }],
+      },
+    );
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    const changes = built.draft.changes.join("\n");
+    expect(changes).toMatch(/счёт → Карта/);
+    expect(changes).toMatch(/дата →/);
+    expect(changes).toMatch(/сумма →/);
+    expect(changes).toMatch(/тип → возврат/);
+    expect(changes).toMatch(/мерчант → Магазин у дома/);
+    expect(changes).toMatch(/комментарий → возврат/);
+    expect(changes).toMatch(/строки: 1/);
+  });
+
+  it("refuses DB error / missing tx / bad amount / bad posted_at / unknown categories / line load error", async () => {
+    const dbError = await buildEditSpendDraft(
+      createClient({ existing: null, existingError: { message: "tx read failed" } }),
+      PERSON,
+      { transaction_id: "tx-9" },
+    );
+    expect(dbError.ok).toBe(false);
+    if (dbError.ok) return;
+    expect(dbError.error).toMatch(/tx read failed/);
+
+    const missing = await buildEditSpendDraft(createClient({ existing: null }), PERSON, {
+      transaction_id: "tx-missing",
+    });
+    expect(missing.ok).toBe(false);
+    if (missing.ok) return;
+    expect(missing.error).toMatch(/No transaction/);
+
+    const badAmount = await buildEditSpendDraft(
+      createClient({ existing: EXISTING_TX, lines: [EXISTING_LINE] }),
+      PERSON,
+      { transaction_id: "tx-9", amount: Number.NaN },
+    );
+    expect(badAmount.ok).toBe(false);
+    if (badAmount.ok) return;
+    expect(badAmount.error).toMatch(/finite number/);
+
+    const badPosted = await buildEditSpendDraft(
+      createClient({ existing: EXISTING_TX, lines: [EXISTING_LINE] }),
+      PERSON,
+      { transaction_id: "tx-9", posted_at: "not-a-date" },
+    );
+    expect(badPosted.ok).toBe(false);
+    if (badPosted.ok) return;
+    expect(badPosted.error).toMatch(/ISO datetime/);
+
+    const unknownCat = await buildEditSpendDraft(createClient({ existing: EXISTING_TX }), PERSON, {
+      transaction_id: "tx-9",
+      line_items: [{ title: "X", amount: -1, category_id: "missing-cat" }],
+    });
+    expect(unknownCat.ok).toBe(false);
+    if (unknownCat.ok) return;
+    expect(unknownCat.error).toMatch(/Unknown category id/);
+
+    const lineLoad = await buildEditSpendDraft(
+      createClient({
+        existing: EXISTING_TX,
+        linesError: { message: "lines boom" },
+      }),
+      PERSON,
+      { transaction_id: "tx-9" },
+    );
+    expect(lineLoad.ok).toBe(false);
+    if (lineLoad.ok) return;
+    expect(lineLoad.error).toMatch(/lines boom/);
+  });
+
+  it("loads existing lines when line_items omitted", async () => {
+    const built = await buildEditSpendDraft(
+      createClient({
+        existing: EXISTING_TX,
+        lines: [EXISTING_LINE],
+      }),
+      PERSON,
+      { transaction_id: "tx-9", comment: "заметка" },
+    );
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(built.draft.input.line_items?.[0]).toMatchObject({
+      id: "li-1",
+      title: "Хлеб",
+      quantity: 2,
+      assignment_method: "rule",
+    });
+    expect(built.draft.changes.some((line) => line.includes("комментарий"))).toBe(true);
+    expect(built.draft.changes.some((line) => line.includes("строки"))).toBe(false);
   });
 });
 

@@ -58,6 +58,8 @@ function createClient(handlers: {
   insert?: { data: unknown; error: null | { message: string } };
   update?: { data: unknown; error: null | { message: string } };
   deleteError?: { message: string } | null;
+  lineUpdates?: unknown[];
+  lineUpdate?: { data: unknown; error: null | { message: string } };
 }) {
   const categories = handlers.categories ?? [CANON, CUSTOM];
   return {
@@ -156,16 +158,18 @@ function createClient(handlers: {
               },
             };
           },
-          update() {
+          update(payload: unknown) {
+            handlers.lineUpdates?.push(payload);
             return {
               eq() {
                 return {
                   select() {
                     return {
-                      single: async () => ({
-                        data: { id: "llllllll-llll-4lll-8lll-llllllllllll", title: "Латте" },
-                        error: null,
-                      }),
+                      single: async () =>
+                        handlers.lineUpdate ?? {
+                          data: { id: "llllllll-llll-4lll-8lll-llllllllllll", title: "Латте" },
+                          error: null,
+                        },
                     };
                   },
                 };
@@ -310,5 +314,175 @@ describe("category-draft money", () => {
       canonical_category_id: CANON.id,
     });
     expect(result.ok).toBe(true);
+  });
+
+  it("apply rename updates custom category", async () => {
+    const result = await applyCategoryDraft(createClient({}), PERSON, "rename", {
+      category_id: CUSTOM.id,
+      name_en: "Latte",
+      name_ru: "Латте",
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.label).toBe("Латте");
+  });
+
+  it("apply rename refuses validation failure / DB error / canonical row", async () => {
+    const canonicalRefuse = await applyCategoryDraft(createClient({}), PERSON, "rename", {
+      category_id: CANON.id,
+      name_en: "Nope",
+    });
+    expect(canonicalRefuse.ok).toBe(false);
+    if (canonicalRefuse.ok) return;
+    expect(canonicalRefuse.error).toMatch(/Canonical/i);
+
+    const dbError = await applyCategoryDraft(
+      createClient({ update: { data: null, error: { message: "rename boom" } } }),
+      PERSON,
+      "rename",
+      { category_id: CUSTOM.id, name_en: "Latte", name_ru: "Латте" },
+    );
+    expect(dbError.ok).toBe(false);
+    if (dbError.ok) return;
+    expect(dbError.error).toMatch(/rename boom/);
+
+    const canonicalRow = await applyCategoryDraft(
+      createClient({
+        update: {
+          data: {
+            id: CUSTOM.id,
+            name_ru: "Еда",
+            name_en: "Food",
+            category_kind: "canonical",
+          },
+          error: null,
+        },
+      }),
+      PERSON,
+      "rename",
+      { category_id: CUSTOM.id, name_en: "Latte", name_ru: "Латте" },
+    );
+    expect(canonicalRow.ok).toBe(false);
+    if (canonicalRow.ok) return;
+    expect(canonicalRow.error).toMatch(/Canonical categories cannot be renamed/);
+  });
+
+  it("apply delete removes unused custom category", async () => {
+    const result = await applyCategoryDraft(createClient({}), PERSON, "delete", {
+      category_id: CUSTOM.id,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.id).toBe(CUSTOM.id);
+    expect(result.label).toMatch(/Кофе|Coffee/);
+  });
+
+  it("apply recategorize locks line as manual", async () => {
+    const lineUpdates: unknown[] = [];
+    const result = await applyCategoryDraft(createClient({ lineUpdates }), PERSON, "recategorize", {
+      line_item_id: "llllllll-llll-4lll-8lll-llllllllllll",
+      category_id: CANON.id,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.label).toBe("Латте");
+    expect(lineUpdates).toHaveLength(1);
+    expect(lineUpdates[0]).toMatchObject({
+      category_id: CANON.id,
+      category_locked_by_user: true,
+      assignment_method: "manual",
+      assignment_rule_id: null,
+    });
+    expect((lineUpdates[0] as { category_assigned_at?: string }).category_assigned_at).toMatch(
+      /^\d{4}-\d{2}-\d{2}T/,
+    );
+  });
+
+  it("refuses delete of canonical / parent-with-children / rules targeting it", async () => {
+    const canonical = await buildDeleteCategoryDraft(createClient({}), PERSON, {
+      category_id: CANON.id,
+    });
+    expect(canonical.ok).toBe(false);
+    if (canonical.ok) return;
+    expect(canonical.error).toMatch(/Canonical categories cannot be deleted/);
+
+    const child = {
+      ...CUSTOM,
+      id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      parent_id: CUSTOM.id,
+      name_en: "Espresso",
+      name_ru: "Эспрессо",
+      slug: "espresso",
+      depth: 2,
+    };
+    const withChildren = await buildDeleteCategoryDraft(
+      createClient({ categories: [CANON, CUSTOM, child] }),
+      PERSON,
+      { category_id: CUSTOM.id },
+    );
+    expect(withChildren.ok).toBe(false);
+    if (withChildren.ok) return;
+    expect(withChildren.error).toMatch(/child categories/i);
+
+    const withRules = await buildDeleteCategoryDraft(createClient({ ruleCount: 2 }), PERSON, {
+      category_id: CUSTOM.id,
+    });
+    expect(withRules.ok).toBe(false);
+    if (withRules.ok) return;
+    expect(withRules.error).toMatch(/2 category rule/);
+  });
+
+  it("refuses create when categoryColumns rejects depth/required fields", async () => {
+    const missing = await buildCreateCategoryDraft(createClient({}), PERSON, {
+      name_en: "",
+      name_ru: "Пекарня",
+      canonical_category_id: CANON.id,
+    });
+    expect(missing.ok).toBe(false);
+    if (missing.ok) return;
+    expect(missing.error).toMatch(/required/i);
+
+    const deep = {
+      id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      parent_id: CUSTOM.id,
+      canonical_category_id: CANON.id,
+      category_kind: "custom" as const,
+      system_key: null,
+      sort_order: 40,
+      depth: 4,
+      name_en: "Deep",
+      name_ru: "Глубокая",
+      slug: "deep",
+      archived_at: null,
+    };
+    const depthFail = await buildCreateCategoryDraft(
+      createClient({ categories: [CANON, CUSTOM, deep] }),
+      PERSON,
+      {
+        name_en: "Too Deep",
+        name_ru: "Слишком",
+        canonical_category_id: CANON.id,
+        parent_id: deep.id,
+      },
+    );
+    expect(depthFail.ok).toBe(false);
+    if (depthFail.ok) return;
+    expect(depthFail.error).toMatch(/depth cannot exceed/i);
+  });
+
+  it("categoryDraftSummaryText covers all modes", () => {
+    const base = {
+      person_id: PERSON.id,
+      person_name: PERSON.name,
+      title: "Карточка",
+      summary_lines: [],
+      input: { category_id: CUSTOM.id },
+    };
+    expect(categoryDraftSummaryText({ ...base, mode: "create" })).toContain("create category");
+    expect(categoryDraftSummaryText({ ...base, mode: "rename" })).toContain("rename category");
+    expect(categoryDraftSummaryText({ ...base, mode: "delete" })).toContain("delete category");
+    expect(categoryDraftSummaryText({ ...base, mode: "recategorize" })).toContain(
+      "recategorize line",
+    );
   });
 });
