@@ -4,7 +4,7 @@ import React, { use } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { ArrowLeft, Pencil } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { MoneyRuleEditor } from "@/components/money";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -22,7 +22,7 @@ export default function EditMoneyRulePage({ params }: { params: Promise<{ id: st
   if (isLoading) {
     return (
       <div className="space-y-6">
-        <Skeleton className="h-10 w-48" />
+        <Skeleton className="h-12 w-full max-w-xl" />
         <Skeleton className="h-[720px] w-full" />
       </div>
     );
@@ -43,26 +43,12 @@ export default function EditMoneyRulePage({ params }: { params: Promise<{ id: st
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" className="h-8 w-8" asChild>
-          <Link href="/money/rules">
-            <ArrowLeft className="h-4 w-4" />
-          </Link>
-        </Button>
-        <h1 className="flex items-center gap-2 text-xl font-semibold">
-          <Pencil className="h-5 w-5" />
-          {t("money.editRule")}
-        </h1>
-      </div>
-
-      <MoneyRuleEditor
-        mode="edit"
-        rule={rule}
-        initialExampleTransactionId={searchParams.get("exampleTransactionId")}
-        initialExampleLineItemId={searchParams.get("exampleLineItemId")}
-        autoRunExample={searchParams.get("autorun") === "1"}
-      />
-    </div>
+    <MoneyRuleEditor
+      mode="edit"
+      rule={rule}
+      initialExampleTransactionId={searchParams.get("exampleTransactionId")}
+      initialExampleLineItemId={searchParams.get("exampleLineItemId")}
+      autoRunExample={searchParams.get("autorun") === "1"}
+    />
   );
 }

@@ -390,30 +390,74 @@ describe("applySpendDraft", () => {
     expect(deletes).toEqual(["tx-orphan"]);
   });
 
-  it("updates via the atomic RPC on edit", async () => {
-    const applied = await applySpendDraft(
-      createClient({
-        existing: {
-          id: "tx-9",
-          payer_person_id: "p-1",
-          account_id: "a-1",
-          posted_at: "2026-11-01T09:00:00.000Z",
-          amount: -100,
-          currency: "RUB",
-          transaction_type: "expense",
-          merchant_name: "Магазин",
-          comment: null,
-        },
-        lines: [{ id: "li-1", title: "Хлеб", amount: -100, category_id: null }],
-        rpc: {
+  it("updates via the atomic RPC on edit with real arg names", async () => {
+    const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const client = {
+      from(table: string) {
+        if (table === "money_transactions") {
+          return {
+            select() {
+              return {
+                eq() {
+                  return {
+                    maybeSingle: async () => ({
+                      data: {
+                        id: "tx-9",
+                        payer_person_id: "p-1",
+                        account_id: "a-1",
+                        posted_at: "2026-11-01T09:00:00.000Z",
+                        amount: -100,
+                        currency: "RUB",
+                        transaction_type: "expense",
+                        merchant_name: "Магазин",
+                        comment: null,
+                      },
+                      error: null,
+                    }),
+                  };
+                },
+              };
+            },
+          };
+        }
+        if (table === "money_line_items") {
+          return {
+            select() {
+              return {
+                eq: async () => ({
+                  data: [{ id: "li-1", title: "Хлеб", amount: -100, category_id: null }],
+                  error: null,
+                }),
+              };
+            },
+          };
+        }
+        throw new Error(`unexpected table ${table}`);
+      },
+      rpc: async (name: string, args?: Record<string, unknown>) => {
+        rpcCalls.push({ name, args: args ?? {} });
+        return {
           data: { transaction: { id: "tx-9", merchant_name: "Магазин" }, line_items: [] },
           error: null,
-        },
-      }),
-      PERSON,
-      "edit",
-      { transaction_id: "tx-9", amount: -110 },
-    );
+        };
+      },
+    } as never;
+
+    const applied = await applySpendDraft(client, PERSON, "edit", {
+      transaction_id: "tx-9",
+      amount: -110,
+    });
     expect(applied).toEqual({ ok: true, transaction_id: "tx-9", label: "Магазин" });
+    expect(rpcCalls).toEqual([
+      {
+        name: "money_update_transaction_with_lines",
+        args: expect.objectContaining({
+          p_transaction_id: "tx-9",
+          p_updates: expect.objectContaining({ amount: -110 }),
+          p_line_items: expect.any(Array),
+        }),
+      },
+    ]);
+    expect((rpcCalls[0]?.args.p_line_items as unknown[]).length).toBeGreaterThan(0);
   });
 });

@@ -22,6 +22,14 @@ export function describeMoneyCategoryPipelineError(error: unknown, t: (key: stri
     );
   }
 
+  if (/JEV_API_KEY is required/i.test(message)) {
+    return translateOrFallback(
+      t,
+      "money.rulePipelineErrorJevUnavailable",
+      "LLM rule preview is unavailable because JEV_API_KEY is not configured for the local money-categorize function.",
+    );
+  }
+
   if (/OPENROUTER_API_KEY is required/i.test(message)) {
     return translateOrFallback(
       t,

@@ -342,12 +342,18 @@ export async function applyRowsAction(
       });
 
       const lineItems = normalizeLineItems(normalized);
+      let blockedByManualEdit = false;
       if (!tx.inserted && hasRealImportLineItems(lineItems)) {
-        await deps.repository.repairExistingTransactionDetails(tx.transactionId, normalized);
+        const repair = await deps.repository.repairExistingTransactionDetails(
+          tx.transactionId,
+          normalized,
+        );
+        blockedByManualEdit = repair.blocked_by_manual_edit === true;
       }
       const lineResults: Array<Record<string, unknown>> = [];
 
       for (let lineIndex = 0; lineIndex < lineItems.length; lineIndex++) {
+        if (blockedByManualEdit) break;
         const lineItem = lineItems[lineIndex];
 
         try {

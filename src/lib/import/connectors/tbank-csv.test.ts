@@ -172,6 +172,7 @@ describe("tbank-csv connector", () => {
       }),
     );
     expect(result.transactions[1].line_items[0].title).toBe("T-Bank");
+    expect(result.transactions[1].line_items[0].is_placeholder).toBe(true);
     expect(result.transactions[0].dedupe_hash).toEqual(expect.any(String));
   });
 });

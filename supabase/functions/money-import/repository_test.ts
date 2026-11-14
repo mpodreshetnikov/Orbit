@@ -1341,6 +1341,7 @@ Deno.test("repository line-item payload uses defaults and fallback errors", asyn
   assertEquals(insertedPayloads[0].title, "Imported");
   assertEquals(insertedPayloads[0].amount, 42);
   assertEquals(insertedPayloads[0].raw_payload, { source: "raw" });
+  assertEquals(insertedPayloads[0].is_placeholder, false);
 
   await assertThrowsWithMessage(
     () =>

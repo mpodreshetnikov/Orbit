@@ -25,6 +25,7 @@ Use the full command list in **AGENTS.md** and `just --list --unsorted`. For day
 - CI runs `test-e2e` when change impact includes web, DB, or Supabase Edge Functions surfaces.
 - **`quality`**: static checks only (format, lint, typecheck). No builds or tests.
 - **`test-extraction`**: scored extraction quality against the fixture corpus in `test/fixtures/extraction/`. See "Extraction quality" below. **Not a gate** — it is not part of `ci`, `ci-fast`, `check` or `coverage-check`, and it never runs on a pull request.
+- **`test-mutation`**: Stryker incremental mutation on Vitest-covered JS/TS changed vs the PR base. **Required** in the PR Quality Gates job; hard gate is `mutationScoreCovered === 100` (no survivors); `NoCoverage` is allowed (line-coverage floors own that). No-op exit 0 when nothing mutable changed. See `docs/design/common/mutation-testing.md`.
 
 ## Extraction quality
 
@@ -316,7 +317,7 @@ Pass criteria: all steps exit successfully; coverage thresholds and ratchets are
 #### Reference: per-step pass criteria
 
 - Format: zero drift. Lint: zero warnings/errors (web, extension, scripts, Supabase functions). Types: no TS/Deno diagnostics.
-- Unit tests: all runtime-split suites pass. Coverage: artifacts under `coverage/` and `.coverage/deno/`; `src/**` and per-function aggregates at `>=75%` lines/branches; ratchet and DB object mapping enforced.
+- Unit tests: all runtime-split suites pass. Coverage: artifacts under `coverage/` and `.coverage/deno/`; `src/**` and per-function aggregates at `>=75%` lines/branches; ratchet and DB object mapping enforced. High-signal oracles, smell lint, and mutation (`mutationScoreCovered` = 100% on covered lines): canonical in [`docs/design/common/testing-quality.md`](./design/common/testing-quality.md).
 - E2E product flows: Playwright suites pass against local Supabase. For extraction-related suites, `HEALTH_STRUCTURE_PARSER_MODE=e2e_stub` must be active, validating happy and failure paths without external LLM calls.
 - Smoke: production build and static generation succeed.
 

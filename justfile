@@ -131,8 +131,12 @@ mobile-start instance="":
 quality-lint-supabase-functions:
   deno lint --config supabase/functions/deno.json supabase/functions
 
+# Assertion-smell scan on unit tests (warn by default; ORBIT_TEST_SMELL_FAIL=1 to gate).
+test-smell-lint:
+  node scripts/just/test-smell-lint.cjs
+
 # Run all lint surfaces with zero warnings allowed.
-quality-lint: quality-lint-web quality-lint-extension quality-lint-scripts quality-lint-supabase-functions
+quality-lint: quality-lint-web quality-lint-extension quality-lint-scripts quality-lint-supabase-functions test-smell-lint
 
 # Run all lint surfaces in parallel (faster for CI).
 quality-lint-parallel:
@@ -195,15 +199,15 @@ quality-smoke-build: web-build-production
 
 # Run web unit tests across client and server runtime projects.
 test-unit-web:
-  npx vitest run --project web --project web-server
+  node scripts/just/run-vitest.cjs run --project web --project web-server
 
 # Run extension unit tests (core + popup UI).
 test-unit-ext:
-  npx vitest run --project extension-core --project extension-ui
+  node scripts/just/run-vitest.cjs run --project extension-core --project extension-ui
 
 # Run node/runtime-agnostic unit tests.
 test-unit-node:
-  npx vitest run --project node
+  node scripts/just/run-vitest.cjs run --project node
 
 # Run Supabase Edge Function unit tests under Deno.
 test-unit-functions:
@@ -211,15 +215,20 @@ test-unit-functions:
 
 # Run fast unit tests across all non-DB surfaces.
 test-unit:
-  npx vitest run
+  node scripts/just/run-vitest.cjs run
   deno test --allow-env --allow-read --config supabase/functions/deno.json supabase/functions
 
 # Run unit tests with coverage reports.
 test-unit-coverage:
-  npx vitest run --coverage --retry=1
+  node scripts/just/run-vitest.cjs run --coverage --retry=1
   deno test --allow-env --allow-read --config supabase/functions/deno.json supabase/functions
   deno test --allow-env --allow-read --config supabase/functions/deno.json --coverage=.coverage/deno supabase/functions
   node scripts/just/coverage-report.cjs
+
+# Mutation testing (Stryker). Required PR Quality Gates step — incremental only.
+# See docs/design/common/mutation-testing.md. No-op exit 0 when no mutable Vitest files changed.
+test-mutation:
+  node scripts/just/run-mutation.cjs
 
 # Run end-to-end product flow checks in deterministic no-external-LLM mode where applicable.
 test-e2e:

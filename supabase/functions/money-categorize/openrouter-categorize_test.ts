@@ -1,6 +1,6 @@
 // deno-lint-ignore-file require-await
 import { assertEquals } from "std/assert/assert-equals";
-import { callOpenRouterMoneyCategorizeBatch } from "./openrouter-categorize.ts";
+import { buildPrompt, callOpenRouterMoneyCategorizeBatch } from "./openrouter-categorize.ts";
 import type { MoneyCategorizeLlmBatchRequest } from "./service.ts";
 
 function createBatchRequest(lineItemIds: string[]): MoneyCategorizeLlmBatchRequest {
@@ -68,6 +68,7 @@ function createBatchRequest(lineItemIds: string[]): MoneyCategorizeLlmBatchReque
           id: `tx-${lineItemId}`,
           payer_person_id: "person-1",
           account_id: "account-1",
+          card_id: null,
           source: "tbank",
           posted_at: "2026-03-10T10:00:00.000Z",
           amount: 100 + index,
@@ -86,15 +87,31 @@ function createBatchRequest(lineItemIds: string[]): MoneyCategorizeLlmBatchReque
           raw_payload: {},
         },
         account: {
+          id: "account-1",
           source: "tbank",
           account_kind: "debit",
+          account_label: "Main",
+        },
+        card: {
+          id: null,
+          last4: null,
+          card_label: null,
+        },
+        brand: {
+          id: null,
+          name: null,
+          slug: null,
         },
         current_category: {
           id: null,
           kind: null,
+          name_en: null,
+          name_ru: null,
+          system_key: null,
           canonical_category_id: null,
           canonical_system_key: null,
         },
+        receipt_sibling_items: [],
         derived: {
           normalized_line_item_title: `item ${index + 1}`,
           normalized_merchant_name: "coffee house",
@@ -128,6 +145,37 @@ async function assertThrowsWithMessage(
 function asRecord(value: Record<string, unknown> | null): Record<string, unknown> {
   return value ?? {};
 }
+
+Deno.test("buildPrompt includes target_line_item and receipt_sibling_items", () => {
+  const request = createBatchRequest(["line-1"]);
+  request.items[0].context.receipt_sibling_items = [
+    {
+      id: "line-sib",
+      title: "Sibling pastry",
+      amount: 80,
+      quantity: 1,
+      unit: "pcs",
+      line_status: "final",
+      category_id: null,
+      assignment_method: "import",
+    },
+  ];
+  request.items[0].context.card = { id: "card-1", last4: "9999", card_label: "Gold" };
+  request.items[0].context.transaction.card_id = "card-1";
+  request.items[0].context.brand = { id: "brand-1", name: "Coffee House", slug: "coffee-house" };
+
+  const prompt = buildPrompt(request);
+  assertEquals(prompt.includes("target_line_item"), true);
+  assertEquals(prompt.includes("receipt_sibling_items"), true);
+  assertEquals(prompt.includes("Sibling pastry"), true);
+  assertEquals(prompt.includes('"last4":"9999"'), true);
+  assertEquals(prompt.includes("Classify only each item's target_line_item"), true);
+});
+
+Deno.test("buildPrompt keeps empty receipt_sibling_items for single-line receipts", () => {
+  const prompt = buildPrompt(createBatchRequest(["line-1"]));
+  assertEquals(prompt.includes('"receipt_sibling_items":[]'), true);
+});
 
 Deno.test(
   "callOpenRouterMoneyCategorizeBatch sends one batched request and parses strict JSON",

@@ -189,6 +189,7 @@ export async function parseTBankCsv(
         {
           title: merchantName || "T-Bank",
           amount,
+          is_placeholder: true,
           raw_payload: rawPayload,
         },
       ],

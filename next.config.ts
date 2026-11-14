@@ -20,6 +20,9 @@ function selfHostedStoragePattern() {
 }
 
 const nextConfig: NextConfig = {
+  // Hide the Next.js "N" / issues badge so review screenshots and local demos stay clean.
+  // Runtime errors still surface in the terminal and browser console.
+  devIndicators: false,
   // The Docker image (deploy/web.Dockerfile) runs Next's standalone server; Vercel builds without it.
   output: process.env.NEXT_OUTPUT === "standalone" ? "standalone" : undefined,
   // Appended to static asset URLs as ?dpl=. The self-hosted image builds with a placeholder that

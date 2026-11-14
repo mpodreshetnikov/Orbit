@@ -1,0 +1,329 @@
+import { decideJevCategoryApplication } from "./jev-confidence.ts";
+import { buildLlmCategorizeItemContext } from "./llm-context.ts";
+import type {
+  MoneyCategorizeCandidateCategory,
+  MoneyCategorizeLlmBatchRequest,
+  MoneyCategorizeLlmBatchRequestItem,
+  MoneyCategorizeLlmBatchResult,
+  MoneyCategorizeLlmBatchResultItem,
+} from "./service.ts";
+
+export interface JevMoneyCategorizeDeps {
+  fetchFn: typeof fetch;
+  apiKey: string;
+  model?: string;
+  baseUrl?: string;
+  timeoutMs?: number;
+  concurrency?: number;
+  probabilityThreshold?: number;
+  noulThreshold?: number;
+}
+
+/** Pinned for reproducibility (ORB-44 experiment used jev-1.14.0). */
+export const DEFAULT_JEV_MODEL = "jev-1.14.0";
+/** Per-call budget under the web client's ~20s money-categorize wall time. */
+export const DEFAULT_JEV_TIMEOUT_MS = 12_000;
+const DEFAULT_CONCURRENCY = 4;
+const DEFAULT_BASE_URL = "https://api.typesafe.ai";
+
+function asRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object") return {};
+  return value as Record<string, unknown>;
+}
+
+function asNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim().length > 0 && Number.isFinite(Number(value))) {
+    return Number(value);
+  }
+  return null;
+}
+
+function asString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function compactRecord(record: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(record).filter(([, value]) => {
+      if (value == null) return false;
+      if (typeof value === "string") return value.trim().length > 0;
+      if (Array.isArray(value)) return value.length > 0;
+      if (typeof value === "object") {
+        return Object.keys(asRecord(value)).length > 0;
+      }
+      return true;
+    }),
+  );
+}
+
+export function buildChoiceCriteria(
+  candidates: MoneyCategorizeCandidateCategory[],
+): Record<string, string> {
+  const criteria: Record<string, string> = {};
+  for (const candidate of candidates) {
+    // Choice keys must be the category UUID so the response maps directly to categoryId.
+    // Skip meta buckets that should not be auto-assigned.
+    const systemKey = candidate.canonical_system_key;
+    if (systemKey === "uncategorized" || systemKey === "needs_review") continue;
+    criteria[candidate.id] = `${candidate.name_ru} / ${candidate.name_en}${
+      systemKey ? ` (${systemKey})` : ""
+    }`;
+  }
+  return criteria;
+}
+
+/**
+ * Full parent/sibling categorize context for Jev state (no secrets), structured as
+ * `target_line_item` vs `receipt_sibling_items`, plus eligible categories for Noul (M2).
+ */
+export function buildJevState(
+  item: MoneyCategorizeLlmBatchRequestItem,
+  eligibleCategories: Record<string, string>,
+): Record<string, unknown> {
+  const itemContext = buildLlmCategorizeItemContext(item);
+  const { receipt_sibling_items: siblingItems, ...rest } = itemContext;
+  return {
+    ...compactRecord({
+      ...rest,
+      // Shared with Choice so Noul any_fit evaluates against the real option list.
+      eligible_categories: Object.entries(eligibleCategories).map(([id, label]) => ({
+        id,
+        label,
+      })),
+    }),
+    // Keep explicit [] for single-line receipts (compactRecord would drop it).
+    receipt_sibling_items: Array.isArray(siblingItems) ? siblingItems : [],
+  };
+}
+
+function buildQuestions(
+  criteria: Record<string, string>,
+  userPrompt: string | null,
+): Record<string, unknown> {
+  const instructions = [
+    "Выбери одну категорию Orbit только для state.target_line_item.",
+    "state.receipt_sibling_items — соседние строки того же чека; используй их как контекст, не классифицируй их.",
+    "Учитывай merchant, карту/счёт, бренд, сумму, MCC, комментарий, raw_payload и текущую категорию если есть.",
+    userPrompt ? `Дополнительная инструкция пользователя: ${userPrompt}` : null,
+  ]
+    .filter((part): part is string => Boolean(part))
+    .join(" ");
+
+  return {
+    category: {
+      type: "choice",
+      instructions,
+      criteria,
+    },
+    any_fit: {
+      type: "noul",
+      instructions:
+        "Подходит ли хотя бы одна из категорий из state.eligible_categories уверенно для target_line_item? Нет — если перевод себе, данных недостаточно, или ни одна опция не подходит.",
+    },
+  };
+}
+
+/**
+ * Bounded concurrency pool: on first failure abort remaining work, drain in-flight
+ * workers (allSettled), then rethrow. Prevents billable overlap with service retries (M3).
+ */
+export async function mapPoolCancelOnError<T, R>(
+  values: T[],
+  concurrency: number,
+  mapper: (value: T, index: number, signal: AbortSignal) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(values.length);
+  let nextIndex = 0;
+  let firstError: unknown = null;
+  const controller = new AbortController();
+
+  async function worker(): Promise<void> {
+    while (!controller.signal.aborted) {
+      if (nextIndex >= values.length) return;
+      const index = nextIndex;
+      nextIndex += 1;
+      try {
+        results[index] = await mapper(values[index], index, controller.signal);
+      } catch (error) {
+        if (!firstError) {
+          firstError = error;
+          controller.abort();
+        }
+      }
+    }
+  }
+
+  const workers = Math.max(1, Math.min(concurrency, values.length || 1));
+  await Promise.allSettled(Array.from({ length: workers }, () => worker()));
+  if (firstError) throw firstError;
+  return results;
+}
+
+async function callJevOnce(
+  item: MoneyCategorizeLlmBatchRequestItem,
+  request: MoneyCategorizeLlmBatchRequest,
+  deps: JevMoneyCategorizeDeps,
+  criteria: Record<string, string>,
+  parentSignal?: AbortSignal,
+): Promise<{
+  item: MoneyCategorizeLlmBatchResultItem;
+  promptTokens: number;
+  completionTokens: number;
+}> {
+  const controller = new AbortController();
+  const timeoutMs = deps.timeoutMs ?? DEFAULT_JEV_TIMEOUT_MS;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const onParentAbort = () => controller.abort();
+  parentSignal?.addEventListener("abort", onParentAbort);
+  if (parentSignal?.aborted) controller.abort();
+
+  const baseUrl = (deps.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, "");
+  const model = deps.model ?? DEFAULT_JEV_MODEL;
+  const userPrompt =
+    typeof request.rule.config.prompt === "string" && request.rule.config.prompt.trim().length > 0
+      ? request.rule.config.prompt.trim()
+      : null;
+
+  try {
+    if (controller.signal.aborted) {
+      throw new DOMException("The signal has been aborted", "AbortError");
+    }
+
+    const response = await deps.fetchFn(`${baseUrl}/v1/systemone`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${deps.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model,
+        state: buildJevState(item, criteria),
+        questions: buildQuestions(criteria, userPrompt),
+      }),
+    });
+
+    if (!response.ok) {
+      // Never echo response bodies (may reflect state); status only.
+      throw new Error(`Jev request failed: ${response.status}`);
+    }
+
+    let body: Record<string, unknown>;
+    try {
+      body = asRecord(await response.json());
+    } catch {
+      throw new Error("Jev returned invalid JSON");
+    }
+
+    const answers = asRecord(body.answers);
+    if (!("category" in answers) && !("any_fit" in answers)) {
+      throw new Error("Jev returned invalid JSON answers");
+    }
+
+    const categoryAnswer = asRecord(answers.category);
+    const noulAnswer = asRecord(answers.any_fit);
+    const choice = asString(categoryAnswer.choice);
+    const probabilities = asRecord(categoryAnswer.probabilities);
+    const hasProbabilities =
+      Object.keys(probabilities).length > 0 ||
+      (categoryAnswer.probabilities != null && typeof categoryAnswer.probabilities === "object");
+    const choiceProbability = choice && hasProbabilities ? asNumber(probabilities[choice]) : null;
+    const noul = asNumber(noulAnswer.noul);
+    const usage = asRecord(body.usage);
+
+    const decision = decideJevCategoryApplication({
+      choice,
+      choiceProbability,
+      noul,
+      probabilityThreshold: deps.probabilityThreshold,
+      noulThreshold: deps.noulThreshold,
+    });
+
+    const allowedIds = new Set(Object.keys(criteria));
+
+    let categoryId: string | null = null;
+    let reason = decision.reason;
+    if (decision.apply && choice && allowedIds.has(choice)) {
+      categoryId = choice;
+    } else if (decision.apply && choice && !allowedIds.has(choice)) {
+      categoryId = null;
+      reason = "Jev returned a category outside the allowed candidate list";
+    } else if (!decision.apply && choice && !allowedIds.has(choice)) {
+      reason = "Jev returned a category outside the allowed candidate list";
+    }
+
+    return {
+      item: {
+        lineItemId: item.lineItemId,
+        categoryId,
+        reason,
+        rawResponse: {
+          choice,
+          choice_probability: choiceProbability,
+          noul,
+          confidence: asNumber(categoryAnswer.confidence),
+          apply: decision.apply,
+          probability_threshold: decision.probabilityThreshold,
+          noul_threshold: decision.noulThreshold,
+          has_probabilities: hasProbabilities,
+        },
+      },
+      promptTokens: asNumber(usage.input_tokens) ?? 0,
+      completionTokens: asNumber(usage.output_tokens) ?? 0,
+    };
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      if (parentSignal?.aborted) {
+        throw new Error("Jev batch aborted");
+      }
+      throw new Error("Jev request timed out");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    parentSignal?.removeEventListener("abort", onParentAbort);
+  }
+}
+
+/**
+ * Jev evaluates one state per request. Preserve the batch service contract by
+ * fan-out with a bounded concurrency pool that cancels on first failure.
+ */
+export async function callJevMoneyCategorizeBatch(
+  request: MoneyCategorizeLlmBatchRequest,
+  deps: JevMoneyCategorizeDeps,
+): Promise<MoneyCategorizeLlmBatchResult> {
+  const criteria = buildChoiceCriteria(request.candidateCategories);
+  if (Object.keys(criteria).length === 0) {
+    return {
+      items: request.items.map((item) => ({
+        lineItemId: item.lineItemId,
+        categoryId: null,
+        reason: "No eligible candidate categories for Jev Choice",
+        rawResponse: null,
+      })),
+      promptTokens: 0,
+      completionTokens: 0,
+      model: deps.model ?? DEFAULT_JEV_MODEL,
+    };
+  }
+
+  if (Object.keys(criteria).length > 255) {
+    throw new Error("Jev Choice supports at most 255 category options");
+  }
+
+  const concurrency = Math.max(1, deps.concurrency ?? DEFAULT_CONCURRENCY);
+  const settled = await mapPoolCancelOnError(request.items, concurrency, (item, _index, signal) =>
+    callJevOnce(item, request, deps, criteria, signal),
+  );
+
+  return {
+    items: settled.map((entry) => entry.item),
+    promptTokens: settled.reduce((sum, entry) => sum + entry.promptTokens, 0),
+    completionTokens: settled.reduce((sum, entry) => sum + entry.completionTokens, 0),
+    model: deps.model ?? DEFAULT_JEV_MODEL,
+  };
+}

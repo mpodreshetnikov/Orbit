@@ -52,6 +52,8 @@ Cross-links:
 - Auth, RLS, and trust boundaries: [`docs/design/common/auth-rls-and-trust-boundaries.md`](./design/common/auth-rls-and-trust-boundaries.md)
 - Async jobs and notifications: [`docs/design/common/async-jobs-and-notifications.md`](./design/common/async-jobs-and-notifications.md)
 - Error handling and observability: [`docs/design/common/error-handling-and-observability.md`](./design/common/error-handling-and-observability.md)
+- High-signal unit tests, coverage floor, and mutation: [`docs/design/common/testing-quality.md`](./design/common/testing-quality.md)
+- SQL ? TypeScript parity for dual-implemented rules: [`docs/design/common/sql-ts-parity.md`](./design/common/sql-ts-parity.md)
 - UI shell, navigation, and person context: [`docs/design/common/ui-shell-navigation-and-person-context.md`](./design/common/ui-shell-navigation-and-person-context.md)
 - iOS app shell: [`docs/design/common/ios-app-shell.md`](./design/common/ios-app-shell.md)
 

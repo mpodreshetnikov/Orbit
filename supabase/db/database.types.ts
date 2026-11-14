@@ -1746,6 +1746,7 @@ export type Database = {
           created_at: string
           id: string
           import_hash: string | null
+          is_placeholder: boolean
           last_category_rule_id: string | null
           last_category_rule_run_id: string | null
           line_status: Database["public"]["Enums"]["money_line_status"]
@@ -1769,6 +1770,7 @@ export type Database = {
           created_at?: string
           id?: string
           import_hash?: string | null
+          is_placeholder?: boolean
           last_category_rule_id?: string | null
           last_category_rule_run_id?: string | null
           line_status?: Database["public"]["Enums"]["money_line_status"]
@@ -1792,6 +1794,7 @@ export type Database = {
           created_at?: string
           id?: string
           import_hash?: string | null
+          is_placeholder?: boolean
           last_category_rule_id?: string | null
           last_category_rule_run_id?: string | null
           line_status?: Database["public"]["Enums"]["money_line_status"]
@@ -3052,6 +3055,17 @@ export type Database = {
           p_today?: string
         }
         Returns: Json
+      }
+      money_list_line_item_discrepancies: {
+        Args: { p_min_delta?: number; p_person_id: string }
+        Returns: {
+          amount: number
+          delta: number
+          line_items_sum: number
+          merchant_name: string
+          posted_at: string
+          transaction_id: string
+        }[]
       }
       money_list_transactions_feed: {
         Args: {

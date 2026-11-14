@@ -38,6 +38,7 @@ Use these command IDs in plans, PRs, and handoffs:
 - `test-unit-functions`: `just test-unit-functions`
 - `test-unit`: `just test-unit` (all fast runtime-split unit lanes)
 - `test-unit-coverage`: `just test-unit-coverage`
+- `test-mutation`: `just test-mutation` (Stryker incremental vs base; required Quality Gates step; hard gate `mutationScoreCovered === 100`)
 - `test-e2e`: `just test-e2e` (Playwright end-to-end lane for real local product flows; includes extraction coverage and runs in deterministic no-external-LLM mode where applicable)
 - `test-extraction`: `just test-extraction` (scored extraction quality against the fixture corpus; replays recordings by default, does not gate CI)
 - `coverage-report`: `just coverage-report`
@@ -48,6 +49,7 @@ Use these command IDs in plans, PRs, and handoffs:
 - `lint-ext`: `just quality-lint-extension`
 - `lint-scripts`: `just quality-lint-scripts`
 - `lint-supabase`: `just quality-lint-supabase-functions`
+- `test-smell-lint`: `just test-smell-lint` (assertion-smell scan on `*.test.*`; warn by default; set `ORBIT_TEST_SMELL_FAIL=1` to gate)
 - `functions-lock-check`: `just quality-check-supabase-functions-lock` (verify Supabase Edge Functions lockfile format compatibility)
 - `functions-lock-refresh`: `just supabase-functions-lock-refresh` (regenerate `supabase/functions/deno.lock` with runtime-compatible Deno)
 - `types`: `just quality-typecheck`
@@ -98,6 +100,7 @@ Commands such as `dev-ready` start servers and do not exit until the stack is st
 - Debugging and operations: `docs/RUNBOOK.md`
 - Debug information in code: `docs/design/common/error-handling-and-observability.md`
 - Quality gates and PR checks: `docs/QUALITY.md`
+- High-signal unit tests, coverage floor, and mutation (`mutationScoreCovered`): `docs/design/common/testing-quality.md` (skills link; do not duplicate)
 - UI on every platform (web and iOS), mobile coverage, and pictures before merge: `docs/QUALITY.md`, "User-Interface Changes Ship On Every Platform"
 - Security and RLS expectations: `docs/SECURITY.md`
 - Where work is tracked, and how a multi-hour execution plan is written: the private task registry (see below)

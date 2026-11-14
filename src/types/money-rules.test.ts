@@ -60,7 +60,7 @@ describe("ruleSummary", () => {
       { field: "custom", operator: "equals", value: null },
     ];
     expect(ruleSummary(rule({ filters }), t, names)).toBe(
-      "Line-item amount is between 1 - ... и Merchant name equals any of set 'a', 'b' и MCC is empty и Current category равно 'Food / Еда' и custom равно ''",
+      "Line-item amount: is between 1 - ... и Merchant name: equals any of set 'a', 'b' и MCC: is empty и Current category: равно 'Food / Еда' и custom: равно ''",
     );
     expect(
       ruleSummary(
@@ -71,7 +71,7 @@ describe("ruleSummary", () => {
         t,
         names,
       ),
-    ).toBe("MCC is empty или MCC contains '5'");
+    ).toBe("MCC: is empty или MCC: contains '5'");
   });
 });
 
@@ -132,7 +132,9 @@ describe("the rule form", () => {
     ]);
     expect(
       ruleFormOf({ ...saved, config: { prompt: "Еда?", target_system_key: "other" } }),
-    ).toMatchObject({ prompt: "Еда?", fallbackSystemKey: "other" });
+    ).toMatchObject({ prompt: "Еда?", fallbackSystemKey: "other", llmProvider: "openrouter" });
+    expect(ruleFormOf({ ...saved, config: { provider: "jev" } }).llmProvider).toBe("jev");
+    expect(emptyRuleForm().llmProvider).toBe("jev");
   });
 
   it("writes a new rule at the end of the order, with only what its kind uses", () => {
@@ -169,7 +171,7 @@ describe("the rule form", () => {
         { field: "merchant_name", operator: "is_empty" },
         { field: "merchant_name", operator: "contains", value: "Coffee" },
       ],
-      config: { prompt: "Еда?" },
+      config: { provider: "jev", prompt: "Еда?" },
       stop_processing: false,
     });
     expect(

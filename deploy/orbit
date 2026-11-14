@@ -76,7 +76,8 @@ check_env() {
     err "deploy/.env: ORBIT_DOMAIN must be a bare domain like orbit.example.com (no https://, no slash)"
     problems=$((problems + 1))
   fi
-  [[ -n "${OPENROUTER_API_KEY:-}" ]] || warn "OPENROUTER_API_KEY is empty: document recognition and money categorization will be off"
+  [[ -n "${OPENROUTER_API_KEY:-}" ]] || warn "OPENROUTER_API_KEY is empty: document recognition and OpenRouter money categorization will be off"
+  [[ -n "${JEV_API_KEY:-}" ]] || warn "JEV_API_KEY is empty: Jev (TypeSafe) money categorization will be off"
   ((problems == 0)) || die "Fix the $problems line(s) above in deploy/.env and run the command again."
 }
 

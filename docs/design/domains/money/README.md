@@ -18,6 +18,7 @@ Money domain covers accounts/cards/categories, transaction ledger with line item
 - Ledger and line items: [`ledger-and-line-items.md`](./ledger-and-line-items.md)
 - Import framework: [`import-framework-file-and-extension.md`](./import-framework-file-and-extension.md)
 - Accounts/cards/categories mapping: [`accounts-cards-categories-and-mapping.md`](./accounts-cards-categories-and-mapping.md)
+- Categorize LLM parent/sibling context: [`categorize-llm-context.md`](./categorize-llm-context.md)
 
 ## Domain Boundaries
 
