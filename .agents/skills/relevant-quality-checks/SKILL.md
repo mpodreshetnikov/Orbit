@@ -22,6 +22,13 @@ Use this skill whenever a task edits repository files.
 8. If a check remains `blocked`, always provide a concrete reason explaining why it is an external blocker.
 9. Use command IDs in communication (`ci`, `db-test`) and map to concrete commands via `AGENTS.md`.
 
+## High-signal / mutation (Orbit)
+
+After changing tests or pure logic under Vitest, follow
+[`docs/design/common/testing-quality.md`](../../../docs/design/common/testing-quality.md)
+(`test-smell-lint`, coverage floor, required `test-mutation` with `mutationScoreCovered` = 100%).
+Do not restate thresholds here.
+
 ## Final Report Contract
 
 Include this checklist in the final task response:
