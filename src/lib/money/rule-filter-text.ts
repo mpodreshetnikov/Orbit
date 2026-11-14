@@ -32,9 +32,12 @@ export function matchTextFilter(
 ): boolean {
   const textValue = normalizeComparableText(rawValue);
   const needle = normalizeComparableText(filterValue);
-  const setValues = (filterValues ?? [])
-    .map((v) => normalizeComparableText(v))
-    .filter((v): v is string => Boolean(v));
+  // Stryker disable next-line ArrayDeclaration: seed values are not normalized, so they cannot match lowercased textValue/includes checks
+  const setValues: string[] = [];
+  for (const raw of filterValues ?? []) {
+    const normalized = normalizeComparableText(raw);
+    if (normalized != null) setValues.push(normalized);
+  }
 
   switch (operator) {
     case "contains":
@@ -42,13 +45,16 @@ export function matchTextFilter(
     case "not_contains":
       return !textValue || !needle || !textValue.includes(needle);
     case "equals":
-      return textValue != null && needle != null && textValue === needle;
+      // `===` alone is not enough: null === null is true, but empty/nullish is not a match.
+      return textValue === needle && textValue != null;
     case "starts_with":
       return Boolean(textValue && needle && textValue.startsWith(needle));
     case "contains_any_in_set":
       return Boolean(textValue && setValues.some((v) => textValue.includes(v)));
     case "equals_any_in_set":
-      return textValue != null && setValues.includes(textValue);
+      // No separate null guard: a null textValue must not match, and blank set
+      // entries must not survive as null members (see unit tests).
+      return setValues.includes(textValue as string);
     case "is_empty":
       return textValue == null;
     case "is_not_empty":
