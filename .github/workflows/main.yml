@@ -815,3 +815,22 @@ jobs:
       environment: production-cacos
       tip_check_job: Deploy production-cacos / Deploy to your server
     secrets: inherit
+
+  deploy-production-kakos:
+    # Igor's self-host instance (docs/SELF_HOSTING.md, "Second instance (production-kakos)").
+    # Same fail-closed / quiet-skip / no-extension rules as production-cacos. Environment name is
+    # production-kakos (Maxim created it); leave production-cacos job intact.
+    needs: [deploy-self-hosted]
+    if: >-
+      github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      needs.deploy-self-hosted.result == 'success'
+    name: Deploy production-kakos
+    permissions:
+      contents: read
+      packages: read
+      actions: read
+    uses: ./.github/workflows/self-hosted.yml
+    with:
+      environment: production-kakos
+      tip_check_job: Deploy production-kakos / Deploy to your server
+    secrets: inherit

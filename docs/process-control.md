@@ -33,9 +33,10 @@ accept the in-repo gates:
 
 ## D14 — Igor email
 
-Login `Kot-kAkos` is on the allowlist. Email is **unknown** — `participants.cjs` keeps an empty
-emails array and a `TODO(D14)` string. Do not invent an address; fill it at onboarding so Igor
-can `tasks-claim --owner=<his-email>`.
+Login `Kot-kAkos` is on the allowlist. Claim / authorship mailbox:
+**`workupnow@yandex.ru`** (filled at onboarding 2026-11-15). GitHub noreply for authorship:
+`59914044+Kot-kAkos@users.noreply.github.com`. Keep both twins in sync:
+`scripts/just/participants.cjs` (Orbit) and the same path in `orbit-tasks`.
 
 ## D12
 

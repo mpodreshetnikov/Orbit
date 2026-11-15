@@ -4,11 +4,10 @@
  * Participant allowlist for Maxim/Igor process control (ORB-47 / T-261113-o9b, D14).
  * * Canonical twin of orbit-tasks/scripts/just/participants.cjs (Orbit CI has no registry checkout).
  *
- * Owner claims and git authorship may only name these people. Igor's real mailbox is unknown
- * until onboarding — do not invent one; keep the TODO slot empty so claims for him fail closed.
+ * Owner claims and git authorship may only name these people.
  */
 
-/** @typedef {{ login: string, name: string, emails: string[], emailTodo?: string }} Participant */
+/** @typedef {{ login: string, name: string, emails: string[] }} Participant */
 
 /** @type {Participant[]} */
 const PARTICIPANTS = [
@@ -20,9 +19,7 @@ const PARTICIPANTS = [
   {
     login: "Kot-kAkos",
     name: "Igor",
-    // TODO(D14): set Igor's real mailbox before onboarding claims. Do not invent an address.
-    emails: [],
-    emailTodo: "D14: Igor email unknown until onboarding",
+    emails: ["workupnow@yandex.ru", "59914044+Kot-kAkos@users.noreply.github.com"],
   },
 ];
 
@@ -81,17 +78,6 @@ function participantOwnerProblem(email) {
     return `'owner' is '${address}' — an agent mailbox. Pass a participant email (Maxim/Igor).`;
   }
   if (!OWNER_CLAIM_EMAILS.has(lower)) {
-    const igor = PARTICIPANTS.find((p) => p.login === "Kot-kAkos");
-    // Stryker disable next-line all: Igor emails stay empty until D14; non-empty / missing-igor branches unreachable
-    if (igor && igor.emails.length === 0) {
-      // Stryker disable next-line StringLiteral: join separator equivalent while only one claim email exists
-      const known = [...OWNER_CLAIM_EMAILS].join(", ");
-      return (
-        `'owner' is '${address}' — not on the participant allowlist. ` +
-        `Known claim emails: ${known}. ` +
-        `${igor.emailTodo}.`
-      );
-    }
     return (
       `'owner' is '${address}' — not on the participant allowlist ` +
       `(Maxim/Igor only). Known claim emails: ${[...OWNER_CLAIM_EMAILS].join(", ")}.`
@@ -112,8 +98,7 @@ function participantAuthorProblem(email) {
     return `'${address}' is an agent mailbox; commits must use a participant identity`;
   }
   if (!ALL_AUTHOR_EMAILS.has(lower)) {
-    // Stryker disable next-line all: Maxim is always listed; empty-allowlist fallback unreachable
-    const listed = [...ALL_AUTHOR_EMAILS].join(", ") || "(empty — Igor email TODO)";
+    const listed = [...ALL_AUTHOR_EMAILS].join(", ");
     return `'${address}' is not a participant author email. Allowlist: ${listed}.`;
   }
   return null;

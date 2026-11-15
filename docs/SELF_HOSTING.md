@@ -309,12 +309,14 @@ Root login is switched off by the first run, which is why GitHub logs in as `orb
 **The server is gone**: rent a new one with the same key (step 2), change `ORBIT_SERVER_HOST`,
 and run the workflow with _action_ set to `restore`: it installs, then restores the latest backup.
 
-### Second instance (`production-cacos`)
+### Second instance (`production-cacos` / `production-kakos`)
 
 A second, independent Orbit on its own VPS uses the same workflows and the same GHCR images, but a
-separate GitHub Environment named **`production-cacos`**. Its Postgres, `ORBIT_MASTER_KEY`, SSH key
-and backups must not be shared with Environment `production` (`privateorbit.space`). This repository
-does not create or fill that environment; the instance owner does, in the GitHub UI.
+separate GitHub Environment. **Igor's Environment is `production-kakos`** (created by Maxim;
+fill vars/secrets there). A parallel Environment name **`production-cacos`** remains wired in
+workflows for compatibility — same rules, different Environment. Its Postgres, `ORBIT_MASTER_KEY`,
+SSH key and backups must not be shared with Environment `production` (`privateorbit.space`). This
+repository does not create or fill those environments; the instance owner does, in the GitHub UI.
 
 **Open ports on the VPS:** `22` (SSH from GitHub Actions), `80` and `443` (Caddy / Let's Encrypt).
 
@@ -324,27 +326,28 @@ does not create or fill that environment; the instance owner does, in the GitHub
 **Generate keys on your computer (never reuse production's):**
 
 ```sh
-ssh-keygen -t ed25519 -f orbit-deploy-cacos -N ''
-# put orbit-deploy-cacos.pub on the server (ssh-copy-id / provider panel)
+ssh-keygen -t ed25519 -f orbit-deploy-kakos -N ''
+# put orbit-deploy-kakos.pub on the server (ssh-copy-id / provider panel)
 openssl rand -hex 32   # → ORBIT_MASTER_KEY; save in a password manager
 ssh-keyscan <server-ip>   # optional → ORBIT_SSH_KNOWN_HOSTS
 ```
 
-**Required in Environment `production-cacos` (names only — set them on the Environment, not as
+**Required in the instance Environment (names only — set them on the Environment, not as
 repository-level Actions variables, or a repository `ORBIT_SERVER_HOST` for production would be
-inherited and this job could deploy the wrong server):**
+inherited and this job could deploy the wrong server). For Igor use Environment
+`production-kakos`; the same table applies to `production-cacos` if that name is used:**
 
-| Where    | Name                       | Notes                                                              |
-| -------- | -------------------------- | ------------------------------------------------------------------ |
-| Variable | `ORBIT_SELF_HOST_INSTANCE` | Must be exactly `production-cacos` — the opt-in; without it → skip |
-| Variable | `ORBIT_SERVER_HOST`        | This instance's server IP                                          |
-| Variable | `ORBIT_DOMAIN`             | Hostname only, e.g. sslip.io                                       |
-| Variable | `ORBIT_ADMIN_EMAIL`        | Let's Encrypt contact                                              |
-| Variable | `ORBIT_ALLOWED_EMAILS`     | Comma-separated Google allowlist                                   |
-| Variable | `GOOGLE_CLIENT_ID`         | Own OAuth client or extra redirect URI                             |
-| Secret   | `ORBIT_SSH_PRIVATE_KEY`    | Whole private key file (`orbit-deploy-cacos`)                      |
-| Secret   | `ORBIT_MASTER_KEY`         | From `openssl rand -hex 32` above                                  |
-| Secret   | `GOOGLE_CLIENT_SECRET`     | Matching the client id                                             |
+| Where    | Name                       | Notes                                                                                       |
+| -------- | -------------------------- | ------------------------------------------------------------------------------------------- |
+| Variable | `ORBIT_SELF_HOST_INSTANCE` | Must equal the Environment name exactly (`production-kakos` or `production-cacos`) — opt-in |
+| Variable | `ORBIT_SERVER_HOST`        | This instance's server IP                                                                   |
+| Variable | `ORBIT_DOMAIN`             | Hostname only, e.g. sslip.io                                                                |
+| Variable | `ORBIT_ADMIN_EMAIL`        | Let's Encrypt contact                                                                       |
+| Variable | `ORBIT_ALLOWED_EMAILS`     | Comma-separated Google allowlist                                                            |
+| Variable | `GOOGLE_CLIENT_ID`         | Own OAuth client or extra redirect URI                                                      |
+| Secret   | `ORBIT_SSH_PRIVATE_KEY`    | Whole private key file (e.g. `orbit-deploy-kakos`)                                          |
+| Secret   | `ORBIT_MASTER_KEY`         | From `openssl rand -hex 32` above                                                           |
+| Secret   | `GOOGLE_CLIENT_SECRET`     | Matching the client id                                                                      |
 
 **Optional (same names as `deploy/.env.example`; secrets for the secret ones):**
 `ORBIT_SERVER_USER`, `ORBIT_SSH_KNOWN_HOSTS`, `ORBIT_HTTP_ONLY`, `MCP_SERVER_ENABLED`,
@@ -355,21 +358,21 @@ when moving from a hosted project — `JWT_SECRET`, `ANON_KEY`, `SERVICE_ROLE_KE
 
 **How deploy behaves after merge (no further agent work):**
 
-1. Until `ORBIT_SELF_HOST_INSTANCE=production-cacos` (and `ORBIT_SERVER_HOST`) are set **in**
-   Environment `production-cacos`, the `Deploy production-cacos` job on every push to `main`
-   quietly skips and does not fail the pipeline. The opt-in exists so a repository-level
+1. Until `ORBIT_SELF_HOST_INSTANCE` equals the Environment name (and `ORBIT_SERVER_HOST`) are set
+   **in** that Environment, the matching `Deploy production-*` job on every push to `main` quietly
+   skips and does not fail the pipeline. The opt-in exists so a repository-level
    `ORBIT_SERVER_HOST` for production cannot be inherited into an empty second environment.
 2. Once the required names above are filled and the public SSH key is on the server, the **next**
    push to `main` whose production self-host job (`Deploy to your server`) succeeds also deploys
-   this instance. If production self-host fails, `production-cacos` is skipped (fail-closed).
+   that instance. If production self-host fails, additional instances are skipped (fail-closed).
 3. The first deploy is safe to repeat: `deploy/ci/deploy.sh` runs `deploy/bootstrap.sh` over SSH
    and installs on a clean server (or updates an existing one). The only manual prerequisite is
    putting the **public** SSH key on the VPS before that first run (step above); the workflow cannot
    invent server login.
 4. To verify without waiting for `main`: _Actions → Deploy to your server → Run workflow_, set
-   Environment to `production-cacos`, action `doctor` then `deploy`.
+   Environment to `production-kakos` (or `production-cacos`), action `doctor` then `deploy`.
 
-This path does **not** publish a browser extension for the second instance.
+These paths do **not** publish a browser extension for the second instance.
 
 ## Moving from hosted Supabase
 
