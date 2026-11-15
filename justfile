@@ -98,13 +98,12 @@ quality-lint-scripts:
 quality-lint-mobile:
   npx eslint mobile/src --ext .ts,.tsx --max-warnings=0
 
-# Warn-only architecture boundary pilot (mobile allowlist, src/app↛supabase deep, edge↛L1).
-# Deliberately omits --max-warnings=0 so warn findings do not fail Quality Gates (T-261115-csy).
+# Architecture boundary lint (mobile allowlist, src/app↛supabase deep, edge↛L1) — errors fail the lane (T-261115-csy).
 # Config: eslint.boundaries.config.mjs — see docs/design/common/architecture-boundary-lint.md.
 quality-lint-boundaries:
   # --no-inline-config: product files carry eslint-disable for Next/react-hooks rules that this
   # dedicated config does not load; without this flag those comments become "rule not found" errors.
-  npx eslint -c eslint.boundaries.config.mjs --no-inline-config mobile/src src/app supabase/functions --ext .ts,.tsx
+  npx eslint -c eslint.boundaries.config.mjs --no-inline-config --max-warnings=0 mobile/src src/app supabase/functions --ext .ts,.tsx
 
 # Typecheck the mobile client against its own dependency tree and TypeScript version.
 #
@@ -143,7 +142,7 @@ quality-lint-supabase-functions:
 test-smell-lint:
   node scripts/just/test-smell-lint.cjs
 
-# Run all lint surfaces with zero warnings allowed (boundaries pilot is warn-only; see quality-lint-boundaries).
+# Run all lint surfaces with zero warnings allowed (boundaries lane is error-severity; see quality-lint-boundaries).
 quality-lint: quality-lint-web quality-lint-extension quality-lint-scripts quality-lint-supabase-functions quality-lint-boundaries test-smell-lint
 
 # Run all lint surfaces in parallel (faster for CI).

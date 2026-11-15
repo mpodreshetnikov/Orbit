@@ -22,8 +22,8 @@ Define clear boundaries between presentation, orchestration, workflow logic, dat
 
 ## Machine Check (Pilot)
 
-A warn-only ESLint boundaries pilot covers the mobile→web allowlist, `src/app`↛deep supabase, and
-edge↛L1 presentation imports. Command: `lint-boundaries`. Details:
+An error-severity ESLint boundaries check covers the mobile→web allowlist, `src/app`↛deep supabase,
+and edge↛L1 presentation imports. Command: `lint-boundaries`. Details:
 [`architecture-boundary-lint.md`](./architecture-boundary-lint.md).
 
 ## Anti-Patterns To Avoid
