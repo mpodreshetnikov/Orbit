@@ -1,77 +1,142 @@
 #!/usr/bin/env node
 
 const { spawn } = require("child_process");
+const fs = require("fs");
 const path = require("path");
 
-function resolveJustBin() {
-  if (process.env.JUST_BIN) {
-    return process.env.JUST_BIN;
+/** Lint lanes run in parallel by `quality-lint-parallel` (T-261115-csy adds boundaries). */
+const LINT_RECIPES = [
+  "quality-lint-web",
+  "quality-lint-extension",
+  "quality-lint-scripts",
+  "quality-lint-supabase-functions",
+  "quality-lint-boundaries",
+  "test-smell-lint",
+];
+
+/**
+ * @param {Record<string, string | undefined>} [env]
+ * @param {NodeJS.Platform} [platform]
+ * @param {(path: string) => boolean} [existsSync]
+ * @returns {string}
+ */
+function resolveJustBin(
+  env = process.env,
+  platform = process.platform,
+  existsSync = fs.existsSync,
+) {
+  if (env.JUST_BIN) {
+    return env.JUST_BIN;
   }
-  if (process.platform === "win32") {
-    const wingetJust = path.join(
-      process.env.LOCALAPPDATA || "",
-      "Microsoft",
-      "WinGet",
-      "Links",
-      "just.exe",
-    );
-    if (wingetJust && require("fs").existsSync(wingetJust)) {
+  if (platform === "win32") {
+    const localAppData = env.LOCALAPPDATA;
+    if (!localAppData) {
+      return "just";
+    }
+    const wingetJust = path.join(localAppData, "Microsoft", "WinGet", "Links", "just.exe");
+    if (existsSync(wingetJust)) {
       return wingetJust;
     }
   }
   return "just";
 }
 
-const LINT_RECIPES = [
-  "quality-lint-web",
-  "quality-lint-extension",
-  "quality-lint-scripts",
-  "quality-lint-supabase-functions",
-  "test-smell-lint",
-];
-
-function resolveParallelism() {
-  const raw = process.env.LINT_PARALLELISM;
-  if (raw) {
-    const parsed = Number.parseInt(raw, 10);
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return parsed;
-    }
+/**
+ * @param {Record<string, string | undefined>} [env]
+ * @param {NodeJS.Platform} [platform]
+ * @param {number} [recipeCount]
+ * @returns {number}
+ */
+function resolveParallelism(
+  env = process.env,
+  platform = process.platform,
+  recipeCount = LINT_RECIPES.length,
+) {
+  const parsed = Number.parseInt(String(env.LINT_PARALLELISM ?? ""), 10);
+  if (Number.isFinite(parsed) && parsed > 0) {
+    return Math.min(parsed, recipeCount);
   }
   // Multiple concurrent ESLint processes OOM on Windows in this repo.
-  return process.platform === "win32" ? 1 : LINT_RECIPES.length;
+  return platform === "win32" ? 1 : recipeCount;
 }
 
-function runRecipe(recipe) {
+/**
+ * @param {string} recipe
+ * @param {{
+ *   spawnFn?: typeof spawn,
+ *   justBin?: string,
+ *   env?: Record<string, string | undefined>,
+ * }} [opts]
+ * @returns {Promise<number>}
+ */
+function runRecipe(
+  recipe,
+  { spawnFn = spawn, justBin = resolveJustBin(), env = process.env } = {},
+) {
   return new Promise((resolve) => {
-    const child = spawn(resolveJustBin(), [recipe], {
+    const child = spawnFn(justBin, [recipe], {
       stdio: "inherit",
-      env: process.env,
+      env,
     });
-    child.on("close", (code) => resolve(code ?? 1));
+    child.on("close", (code) => {
+      resolve(code === null || code === undefined ? 1 : code);
+    });
     child.on("error", () => resolve(1));
   });
 }
 
-async function main() {
-  const parallelism = Math.min(resolveParallelism(), LINT_RECIPES.length);
-  const results = new Array(LINT_RECIPES.length).fill(0);
+/**
+ * @param {{
+ *   recipes?: string[],
+ *   parallelism?: number,
+ *   runOne?: (recipe: string) => Promise<number>,
+ *   captureResults?: number[],
+ * }} [opts]
+ * @returns {Promise<number>}
+ */
+async function runLintParallel({
+  recipes = LINT_RECIPES,
+  parallelism = resolveParallelism(),
+  runOne = runRecipe,
+  captureResults,
+} = {}) {
+  const workerCount = Math.min(parallelism, recipes.length);
+  const results = recipes.map(() => 0);
   let nextIndex = 0;
 
   async function worker() {
-    while (nextIndex < LINT_RECIPES.length) {
+    while (nextIndex < recipes.length) {
       const currentIndex = nextIndex;
       nextIndex += 1;
-      results[currentIndex] = await runRecipe(LINT_RECIPES[currentIndex]);
+      results[currentIndex] = await runOne(recipes[currentIndex]);
       if (results[currentIndex] !== 0) {
         return;
       }
     }
   }
 
-  await Promise.all(Array.from({ length: parallelism }, () => worker()));
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  if (captureResults) {
+    captureResults.push(...results);
+  }
   const failed = results.findIndex((code) => code !== 0);
-  process.exit(failed === -1 ? 0 : results[failed]);
+  return failed === -1 ? 0 : results[failed];
 }
 
-main();
+async function main() {
+  const code = await runLintParallel();
+  process.exit(code);
+}
+
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  LINT_RECIPES,
+  resolveJustBin,
+  resolveParallelism,
+  runRecipe,
+  runLintParallel,
+  main,
+};
