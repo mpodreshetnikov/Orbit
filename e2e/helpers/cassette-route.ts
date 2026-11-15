@@ -1,8 +1,5 @@
 import type { Page, Route } from "@playwright/test";
-import {
-  createCassettePlayer,
-  type Cassette,
-} from "../../test/helpers/tbank/cassette-replay";
+import { createCassettePlayer, type Cassette } from "../../test/helpers/tbank/cassette-replay";
 
 /**
  * Serve a recorded (or synthetic) T-Bank cassette through Playwright `page.route`, so the

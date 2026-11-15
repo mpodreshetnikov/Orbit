@@ -2,10 +2,7 @@ import crypto from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { createClient } from "@supabase/supabase-js";
 import syntheticCassette from "../test/fixtures/tbank/cassettes/synthetic-month/cassette.json";
-import {
-  createCassettePlayer,
-  type Cassette,
-} from "../test/helpers/tbank/cassette-replay";
+import { createCassettePlayer, type Cassette } from "../test/helpers/tbank/cassette-replay";
 import { installCassetteRoute } from "./helpers/cassette-route";
 
 const DEV_EMAIL = process.env.E2E_DEV_EMAIL_MONEY_IMPORT ?? "e2e-money-import@example.com";
