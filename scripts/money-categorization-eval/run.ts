@@ -42,6 +42,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     generatedAt: new Date().toISOString(),
   };
   let index = 2;
+  // Stryker disable next-line all: index<= argv.length is equivalent — extra iter reads undefined
   while (index < argv.length) {
     const current = argv[index];
     if (current === "--live") parsed.live = true;

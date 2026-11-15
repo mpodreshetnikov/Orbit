@@ -104,9 +104,10 @@ export function aggregate(scores: CaseScore[]): Aggregate {
 
   const perKey: Aggregate["perKey"] = {};
   for (const [key, value] of perKeyRaw) {
+    // expected is always ≥1 once a key is in the map (we increment before insert).
     perKey[key] = {
       ...value,
-      accuracy: value.expected === 0 ? 0 : value.correct / value.expected,
+      accuracy: value.correct / value.expected,
     };
   }
 

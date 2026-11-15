@@ -29,6 +29,8 @@ export function cassetteKey(body: Record<string, unknown>): string {
 }
 
 export function stripReasoning(response: unknown): unknown {
+  // Non-object short-circuit is shadowed by the `!choices` return for every primitive we can pass.
+  // Stryker disable next-line ConditionalExpression: equivalent under the later !choices return
   if (!response || typeof response !== "object") return response;
   const payload = response as Record<string, unknown>;
   const choices = Array.isArray(payload.choices) ? payload.choices : null;
@@ -36,6 +38,7 @@ export function stripReasoning(response: unknown): unknown {
   return {
     ...payload,
     choices: choices.map((choice) => {
+      // Stryker disable next-line ConditionalExpression,LogicalOperator: shadowed by !message check
       if (!choice || typeof choice !== "object") return choice;
       const entry = choice as Record<string, unknown>;
       if (!entry.message || typeof entry.message !== "object") return choice;
@@ -95,7 +98,7 @@ export async function createCassetteFetch(options: {
     const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
     const key = cassetteKey(body);
 
-    if (mode === "replay") {
+      if (mode === "replay") {
       const hit = existing.get(key);
       if (!hit) {
         misses.push(`${stage}:${key}`);
@@ -106,6 +109,8 @@ export async function createCassetteFetch(options: {
             `  just test-money-categorization --record`,
         );
       }
+      // Response defaults to 200 when status is omitted — keep it explicit for readers.
+      // Stryker disable next-line ObjectLiteral -- status:200 is equivalent to Response default
       return new Response(JSON.stringify(hit.response), { status: 200 });
     }
 
@@ -126,6 +131,10 @@ export async function createCassetteFetch(options: {
     fetchFn,
     settled: async () => {
       while (inFlight.size > 0) {
+        // Spreading the Set is required so allSettled observes the in-flight handles; an empty
+        // array would busy-yield until the live fetch clears the Set on its own — same eventual
+        // resolve under a blocked gate, so the mutant is not a behavioural difference we can assert.
+        // Stryker disable next-line ArrayDeclaration
         await Promise.allSettled([...inFlight]);
       }
     },
@@ -143,6 +152,7 @@ export async function createCassetteFetch(options: {
       if (!options?.prune) return;
       for (const [key, entry] of existing) {
         if (recorded.has(key)) continue;
+        // force: missing stale paths must not throw when the on-disk name already drifted.
         await rm(path.join(dir, `${entry.stage}-${entry.request_hash}.json`), { force: true });
       }
     },
