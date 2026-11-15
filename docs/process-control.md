@@ -24,9 +24,10 @@ accept the in-repo gates:
 
 1. Orbit (public): add collaborator `Kot-kAkos` with write; set ruleset / branch protection so
    `main` rejects direct pushes (required status checks already include Quality Gates / Secret
-   Scan / CodeQL). Required approving review count stays 0 for simple agent PRs; second-person
-   approve for complex work is the `spec-approve` / task-file PR path, not a blanket
-   `required_approving_review_count: 1`.
+   Scan / CodeQL — canonical detail in `docs/QUALITY.md` **Main protection (required checks)**;
+   CodeQL is GitHub default setup, not a workflow under `.github/workflows/`). Required approving
+   review count stays 0 for simple agent PRs; second-person approve for complex work is the
+   `spec-approve` / task-file PR path, not a blanket `required_approving_review_count: 1`.
 2. orbit-tasks (private): Igor already has write. No Pro/org rulesets (D6) — cards stay
    straight to `main`; rules/scripts via PR; gate = local `pre-push`.
 

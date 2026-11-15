@@ -124,6 +124,43 @@ Every behavior change must update tests in the same change set.
 - When the manifest version changes, build the release bundle with `extension-release-build`.
 - Production publication uses `extension-release-publish` and updates the public `extension-releases` bucket metadata consumed by the web app.
 
+## Main protection (required checks)
+
+Canonical list of what must be green before a pull request can merge into `main`. Observed
+2026-11-15 from the active repository ruleset `main protection` (id `21096041`) and from the check
+list on merged PR #276.
+
+### Required status checks (strict up-to-date)
+
+| Check context     | Where it comes from                                                                                          | In-repo workflow path                         |
+| ----------------- | ------------------------------------------------------------------------------------------------------------ | --------------------------------------------- |
+| `Quality Gates`   | GitHub Actions job `quality-gates` in the Deploy workflow                                                    | `.github/workflows/main.yml`                  |
+| `Secret Scan`     | GitHub Actions job `secrets-scan` in the Deploy workflow                                                     | `.github/workflows/main.yml`                  |
+| `CodeQL`          | GitHub code scanning default setup (not a checked-in workflow). Companion jobs `Analyze (javascript-typescript)` and `Analyze (actions)` also appear on PRs; the **required** context name is `CodeQL`. | _none under `.github/workflows/`_ |
+
+`strict_required_status_checks_policy` is on: the branch must be up to date with `main` before
+merge. That is what makes a PR verdict bind after another merge lands (same rule the Migration Order
+Policy relies on). A merge queue is not available on this user-owned repository.
+
+`Quality Gates` is the umbrella that already runs format/lint/typecheck (`just quality`), impact-gated
+mobile checks, unit coverage + `coverage-check`, `test-mutation`, and impact-gated `test-e2e`. Do not
+treat those steps as separate ruleset contexts — they fail the single `Quality Gates` check.
+
+Deleting `/opt/hostedtoolcache/CodeQL` inside the Quality Gates job is only disk reclaim on the
+runner; it is not how CodeQL analysis is invoked.
+
+### Other `main protection` rules (not separate named status checks)
+
+The same ruleset also enables GitHub-native rules that are not additional contexts in the table
+above: pull-request required (0 approving reviews for ordinary agent PRs; review threads must be
+resolved; extra approval for unattributed changes), CodeQL code-scanning alert thresholds, code
+quality at `errors`, and a GitHub code-coverage floor of 75%. Orbit's own Vitest `src/**` coverage
+floor inside Quality Gates is stricter (80% as of T-261113-tww) and is what agents must satisfy
+locally via `coverage-check`.
+
+Architecture maturity implications of these gates live in `docs/ARCHITECTURE.md` (gap `ARCH-G03`
+retired 2026-11-15; delivery/operations scorecard refreshed the same day).
+
 ## Migration Order Policy
 
 A new migration's timestamp must sort **after** every migration already on the branch it will merge into. Reusing an existing timestamp is the same violation: it does not sort after, and duplicate versions collide in the remote migration history.
@@ -133,7 +170,7 @@ A new migration's timestamp must sort **after** every migration already on the b
 - If your branch was opened before another migration merged, rename yours to a later timestamp. The contents do not change, only the ordering.
 - CI enforces the rule with `quality-migration-order`, which runs inside `quality` and compares against the pull request's actual base branch.
 - The check answers for the **whole tree**, not only for what the branch adds. It reads the order migrations landed out of first-parent history, and every file still in `supabase/migrations` answers for its own position. An added-only check goes quiet on a misordered file after one push -- which is how `20260901150000` reached production on 2026-09-02 -- so a file that landed out of order keeps failing until it is renamed or recorded.
-- A pull-request verdict expires. "My version sorts after everything on the base" stops being true when somebody else merges, with nothing on the branch moving, and no `pull_request` event fires for that. What makes the verdict binding is the `main protection` ruleset: it requires a pull request, requires `Quality Gates`, `Secret Scan` and `CodeQL` to pass, and requires the branch to be **up to date with `main`** before it can merge. A merge to `main` therefore puts every open pull request behind, and each has to take the new tip and pass CI again on it — the base the gate judged is the base the branch lands on. A merge queue would guarantee the same thing and is not available on this repository (GitHub offers it to organisation-owned repositories only); the cost of the rule is that merges become sequential, which is also what ends bursts of merges a minute apart.
+- A pull-request verdict expires. "My version sorts after everything on the base" stops being true when somebody else merges, with nothing on the branch moving, and no `pull_request` event fires for that. What makes the verdict binding is the `main protection` ruleset — required checks and up-to-date policy are listed under **Main protection (required checks)** above. A merge to `main` therefore puts every open pull request behind, and each has to take the new tip and pass CI again on it — the base the gate judged is the base the branch lands on.
 - `supabase/migrations/.out-of-order-allowlist` is the reviewed exception for ordering only. Each entry is `<migration filename> <sha256 prefix> # <why it is safe against the newer schema>`, and it applies only while both still describe the file in the tree; the rationale is required and an entry without one fails the check. Read a digest with `shasum -a 256 supabase/migrations/<file>` and record its first 16 characters.
 - **An exemption is pinned to the SQL it was written about.** Keyed by version alone it would be inherited by a replacement — a different file under the same timestamp — and keyed by filename alone it would survive an edit in place. Both are worse than a plain ordering fault: an allowlisted migration is one production has already applied, so changing its SQL changes nothing there. `db push --include-all` skips the version and the new SQL runs nowhere but a local `db reset`. Put the change in a new migration; if an edit really is cosmetic, update the digest and say so in the rationale.
 - **A rename is only available while the version is unapplied.** Once `supabase_migrations.schema_migrations` records it the version is permanent, and renaming presents the same change as unapplied, so production runs it again under the new key. `supabase migration list --linked` says which case a version is in. A version already applied is recorded in the allowlist rather than renamed.
