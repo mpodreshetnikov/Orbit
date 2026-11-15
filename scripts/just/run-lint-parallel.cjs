@@ -14,6 +14,12 @@ const LINT_RECIPES = [
   "test-smell-lint",
 ];
 
+/**
+ * @param {Record<string, string | undefined>} [env]
+ * @param {NodeJS.Platform} [platform]
+ * @param {(path: string) => boolean} [existsSync]
+ * @returns {string}
+ */
 function resolveJustBin(
   env = process.env,
   platform = process.platform,
@@ -35,6 +41,12 @@ function resolveJustBin(
   return "just";
 }
 
+/**
+ * @param {Record<string, string | undefined>} [env]
+ * @param {NodeJS.Platform} [platform]
+ * @param {number} [recipeCount]
+ * @returns {number}
+ */
 function resolveParallelism(
   env = process.env,
   platform = process.platform,
@@ -48,6 +60,15 @@ function resolveParallelism(
   return platform === "win32" ? 1 : recipeCount;
 }
 
+/**
+ * @param {string} recipe
+ * @param {{
+ *   spawnFn?: typeof spawn,
+ *   justBin?: string,
+ *   env?: Record<string, string | undefined>,
+ * }} [opts]
+ * @returns {Promise<number>}
+ */
 function runRecipe(
   recipe,
   { spawnFn = spawn, justBin = resolveJustBin(), env = process.env } = {},
@@ -64,6 +85,15 @@ function runRecipe(
   });
 }
 
+/**
+ * @param {{
+ *   recipes?: string[],
+ *   parallelism?: number,
+ *   runOne?: (recipe: string) => Promise<number>,
+ *   captureResults?: number[],
+ * }} [opts]
+ * @returns {Promise<number>}
+ */
 async function runLintParallel({
   recipes = LINT_RECIPES,
   parallelism = resolveParallelism(),
