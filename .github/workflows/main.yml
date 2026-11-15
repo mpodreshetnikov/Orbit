@@ -333,9 +333,7 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: End-to-end tests
         if: steps.impact.outputs.webImpact == 'true' || steps.impact.outputs.dbImpact == 'true' || steps.impact.outputs.functionsImpact == 'true'
-        # TEMP B1 proof: run-e2e wires local Supabase env, then only the controlled-failure
-        # spec (so CI uploads real test-results/). Restored to `just test-e2e` after proof.
-        run: node scripts/just/run-e2e.cjs e2e/_b1-artifact-upload-proof.spec.ts
+        run: just test-e2e
       # Failure media only (playwright.config: retain/screenshot on failure → test-results/).
       # Placed immediately after e2e so later unit/mutation failures do not upload an empty blob.
       - name: Upload Playwright failure artifacts
