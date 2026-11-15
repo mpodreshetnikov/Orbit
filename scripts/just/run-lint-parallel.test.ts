@@ -10,7 +10,7 @@ import {
 } from "./run-lint-parallel.cjs";
 
 describe("run-lint-parallel", () => {
-  it("includes the warn-only architecture boundary lane in the parallel set", () => {
+  it("includes the architecture boundary lane in the parallel set", () => {
     // Independent oracle: justfile recipe id from T-261115-csy / architecture-boundary-lint.md
     expect(LINT_RECIPES).toContain("quality-lint-boundaries");
     expect(LINT_RECIPES).toEqual([

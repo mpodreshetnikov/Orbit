@@ -1,16 +1,12 @@
 /**
- * Warn-only architecture boundary pilot (T-261115-csy / B5).
+ * Architecture boundary lint (T-261115-csy / B5) — error severity.
  *
- * Separate from eslint.config.mjs so:
- * - Next/core-web-vitals rules do not run on Deno edge sources
- * - `--max-warnings=0` on product lint lanes does not fail the pilot while rules stay `warn`
+ * Separate from eslint.config.mjs so Next/core-web-vitals rules do not run on Deno edge sources.
  *
  * Covers:
  * (a) mobile → web allowlist (@orbit-types, @orbit-messages, @db / database.types)
  * (b) src/app ↛ deep supabase (functions / migrations / db)
  * (c) edge functions ↛ L1 presentation (src/components, src/app, mobile)
- *
- * Flip `warn` → `error` and add `--max-warnings=0` only after a clean warn phase.
  */
 import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
@@ -90,9 +86,9 @@ const eslintBoundariesConfig = [
       ],
     },
     rules: {
-      // Pilot: warn only. Do not enable no-unknown* — this is a narrow allowlist, not a full map.
+      // Do not enable no-unknown* — this is a narrow allowlist, not a full map.
       "boundaries/element-types": [
-        "warn",
+        "error",
         {
           default: "allow",
           message:
