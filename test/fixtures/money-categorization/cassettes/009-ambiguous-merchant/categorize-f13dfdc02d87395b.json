@@ -1,0 +1,23 @@
+{
+  "request_hash": "f13dfdc02d87395b",
+  "stage": "categorize",
+  "model": "google/gemini-2.0-flash-001",
+  "response": {
+    "id": "synthetic-money-categorize",
+    "model": "google/gemini-2.0-flash-001",
+    "choices": [
+      {
+        "finish_reason": "stop",
+        "message": {
+          "role": "assistant",
+          "content": "{\"items\":[{\"line_item_id\":\"li-eval-009\",\"category_id\":null,\"reason\":\"synthetic label for 009-ambiguous-merchant\"}]}"
+        }
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "cost": 0
+    }
+  }
+}

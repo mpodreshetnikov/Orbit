@@ -238,6 +238,10 @@ test-e2e:
 test-extraction *args:
   npx tsx scripts/extraction-eval/run.ts {{args}}
 
+# Score money categorization quality against the fixture corpus (replays recordings; --live to call the model).
+test-money-categorization *args:
+  npx tsx scripts/money-categorization-eval/run.ts {{args}}
+
 # Generate combined runtime + DB coverage report artifacts.
 coverage-report:
   node scripts/just/coverage-report.cjs

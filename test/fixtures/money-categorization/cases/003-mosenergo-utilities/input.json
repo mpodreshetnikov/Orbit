@@ -1,0 +1,11 @@
+{
+  "line_item_id": "li-eval-003",
+  "title": "Электроэнергия март",
+  "amount": -1850.5,
+  "merchant_name": "Мосэнергосбыт",
+  "mcc": "4900",
+  "currency": "RUB",
+  "transaction_type": "expense",
+  "brand_name": "Мосэнергосбыт",
+  "siblings": []
+}

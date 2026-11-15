@@ -1,0 +1,12 @@
+{
+  "line_item_id": "li-eval-009",
+  "title": "Оплата",
+  "amount": -350.0,
+  "merchant_name": "IP IVANOV",
+  "mcc": null,
+  "currency": "RUB",
+  "transaction_type": "expense",
+  "brand_name": null,
+  "comment": "",
+  "siblings": []
+}

@@ -62,6 +62,9 @@ describe("change-impact", () => {
       classifyChangedFiles(["test/fixtures/extraction/shared/catalogs.json"]).fixturesImpact,
     ).toBe(true);
     expect(classifyChangedFiles(["scripts/extraction-eval/score.ts"]).fixturesImpact).toBe(true);
+    expect(
+      classifyChangedFiles(["scripts/money-categorization-eval/score.ts"]).fixturesImpact,
+    ).toBe(true);
   });
 
   it("does not claim fixture impact for unrelated changes", () => {

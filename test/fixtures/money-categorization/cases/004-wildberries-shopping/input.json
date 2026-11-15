@@ -1,0 +1,11 @@
+{
+  "line_item_id": "li-eval-004",
+  "title": "Чехол для телефона",
+  "amount": -799.0,
+  "merchant_name": "WILDBERRIES",
+  "mcc": "5311",
+  "currency": "RUB",
+  "transaction_type": "expense",
+  "brand_name": "Wildberries",
+  "siblings": []
+}

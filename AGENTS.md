@@ -41,6 +41,7 @@ Use these command IDs in plans, PRs, and handoffs:
 - `test-mutation`: `just test-mutation` (Stryker incremental vs base; required Quality Gates step; hard gate `mutationScoreCovered === 100`)
 - `test-e2e`: `just test-e2e` (Playwright end-to-end lane for real local product flows; includes extraction coverage and runs in deterministic no-external-LLM mode where applicable)
 - `test-extraction`: `just test-extraction` (scored extraction quality against the fixture corpus; replays recordings by default, does not gate CI)
+- `test-money-categorization`: `just test-money-categorization` (scored money LLM categorization against the fixture corpus; replays recordings by default, does not gate CI)
 - `coverage-report`: `just coverage-report`
 - `coverage-check`: `just coverage-check`
 - `lint`: `just quality-lint`
