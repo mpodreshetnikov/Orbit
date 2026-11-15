@@ -1,0 +1,125 @@
+{
+  "name": "synthetic-month",
+  "summary": {
+    "months": [
+      {
+        "month": "2026-11",
+        "currency": "RUB",
+        "operations": 2,
+        "income": "0.00",
+        "expense": "300.00",
+        "complete": true
+      }
+    ]
+  },
+  "entries": [
+    {
+      "url": "https://www.tbank.ru/api/common/v1/operations?sessionid=REDACTED&start=1&end=2",
+      "status": 200,
+      "body": {
+        "resultCode": "OK",
+        "payload": [
+          {
+            "id": "synth-op-1",
+            "authorizationId": "synth-auth-1",
+            "operationTime": { "milliseconds": 0 },
+            "type": "Debit",
+            "status": "OK",
+            "amount": { "value": 100, "currency": { "strCode": "RUB", "name": "RUB", "code": 643 } },
+            "accountAmount": {
+              "value": 100,
+              "currency": { "strCode": "RUB", "name": "RUB", "code": 643 }
+            },
+            "description": "Synthetic Cafe",
+            "group": "PAY",
+            "merchant": { "name": "Synthetic Cafe" },
+            "documents": ["ShoppingReceipt"]
+          },
+          {
+            "id": "synth-op-2",
+            "authorizationId": "synth-auth-2",
+            "operationTime": { "milliseconds": 0 },
+            "type": "Debit",
+            "status": "OK",
+            "amount": { "value": 200, "currency": { "strCode": "RUB", "name": "RUB", "code": 643 } },
+            "accountAmount": {
+              "value": 200,
+              "currency": { "strCode": "RUB", "name": "RUB", "code": 643 }
+            },
+            "description": "Synthetic Market",
+            "group": "PAY",
+            "merchant": { "name": "Synthetic Market" },
+            "documents": ["ShoppingReceipt"]
+          }
+        ]
+      }
+    },
+    {
+      "url": "https://www.tbank.ru/api/common/v1/operation?sessionid=REDACTED&operationId=synth-auth-1",
+      "status": 200,
+      "body": {
+        "resultCode": "OK",
+        "payload": { "id": "synth-op-1", "message": "synthetic detail" }
+      }
+    },
+    {
+      "url": "https://www.tbank.ru/api/common/v1/operation?sessionid=REDACTED&operationId=synth-auth-2",
+      "status": 200,
+      "body": {
+        "resultCode": "OK",
+        "payload": { "id": "synth-op-2", "message": "synthetic detail" }
+      }
+    },
+    {
+      "url": "https://www.tbank.ru/api/common/v1/shopping_receipt?operationId=synth-auth-1&sessionid=REDACTED",
+      "status": 200,
+      "body": {
+        "resultCode": "OK",
+        "payload": {
+          "receipt": {
+            "totalSum": 100,
+            "operationType": 1,
+            "items": [{ "name": "Synthetic latte", "price": 100, "sum": 100, "quantity": 1 }]
+          }
+        }
+      }
+    },
+    {
+      "url": "https://www.tbank.ru/api/common/v1/shopping_receipt?operationId=synth-auth-2&sessionid=REDACTED",
+      "status": 200,
+      "body": {
+        "resultCode": "OK",
+        "payload": {
+          "receipt": {
+            "totalSum": 200,
+            "operationType": 1,
+            "items": [
+              { "name": "Synthetic milk", "price": 80, "sum": 80, "quantity": 1 },
+              { "name": "Synthetic bread", "price": 120, "sum": 120, "quantity": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "url": "https://www.tbank.ru/api/common/v1/tranche_offers?sessionid=REDACTED&wuid=REDACTED&appName=tbank&appVersion=0.0.1&platform=web&program_type=rpk_kk&origin=web%2Cib5%2Cplatform&amount=100",
+      "status": 200,
+      "body": { "resultCode": "OK", "payload": [] }
+    },
+    {
+      "url": "https://www.tbank.ru/api/common/v1/tranche_offers?sessionid=REDACTED&appName=tbank&appVersion=0.0.1&platform=web&program_type=rpk_kk&origin=web%2Cib5%2Cplatform&amount=100",
+      "status": 200,
+      "body": { "resultCode": "OK", "payload": [] }
+    },
+    {
+      "url": "https://www.tbank.ru/api/common/v1/tranche_offers?sessionid=REDACTED&appName=tbank&appVersion=0.0.1&platform=web&program_type=rpk_kk&origin=web%2Cib5%2Cplatform&amount=200",
+      "status": 200,
+      "body": { "resultCode": "OK", "payload": [] }
+    },
+    {
+      "url": "https://www.tbank.ru/api/common/v1/operations?sessionid=REDACTED&start=1&end=2&probe=bodyless",
+      "status": 204,
+      "body": null
+    }
+  ]
+}

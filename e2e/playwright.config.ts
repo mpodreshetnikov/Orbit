@@ -22,16 +22,23 @@ export default defineConfig({
     screenshot: "only-on-failure",
     video: "retain-on-failure",
   },
-  webServer: {
-    command: `npx next dev --hostname ${webHost} --port ${webPort}`,
-    cwd: process.cwd(),
-    url: baseURL,
-    reuseExistingServer: false,
-    timeout: 180_000,
-    env: {
-      ...process.env,
-      DEV_AUTH_BYPASS_ENABLED: process.env.DEV_AUTH_BYPASS_ENABLED ?? "1",
-      NEXT_PUBLIC_DEV_AUTH_BYPASS_ENABLED: process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS_ENABLED ?? "1",
-    },
-  },
+  webServer: process.env.E2E_REUSE_SERVER
+    ? undefined
+    : {
+        command: `npx next dev --hostname ${webHost} --port ${webPort}`,
+        cwd: process.cwd(),
+        url: baseURL,
+        reuseExistingServer: !process.env.CI,
+        timeout: 180_000,
+        env: {
+          ...process.env,
+          DEV_AUTH_BYPASS_ENABLED: process.env.DEV_AUTH_BYPASS_ENABLED ?? "1",
+          NEXT_PUBLIC_DEV_AUTH_BYPASS_ENABLED:
+            process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS_ENABLED ?? "1",
+          // Auto-login redirects `/` and `/login` to 307, which makes Playwright's
+          // webServer readiness check hang when another next is already bound.
+          DEV_AUTH_BYPASS_AUTO_LOGIN_ENABLED: "0",
+          NEXT_PUBLIC_DEV_AUTH_BYPASS_AUTO_LOGIN_ENABLED: "0",
+        },
+      },
 });

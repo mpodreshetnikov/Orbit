@@ -76,6 +76,12 @@ const EXTENSION_VERSIONED_SURFACE_PATTERNS = [
 const EXTENSION_NON_PACKAGED_PATTERNS = [
   /\.(test|spec)\.[cm]?[jt]sx?$/,
   /(^|\/)__tests__\//,
+  // Cassette replay is the acceptance harness for recorded bank sessions. It is
+  // imported only by tests and is excluded from the extension tsconfig emit, so
+  // changing it cannot alter the zip users receive. Treating it as packaged
+  // would mint an extension release for test infrastructure (T-260829-h66 /
+  // T-0029 restore).
+  /^browserExtension\/src\/connectors\/cassette-replay\.ts$/,
   // This file is the release tooling itself: it reads the manifest, zips
   // browserExtension/dist and uploads the result. It cannot change what goes
   // into that bundle — only build.ts, build-lib.ts and esbuild-widget.ts can —
