@@ -1,0 +1,11 @@
+{
+  "line_item_id": "li-eval-001",
+  "title": "Молоко 3.2% 1л",
+  "amount": -89.9,
+  "merchant_name": "Пятёрочка",
+  "mcc": "5411",
+  "currency": "RUB",
+  "transaction_type": "expense",
+  "brand_name": "Пятёрочка",
+  "siblings": []
+}

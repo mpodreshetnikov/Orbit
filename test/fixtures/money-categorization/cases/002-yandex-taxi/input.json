@@ -1,0 +1,11 @@
+{
+  "line_item_id": "li-eval-002",
+  "title": "Поездка",
+  "amount": -420.0,
+  "merchant_name": "Яндекс Go",
+  "mcc": "4121",
+  "currency": "RUB",
+  "transaction_type": "expense",
+  "brand_name": "Yandex Go",
+  "siblings": []
+}

@@ -41,6 +41,7 @@ Use these command IDs in plans, PRs, and handoffs:
 - `test-mutation`: `just test-mutation` (Stryker incremental vs base; required Quality Gates step; hard gate `mutationScoreCovered === 100`)
 - `test-e2e`: `just test-e2e` (Playwright end-to-end lane for real local product flows; includes extraction coverage and runs in deterministic no-external-LLM mode where applicable)
 - `test-extraction`: `just test-extraction` (scored extraction quality against the fixture corpus; replays recordings by default, does not gate CI)
+- `test-money-categorization`: `just test-money-categorization` (scored money LLM categorization against the fixture corpus; replays recordings by default, does not gate CI)
 - `coverage-report`: `just coverage-report`
 - `coverage-check`: `just coverage-check`
 - `lint`: `just quality-lint`
@@ -49,6 +50,7 @@ Use these command IDs in plans, PRs, and handoffs:
 - `lint-ext`: `just quality-lint-extension`
 - `lint-scripts`: `just quality-lint-scripts`
 - `lint-supabase`: `just quality-lint-supabase-functions`
+- `lint-boundaries`: `just quality-lint-boundaries` (architecture boundary lint, error severity: mobile allowlist + L3→L1; see `docs/design/common/architecture-boundary-lint.md`)
 - `test-smell-lint`: `just test-smell-lint` (assertion-smell scan on `*.test.*`; warn by default; set `ORBIT_TEST_SMELL_FAIL=1` to gate)
 - `functions-lock-check`: `just quality-check-supabase-functions-lock` (verify Supabase Edge Functions lockfile format compatibility)
 - `functions-lock-refresh`: `just supabase-functions-lock-refresh` (regenerate `supabase/functions/deno.lock` with runtime-compatible Deno)

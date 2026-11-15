@@ -1,0 +1,11 @@
+{
+  "line_item_id": "li-eval-008",
+  "title": "Перевод себе",
+  "amount": -5000.0,
+  "merchant_name": "Свой счёт",
+  "mcc": null,
+  "currency": "RUB",
+  "transaction_type": "transfer",
+  "brand_name": null,
+  "siblings": []
+}

@@ -1,0 +1,11 @@
+{
+  "line_item_id": "li-eval-006",
+  "title": "Парацетамол 500мг",
+  "amount": -120.0,
+  "merchant_name": "Аптека 36.6",
+  "mcc": "5912",
+  "currency": "RUB",
+  "transaction_type": "expense",
+  "brand_name": "36.6",
+  "siblings": []
+}

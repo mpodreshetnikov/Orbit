@@ -147,6 +147,7 @@ export default defineConfig({
             "scripts/**/*.{test,spec}.ts",
             "src/lib/**/*.{test,spec}.ts",
             "native/**/*.{test,spec}.ts",
+            "test/helpers/**/*.{test,spec}.ts",
           ],
         },
       },

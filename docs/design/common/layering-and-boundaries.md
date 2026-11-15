@@ -20,6 +20,12 @@ Define clear boundaries between presentation, orchestration, workflow logic, dat
 4. Preserve migration track and deploy track parity for DB behavior changes.
 5. Document layer ownership when introducing a new workflow.
 
+## Machine Check (Pilot)
+
+An error-severity ESLint boundaries check covers the mobile→web allowlist, `src/app`↛deep supabase,
+and edge↛L1 presentation imports. Command: `lint-boundaries`. Details:
+[`architecture-boundary-lint.md`](./architecture-boundary-lint.md).
+
 ## Anti-Patterns To Avoid
 
 - Implementing integrity rules only in component event handlers.

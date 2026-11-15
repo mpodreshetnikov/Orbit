@@ -1,0 +1,22 @@
+{
+  "line_item_id": "li-eval-010",
+  "title": "Капучино 0.3",
+  "amount": -280.0,
+  "merchant_name": "Кофемания",
+  "mcc": "5814",
+  "currency": "RUB",
+  "transaction_type": "expense",
+  "brand_name": "Кофемания",
+  "siblings": [
+    {
+      "id": "li-eval-010-sib-1",
+      "title": "Круассан",
+      "amount": -190.0
+    },
+    {
+      "id": "li-eval-010-sib-2",
+      "title": "Вода 0.5",
+      "amount": -90.0
+    }
+  ]
+}

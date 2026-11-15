@@ -75,7 +75,9 @@ function classifyChangedFiles(changedFiles) {
   // that edit the corpus, which is the one change most able to move every score silently.
   const fixturesImpact = normalizedChangedFiles.some(
     (filePath) =>
-      filePath.startsWith("test/fixtures/") || filePath.startsWith("scripts/extraction-eval/"),
+      filePath.startsWith("test/fixtures/") ||
+      filePath.startsWith("scripts/extraction-eval/") ||
+      filePath.startsWith("scripts/money-categorization-eval/"),
   );
   const docsOnly = hasFiles && normalizedChangedFiles.every(isDocFile);
 
