@@ -463,6 +463,129 @@ describe("getMoneyTransactionDetails", () => {
     expect(await getMoneyTransactionDetails(stub.client, "p-1", ["  ", ""], [])).toEqual([]);
     expect(stub.client.from).not.toHaveBeenCalled();
   });
+
+  it("sorts lines by created_at then id; coerces nullish fields", async () => {
+    const stub = createSupabaseStub({
+      money_transactions: [
+        {
+          data: [
+            {
+              id: "t-sort",
+              posted_at: "2026-10-28T10:00:00Z",
+              amount: -30,
+              currency: "RUB",
+              merchant_name: "Shop",
+              money_line_items: [
+                {
+                  id: "l-b",
+                  title: "Second",
+                  amount: -10,
+                  quantity: null,
+                  unit: 12,
+                  line_status: null,
+                  category_id: "food",
+                  assignment_method: 1,
+                  created_at: "2026-10-28T10:00:02Z",
+                },
+                {
+                  id: 99,
+                  title: null,
+                  amount: -5,
+                  quantity: "2",
+                  unit: null,
+                  line_status: "final",
+                  category_id: null,
+                  assignment_method: "rule",
+                  created_at: "2026-10-28T10:00:01Z",
+                },
+                {
+                  id: "l-a",
+                  title: "Same time A",
+                  amount: -8,
+                  quantity: 1,
+                  unit: "шт",
+                  line_status: "final",
+                  category_id: "gone",
+                  assignment_method: "manual",
+                  // missing created_at sorts before dated rows
+                },
+                {
+                  id: "l-c",
+                  title: "Same time C",
+                  amount: -7,
+                  quantity: 1,
+                  unit: "шт",
+                  line_status: "final",
+                  category_id: "food",
+                  assignment_method: "manual",
+                  created_at: "2026-10-28T10:00:01Z",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    const [detail] = await getMoneyTransactionDetails(stub.client, "p-1", ["t-sort"], categories);
+    // missing created_at ("") first; then same stamp by stringified id ("99" before "l-c"); then later stamp
+    expect(detail.line_items.map((line) => line.id)).toEqual(["l-a", null, "l-c", "l-b"]);
+    expect(detail.line_items[0]).toMatchObject({ id: "l-a", title: "Same time A" });
+    expect(detail.line_items[1]).toMatchObject({
+      id: null,
+      title: "",
+      quantity: 2,
+      unit: null,
+      status: "final",
+      assignment_method: "rule",
+      category: null,
+    });
+    expect(detail.line_items[2]).toMatchObject({ id: "l-c", title: "Same time C" });
+    expect(detail.line_items[3]).toMatchObject({
+      id: "l-b",
+      title: "Second",
+      quantity: null,
+      unit: null,
+      status: null,
+      assignment_method: null,
+      category: { id: "food", name: "Еда", canonical_key: "food" },
+    });
+  });
+
+  it("treats a non-array money_line_items as empty", async () => {
+    const stub = createSupabaseStub({
+      money_transactions: [
+        {
+          data: [
+            {
+              id: "t-null-lines",
+              posted_at: "2026-10-28T10:00:00Z",
+              amount: -1,
+              currency: "RUB",
+              merchant_name: null,
+              money_line_items: null,
+            },
+          ],
+        },
+      ],
+    });
+    const [detail] = await getMoneyTransactionDetails(
+      stub.client,
+      "p-1",
+      ["t-null-lines"],
+      categories,
+    );
+    expect(detail.line_items).toEqual([]);
+  });
+
+  it("surfaces select errors", async () => {
+    const stub = createSupabaseStub({
+      money_transactions: [{ error: { message: "details denied" } }],
+    });
+    await expect(
+      getMoneyTransactionDetails(stub.client, "p-1", ["t-1"], categories),
+    ).rejects.toThrow("details denied");
+  });
 });
 
 describe("searchMoneyLineItems", () => {
@@ -530,5 +653,61 @@ describe("searchMoneyLineItems", () => {
       ),
     ).toEqual({ total: 0, transactions: [] });
     expect(stub.rpc).not.toHaveBeenCalled();
+  });
+
+  it("maps RPC rows with non-array matching_line_items; total 0 on empty", async () => {
+    const empty = createSupabaseStub({}, { money_search_line_items: { data: [] } });
+    expect(
+      await searchMoneyLineItems(
+        empty.client,
+        { payerPersonId: "p-1", search: "хлеб", offset: 0, limit: 10 },
+        categories,
+      ),
+    ).toEqual({ total: 0, transactions: [] });
+
+    const stub = createSupabaseStub(
+      {},
+      {
+        money_search_line_items: {
+          data: [
+            {
+              id: "t-4",
+              posted_at: "2026-10-12T12:00:00Z",
+              amount: -50,
+              currency: "RUB",
+              merchant_name: null,
+              account_id: "a-1",
+              account_label: "Cash",
+              account_kind: "cash",
+              matching_line_items: { not: "an array" },
+              line_item_count: 0,
+              total_count: 3,
+            },
+          ],
+        },
+      },
+    );
+    const page = await searchMoneyLineItems(
+      stub.client,
+      { payerPersonId: "p-1", search: "хлеб", offset: 0, limit: 10 },
+      categories,
+    );
+    expect(page.total).toBe(3);
+    expect(page.transactions[0].matching_line_items).toEqual([]);
+    expect(page.transactions[0].merchant_name).toBeNull();
+  });
+
+  it("surfaces RPC errors", async () => {
+    const stub = createSupabaseStub(
+      {},
+      { money_search_line_items: { error: { message: "search denied" } } },
+    );
+    await expect(
+      searchMoneyLineItems(
+        stub.client,
+        { payerPersonId: "p-1", search: "молоко", offset: 0, limit: 10 },
+        [],
+      ),
+    ).rejects.toThrow("search denied");
   });
 });
