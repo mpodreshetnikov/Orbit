@@ -18,10 +18,5 @@
   },
   "include": ["src/**/*.ts"],
   "types": ["chrome"],
-  "exclude": [
-    "node_modules",
-    "src/**/*.test.ts",
-    "src/**/*.spec.ts",
-    "src/connectors/cassette-replay.ts"
-  ]
+  "exclude": ["node_modules"]
 }

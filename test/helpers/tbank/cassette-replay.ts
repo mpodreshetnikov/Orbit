@@ -12,8 +12,9 @@
  * in cannot be automated, and pretending otherwise would make CI both flaky and a risk to the
  * account.
  *
- * This module is test harness only. It must not ship in the packaged extension bundle (see
- * `EXTENSION_NON_PACKAGED_PATTERNS` in `scripts/extension/release.ts` and the tsconfig exclude).
+ * This module is test harness only. It lives under `test/helpers/` (outside
+ * `browserExtension/`) so the packaged extension zip never includes it and restoring it does
+ * not mint an extension release.
  */
 
 export interface CassetteEntry {

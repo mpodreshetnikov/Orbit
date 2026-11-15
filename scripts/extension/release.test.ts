@@ -329,7 +329,6 @@ describe("extension release", () => {
     // release — and triggers the release bundle job — for a test-only edit.
     for (const changed of [
       "browserExtension/src/connectors/tbank-web.test.ts",
-      "browserExtension/src/connectors/cassette-replay.ts",
       "browserExtension/src/core/background-router.test.ts",
       "browserExtension/popup-src/helpers.test.ts",
       "scripts/extension/release.test.ts",

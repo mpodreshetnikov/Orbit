@@ -1,7 +1,11 @@
 /// <reference types="vite/client" />
 import { describe, expect, it, vi } from "vitest";
 import { __test__ } from "./tbank-web.js";
-import { createCassettePlayer, matchKey, type Cassette } from "./cassette-replay";
+import {
+  createCassettePlayer,
+  matchKey,
+  type Cassette,
+} from "../../../test/helpers/tbank/cassette-replay";
 import syntheticCassetteModule from "../../../test/fixtures/tbank/cassettes/synthetic-month/cassette.json";
 
 /**
