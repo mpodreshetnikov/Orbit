@@ -295,3 +295,10 @@ function main() {
 if (require.main === module) {
   main();
 }
+
+module.exports = {
+  REQUIRED_PARSER_MODE,
+  parseSupabaseEnv,
+  applyE2EDefaultEnv,
+  applyE2EEnv,
+};
