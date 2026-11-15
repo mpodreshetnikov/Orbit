@@ -280,12 +280,12 @@ and installs — and after that deploys every commit that reaches `main`.
     _Repository_ ones). Or in _Settings → Environments → production_: the deploy reads both, and
     where a name is in both, the environment's value wins.
 
-    | Where                                     | Name                                | Value                                                  |
-    | ----------------------------------------- | ----------------------------------- | ------------------------------------------------------ |
-    | Variables                                 | `ORBIT_SERVER_HOST`                 | The server's IP address                                |
-    | Secrets                                   | `ORBIT_SSH_PRIVATE_KEY`             | The whole `orbit-deploy` file (the one without `.pub`) |
-    | Secrets                                   | `ORBIT_MASTER_KEY`                  | The master key from step 3                             |
-    | Variables, or Secrets for the secret ones | everything in `deploy/.env.example` | Same names, same values as Step 3 and Step 5 describe  |
+    | Where                                     | Name                                | Value                                                          |
+    | ----------------------------------------- | ----------------------------------- | -------------------------------------------------------------- |
+    | Variables                                 | `ORBIT_SERVER_HOST`                 | The server's IP or hostname; optional `:port` (default SSH 22) |
+    | Secrets                                   | `ORBIT_SSH_PRIVATE_KEY`             | The whole `orbit-deploy` file (the one without `.pub`)         |
+    | Secrets                                   | `ORBIT_MASTER_KEY`                  | The master key from step 3                                     |
+    | Variables, or Secrets for the secret ones | everything in `deploy/.env.example` | Same names, same values as Step 3 and Step 5 describe          |
 
     At the least `ORBIT_DOMAIN`, `ORBIT_ADMIN_EMAIL`, `ORBIT_ALLOWED_EMAILS` and `GOOGLE_CLIENT_ID`
     as variables and `GOOGLE_CLIENT_SECRET` as a secret; for backups, the `BACKUP_*` names. These
@@ -294,9 +294,11 @@ and installs — and after that deploys every commit that reaches `main`.
     `ALERT_TELEGRAM_BOT_TOKEN`, `BACKUP_HEALTHCHECK_URL`, `OBS_GRAFANA_CLOUD_OTLP_HEADERS` (and, when
     moving from hosted Supabase, `JWT_SECRET`, `ANON_KEY`, `SERVICE_ROLE_KEY`, `VAPID_*`). Everything
     else is a _Variable_ — a setting saved as a secret under any other name is not read. Optional:
-    `ORBIT_SERVER_USER` if your provider's login is not `root` (e.g. `ubuntu`), and
-    `ORBIT_SSH_KNOWN_HOSTS` with the output of `ssh-keyscan <server ip>` so GitHub checks it talks to
-    your server.
+    `ORBIT_SERVER_USER` if your provider's login is not `root` (e.g. `ubuntu`),
+    `ORBIT_SERVER_PORT` if SSH is not on 22 (or put `host:port` in `ORBIT_SERVER_HOST`, e.g.
+    `141.133.186.73:22222`), and `ORBIT_SSH_KNOWN_HOSTS` with the output of
+    `ssh-keyscan -p <port> <server ip>` so GitHub checks it talks to your server. IPv6 host forms
+    are not supported for `ORBIT_SERVER_HOST`.
 
 5.  **Deploy**: _Actions → Deploy to your server → Run workflow_. The first run takes 5–15 minutes and
     ends green; the log shows the same steps as a manual install.
@@ -318,7 +320,8 @@ workflows for compatibility — same rules, different Environment. Its Postgres,
 SSH key and backups must not be shared with Environment `production` (`privateorbit.space`). This
 repository does not create or fill those environments; the instance owner does, in the GitHub UI.
 
-**Open ports on the VPS:** `22` (SSH from GitHub Actions), `80` and `443` (Caddy / Let's Encrypt).
+**Open ports on the VPS:** SSH from GitHub Actions (port **22** by default, or the port you set in
+`ORBIT_SERVER_HOST` / `ORBIT_SERVER_PORT`), plus `80` and `443` (Caddy / Let's Encrypt).
 
 **Default domain without buying one:** `<ip-with-dashes>.sslip.io` as `ORBIT_DOMAIN` (for example
 `41-133-186-73.sslip.io`). Or set `ORBIT_HTTP_ONLY=true` for a temporary HTTP-only test.
@@ -329,7 +332,7 @@ repository does not create or fill those environments; the instance owner does, 
 ssh-keygen -t ed25519 -f orbit-deploy-kakos -N ''
 # put orbit-deploy-kakos.pub on the server (ssh-copy-id / provider panel)
 openssl rand -hex 32   # → ORBIT_MASTER_KEY; save in a password manager
-ssh-keyscan <server-ip>   # optional → ORBIT_SSH_KNOWN_HOSTS
+ssh-keyscan -p <ssh-port> <server-ip>   # optional → ORBIT_SSH_KNOWN_HOSTS
 ```
 
 **Required in the instance Environment (names only — set them on the Environment, not as
@@ -340,7 +343,7 @@ inherited and this job could deploy the wrong server). For Igor use Environment
 | Where    | Name                       | Notes                                                                                       |
 | -------- | -------------------------- | ------------------------------------------------------------------------------------------- |
 | Variable | `ORBIT_SELF_HOST_INSTANCE` | Must equal the Environment name exactly (`production-kakos` or `production-cacos`) — opt-in |
-| Variable | `ORBIT_SERVER_HOST`        | This instance's server IP                                                                   |
+| Variable | `ORBIT_SERVER_HOST`        | This instance's server IP or hostname; optional `:port` (default 22)                        |
 | Variable | `ORBIT_DOMAIN`             | Hostname only, e.g. sslip.io                                                                |
 | Variable | `ORBIT_ADMIN_EMAIL`        | Let's Encrypt contact                                                                       |
 | Variable | `ORBIT_ALLOWED_EMAILS`     | Comma-separated Google allowlist                                                            |
@@ -350,7 +353,8 @@ inherited and this job could deploy the wrong server). For Igor use Environment
 | Secret   | `GOOGLE_CLIENT_SECRET`     | Matching the client id                                                                      |
 
 **Optional (same names as `deploy/.env.example`; secrets for the secret ones):**
-`ORBIT_SERVER_USER`, `ORBIT_SSH_KNOWN_HOSTS`, `ORBIT_HTTP_ONLY`, `MCP_SERVER_ENABLED`,
+`ORBIT_SERVER_USER`, `ORBIT_SERVER_PORT` (when SSH is not on 22 and the host has no `:port`),
+`ORBIT_SSH_KNOWN_HOSTS`, `ORBIT_HTTP_ONLY`, `MCP_SERVER_ENABLED`,
 `OPENROUTER_API_KEY`, `JEV_API_KEY`, `WHO_ICD_CLIENT_ID` / `WHO_ICD_CLIENT_SECRET`, `BACKUP_*`,
 `ALERT_TELEGRAM_BOT_TOKEN`, `BACKUP_HEALTHCHECK_URL`, `OBS_GRAFANA_CLOUD_OTLP_HEADERS`, and — only
 when moving from a hosted project — `JWT_SECRET`, `ANON_KEY`, `SERVICE_ROLE_KEY`, `VAPID_*`,

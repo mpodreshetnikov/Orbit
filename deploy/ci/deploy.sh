@@ -8,6 +8,8 @@
 #   ORBIT_SECRET_<NAME>                   the secrets a server needs, each by name (the workflow
 #                                         lists them; never the repository's whole set)
 #   ORBIT_VARS_JSON                       toJSON(vars) of the workflow
+#                                         (ORBIT_SERVER_HOST may be host or host:port;
+#                                         optional ORBIT_SERVER_PORT; default SSH port 22)
 #   ORBIT_COMMIT                          the commit to deploy
 #   ORBIT_ACTION                          deploy (the default); restore: then restore the latest
 #                                         backup over it (a server replacing a lost one); doctor:
@@ -42,8 +44,14 @@ setting() {
   printf '%s' "$value"
 }
 
-host="$(setting ORBIT_SERVER_HOST)"
-[[ -n "$host" ]] || fail "Set the ORBIT_SERVER_HOST variable to your server's IP address."
+# shellcheck source=ssh-target.sh
+source "$here/ssh-target.sh"
+host_raw="$(setting ORBIT_SERVER_HOST)"
+[[ -n "$host_raw" ]] || fail "Set the ORBIT_SERVER_HOST variable to your server's IP address (optional :port) or hostname."
+parse_err="$(orbit_parse_ssh_target "$host_raw" "$(setting ORBIT_SERVER_PORT)" 2>&1)" ||
+  fail "$parse_err"
+host="$ORBIT_SSH_HOST"
+ssh_port="$ORBIT_SSH_PORT"
 [[ -n "$(setting ORBIT_SSH_PRIVATE_KEY)" ]] ||
   fail "Set the ORBIT_SSH_PRIVATE_KEY secret to a private key your server accepts (docs/SELF_HOSTING.md, Deploy from GitHub)."
 [[ -n "$(setting ORBIT_MASTER_KEY)" ]] ||
@@ -74,11 +82,12 @@ echo >>"$work/key"
 if [[ -n "$(setting ORBIT_SSH_KNOWN_HOSTS)" ]]; then
   setting ORBIT_SSH_KNOWN_HOSTS >"$work/known_hosts"
 else
-  ssh-keyscan -T 15 "$host" 2>/dev/null >"$work/known_hosts" || true
-  [[ -s "$work/known_hosts" ]] || fail "Cannot reach $host on port 22."
-  echo "::notice::Accepted the SSH host key $host presents. To pin it, set the variable ORBIT_SSH_KNOWN_HOSTS to the output of: ssh-keyscan $host"
+  ssh-keyscan -p "$ssh_port" -T 15 "$host" 2>/dev/null >"$work/known_hosts" || true
+  [[ -s "$work/known_hosts" ]] || fail "Cannot reach $host on port $ssh_port."
+  keyscan_hint="ssh-keyscan -p $ssh_port $host"
+  echo "::notice::Accepted the SSH host key $host presents on port $ssh_port. To pin it, set the variable ORBIT_SSH_KNOWN_HOSTS to the output of: $keyscan_hint"
 fi
-ssh_opts=(-i "$work/key" -o UserKnownHostsFile="$work/known_hosts" -o StrictHostKeyChecking=yes
+ssh_opts=(-i "$work/key" -p "$ssh_port" -o UserKnownHostsFile="$work/known_hosts" -o StrictHostKeyChecking=yes
   -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30)
 
 # The first deploy logs in as root (or ORBIT_SERVER_USER); bootstrap.sh then turns root logins
@@ -91,8 +100,8 @@ for candidate in orbit "$(setting ORBIT_SERVER_USER)" root; do
     break
   fi
 done
-[[ -n "$user" ]] || fail "ORBIT_SSH_PRIVATE_KEY does not log in to $host as orbit, $(setting ORBIT_SERVER_USER) or root."
-echo "Logged in to $host as $user"
+[[ -n "$user" ]] || fail "ORBIT_SSH_PRIVATE_KEY does not log in to $host (port $ssh_port) as orbit, $(setting ORBIT_SERVER_USER) or root."
+echo "Logged in to $host:$ssh_port as $user"
 sudo=""
 [[ "$user" == root ]] || sudo="sudo -n"
 # The command is built here and runs there: client-side expansion is the point.
@@ -161,4 +170,4 @@ if [[ "${ORBIT_ACTION:-deploy}" == migrate-from-supabase ]]; then
   remote "$sudo /opt/orbit/deploy/orbit migrate-from-supabase import --yes" 2>&1 |
     sed -E -e 's|^(MISMATCH object [^/]*)/.*|\1/...|' -e 's/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]+/<e-mail>/g'
 fi
-echo "::notice::Orbit $(cut -c1-12 <<<"$ORBIT_COMMIT") is on $host"
+echo "::notice::Orbit $(cut -c1-12 <<<"$ORBIT_COMMIT") is on $host:$ssh_port"
