@@ -14,6 +14,7 @@ const checkups = vi.hoisted(() => ({
 const regen = vi.hoisted(() => ({
   readTimezonePreference: vi.fn(),
 }));
+const person = vi.hoisted(() => ({ resolvePerson: vi.fn(), listPeople: vi.fn() }));
 
 vi.mock("../health/checkups", async () => {
   const actual = await vi.importActual<typeof import("../health/checkups")>("../health/checkups");
@@ -36,6 +37,7 @@ vi.mock("../health/checkups", async () => {
 vi.mock("@/lib/medications/regenerate-dose-events", () => ({
   readTimezonePreference: (...args: unknown[]) => regen.readTimezonePreference(...args),
 }));
+vi.mock("../resolve-person", () => person);
 vi.mock("../supabase-user-client", () => ({
   createUserScopedSupabaseClient: vi.fn(() => ({}) as never),
 }));
@@ -92,6 +94,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-06-15T12:00:00Z"));
+  person.resolvePerson.mockResolvedValue({
+    status: "ok",
+    person: { id: "p-1", name: "Максим", kind: "human" },
+  });
   regen.readTimezonePreference.mockResolvedValue("UTC");
   checkups.loadCheckupItem.mockResolvedValue(ITEM);
   checkups.latestCompletionDay.mockResolvedValue(null);
@@ -250,5 +256,153 @@ describe("update_checkup_schedule", () => {
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("health:write");
     expect(checkups.updateCheckupSchedule).not.toHaveBeenCalled();
+  });
+
+  it("refuses a missing or archived checkup before preview", async () => {
+    const map = await handlers();
+    checkups.loadCheckupItem.mockResolvedValueOnce(null);
+    const missing = await map.get("update_checkup_schedule")!(
+      {
+        checkup_id: ITEM.id,
+        schedule: { type: "one_off", due_at: "2026-12-01" },
+      },
+      ctx(),
+    );
+    expect(missing.isError).toBe(true);
+    expect(missing.content[0].text).toMatch(/No checkup/);
+
+    checkups.loadCheckupItem.mockResolvedValueOnce({ ...ITEM, status: "archived" });
+    const archived = await map.get("update_checkup_schedule")!(
+      {
+        checkup_id: ITEM.id,
+        schedule: { type: "one_off", due_at: "2026-12-01" },
+      },
+      ctx(),
+    );
+    expect(archived.isError).toBe(true);
+    expect(archived.content[0].text).toMatch(/archived/);
+    expect(checkups.updateCheckupSchedule).not.toHaveBeenCalled();
+  });
+
+  it("previews reactivation when an interval rewrite hits a completed checkup", async () => {
+    checkups.loadCheckupItem.mockResolvedValue({
+      ...ITEM,
+      status: "completed",
+      schedule: { type: "one_off", due_at: "2026-01-01" },
+    });
+    const preview = await (await handlers()).get("update_checkup_schedule")!(
+      {
+        checkup_id: ITEM.id,
+        schedule: { type: "interval", every: 1, unit: "year", next_due_from: "target" },
+      },
+      ctx(),
+    );
+    expect(preview.isError).toBeFalsy();
+    expect(preview.content[0].text).toMatch(/completed → active/);
+    expect(preview.content[0].text).toMatch(/one-off due/);
+    expect(preview.content[0].text).toMatch(/every 1 year/);
+    expect(preview.content[0].text).toMatch(/next from target/);
+    expect(preview.structuredContent?.proposed).toMatchObject({ status: "active" });
+  });
+});
+
+describe("list_checkups / get_checkup", () => {
+  it("flags overdue rows and omits due date when absent", async () => {
+    checkups.listCheckups.mockResolvedValue([
+      {
+        id: ITEM.id,
+        title: "Blood panel",
+        category: "lab",
+        status: "active",
+        next_due_at: "2026-01-01",
+        is_overdue: true,
+        days_until_due: -10,
+      },
+      {
+        id: "22222222-2222-4222-8222-222222222222",
+        title: "Dental",
+        category: "dental",
+        status: "paused",
+        next_due_at: null,
+        is_overdue: false,
+        days_until_due: null,
+      },
+    ]);
+    const result = await (await handlers()).get("list_checkups")!(
+      { person_id: "p-1", due_window: "all" },
+      ctx(),
+    );
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toContain("1 overdue");
+    expect(result.content[0].text).toContain("OVERDUE by 10 days");
+    expect(result.content[0].text).toContain("no due date");
+    expect(result.structuredContent?.overdue_count).toBe(1);
+  });
+
+  it("fails get_checkup when missing and quotes next due when present", async () => {
+    const map = await handlers();
+    checkups.getCheckup.mockResolvedValueOnce({ checkup: null, completions: [] });
+    const missing = await map.get("get_checkup")!({ checkup_id: ITEM.id }, ctx());
+    expect(missing.isError).toBe(true);
+    expect(missing.content[0].text).toMatch(/No checkup/);
+
+    checkups.getCheckup.mockResolvedValueOnce({
+      checkup: { ...ITEM, next_due_at: null },
+      completions: [{ id: "done-1" }],
+    });
+    const noDue = await map.get("get_checkup")!({ checkup_id: ITEM.id }, ctx());
+    expect(noDue.isError).toBeFalsy();
+    expect(noDue.content[0].text).toContain("1 completion");
+    expect(noDue.content[0].text).not.toContain("next due");
+
+    checkups.getCheckup.mockResolvedValueOnce({
+      checkup: ITEM,
+      completions: [],
+    });
+    const withDue = await map.get("get_checkup")!({ checkup_id: ITEM.id }, ctx());
+    expect(withDue.content[0].text).toContain("next due 2026-06-20");
+  });
+});
+
+describe("mark_checkup_done guards", () => {
+  it("rejects an unrecognised timezone before writing", async () => {
+    const result = await (await handlers()).get("mark_checkup_done")!(
+      { checkup_id: ITEM.id, timezone: "Not/AZone" },
+      ctx(),
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/IANA/);
+    expect(checkups.markCheckupDone).not.toHaveBeenCalled();
+  });
+
+  it("falls back to UTC when no preference is saved", async () => {
+    regen.readTimezonePreference.mockResolvedValue(null);
+    await (await handlers()).get("mark_checkup_done")!({ checkup_id: ITEM.id }, ctx());
+    expect(checkups.markCheckupDone).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ doneAt: "2026-06-15" }),
+    );
+  });
+
+  it("refuses a done_at before the latest completion", async () => {
+    checkups.latestCompletionDay.mockResolvedValue("2026-06-10");
+    const result = await (await handlers()).get("mark_checkup_done")!(
+      { checkup_id: ITEM.id, done_at: "2026-06-01", confirm: true },
+      ctx(),
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/before the latest completion/);
+    expect(checkups.markCheckupDone).not.toHaveBeenCalled();
+  });
+
+  it("fails backdate preview when the checkup row is gone", async () => {
+    checkups.loadCheckupItem.mockResolvedValueOnce(null);
+    const result = await (await handlers()).get("mark_checkup_done")!(
+      { checkup_id: ITEM.id, done_at: "2026-05-01" },
+      ctx(),
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/No checkup/);
+    expect(checkups.markCheckupDone).not.toHaveBeenCalled();
   });
 });

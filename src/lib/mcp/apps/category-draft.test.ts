@@ -308,6 +308,167 @@ describe("registerCategoryDraftApp", () => {
     expect(rules.applyRuleDraft).toHaveBeenCalledTimes(1);
     expect(category.applyCategoryDraft).not.toHaveBeenCalled();
   });
+
+  it("propose tools surface builder failures for each category and rule mode", async () => {
+    category.buildCreateCategoryDraft.mockResolvedValueOnce({ ok: false, error: "create refused" });
+    category.buildRenameCategoryDraft.mockResolvedValueOnce({ ok: false, error: "rename refused" });
+    category.buildDeleteCategoryDraft.mockResolvedValueOnce({ ok: false, error: "delete refused" });
+    category.buildRecategorizeDraft.mockResolvedValueOnce({ ok: false, error: "recat refused" });
+    rules.buildCreateRuleDraft.mockResolvedValueOnce({ ok: false, error: "rule create refused" });
+    rules.buildUpdateRuleDraft.mockResolvedValueOnce({ ok: false, error: "rule update refused" });
+    rules.buildDeleteRuleDraft.mockResolvedValueOnce({ ok: false, error: "rule delete refused" });
+    rules.buildApplyRulesDraft.mockResolvedValueOnce({ ok: false, error: "rule apply refused" });
+
+    const { tools } = register();
+    const cases: Array<[string, Record<string, unknown>, string]> = [
+      ["propose_category_create", CREATE, "create refused"],
+      [
+        "propose_category_rename",
+        { category_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", name_en: "Latte" },
+        "rename refused",
+      ],
+      [
+        "propose_category_delete",
+        { category_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" },
+        "delete refused",
+      ],
+      [
+        "propose_line_recategorize",
+        {
+          line_item_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          category_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        },
+        "recat refused",
+      ],
+      [
+        "propose_category_rule_create",
+        {
+          name: "Кофе",
+          rule_kind: "direct",
+          target_category_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        },
+        "rule create refused",
+      ],
+      [
+        "propose_category_rule_update",
+        { rule_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", name: "X" },
+        "rule update refused",
+      ],
+      [
+        "propose_category_rule_delete",
+        { rule_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" },
+        "rule delete refused",
+      ],
+      [
+        "propose_category_rules_apply",
+        { line_item_ids: ["cccccccc-cccc-4ccc-8ccc-cccccccccccc"] },
+        "rule apply refused",
+      ],
+    ];
+    for (const [name, args, err] of cases) {
+      const result = await tools.get(name)!.handler(args, moneyCtx);
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain(err);
+    }
+  });
+
+  it("confirm_category_draft verbs cover category and rule modes and apply failures", async () => {
+    const { tools } = register();
+    const confirm = tools.get("confirm_category_draft")!.handler;
+
+    category.applyCategoryDraft
+      .mockResolvedValueOnce({ ok: true, id: "id-rename", label: "Латте" })
+      .mockResolvedValueOnce({ ok: true, id: "id-delete", label: "Кофе" })
+      .mockResolvedValueOnce({ ok: true, id: "id-recat", label: "Латте" })
+      .mockResolvedValueOnce({ ok: false, error: "apply category refused" });
+    rules.applyRuleDraft
+      .mockResolvedValueOnce({ ok: true, id: "id-ru", label: "Updated" })
+      .mockResolvedValueOnce({ ok: true, id: "id-rd", label: "Deleted" })
+      .mockResolvedValueOnce({ ok: true, id: "id-ra", label: "Applied" })
+      .mockResolvedValueOnce({ ok: false, error: "apply rule refused" });
+
+    const rename = await confirm(
+      {
+        person_id: "p-1",
+        mode: "rename",
+        draft: { category_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", name_en: "Latte" },
+      },
+      moneyCtx,
+    );
+    expect(rename.content[0].text).toMatch(/^Renamed/);
+
+    const deleted = await confirm(
+      {
+        person_id: "p-1",
+        mode: "delete",
+        draft: { category_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" },
+      },
+      moneyCtx,
+    );
+    expect(deleted.content[0].text).toMatch(/^Deleted/);
+
+    const recat = await confirm(
+      {
+        person_id: "p-1",
+        mode: "recategorize",
+        draft: {
+          line_item_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          category_id: null,
+        },
+      },
+      moneyCtx,
+    );
+    expect(recat.content[0].text).toMatch(/^Recategorized/);
+
+    const catFail = await confirm({ person_id: "p-1", mode: "create", draft: CREATE }, moneyCtx);
+    expect(catFail.isError).toBe(true);
+    expect(catFail.content[0].text).toContain("apply category refused");
+
+    const ruleUpdate = await confirm(
+      {
+        person_id: "p-1",
+        mode: "rule_update",
+        draft: { rule_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", name: "X" },
+      },
+      moneyCtx,
+    );
+    expect(ruleUpdate.content[0].text).toMatch(/^Updated rule/);
+
+    const ruleDelete = await confirm(
+      {
+        person_id: "p-1",
+        mode: "rule_delete",
+        draft: { rule_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" },
+      },
+      moneyCtx,
+    );
+    expect(ruleDelete.content[0].text).toMatch(/^Deleted rule/);
+
+    const ruleApply = await confirm(
+      {
+        person_id: "p-1",
+        mode: "rule_apply",
+        draft: { line_item_ids: ["cccccccc-cccc-4ccc-8ccc-cccccccccccc"] },
+      },
+      moneyCtx,
+    );
+    expect(ruleApply.content[0].text).toMatch(/^Applied rules/);
+
+    const ruleFail = await confirm(
+      {
+        person_id: "p-1",
+        mode: "rule_create",
+        draft: {
+          name: "Кофе",
+          rule_kind: "direct",
+          target_category_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        },
+      },
+      moneyCtx,
+    );
+    expect(ruleFail.isError).toBe(true);
+    expect(ruleFail.content[0].text).toContain("apply rule refused");
+  });
 });
 
 describe("CATEGORY_DRAFT_HTML client script", () => {

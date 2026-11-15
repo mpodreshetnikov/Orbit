@@ -7,6 +7,8 @@ import {
   dismissRecordProposals,
   findDuplicatePages,
   findMissingPages,
+  getIngestCandidates,
+  getPendingCompletions,
   signRecordPageLinks,
   proposeRecordReconciliation,
   recordPageSizes,
@@ -833,5 +835,200 @@ describe("removeRecordDraft", () => {
   it("reports a record that is not there", async () => {
     const stub = createSupabaseStub({ medical_records: [{ data: null }] });
     expect(await removeRecordDraft(stub.client, "r-1")).toEqual({ status: "not_found" });
+  });
+});
+
+describe("getIngestCandidates", () => {
+  it("returns conditions, dedupes open findings, and skips resolved ones", async () => {
+    const stub = createSupabaseStub({
+      conditions: [
+        {
+          data: [
+            { id: "c-1", name: "Дефицит B12", code: "E53.8", current_status: "active" },
+            { id: "c-2", name: "Гастрит", code: null, current_status: "resolved" },
+          ],
+        },
+      ],
+      record_findings: [
+        {
+          data: [
+            {
+              finding_code: "F1",
+              finding_type_text: "Киста",
+              site_code: "S1",
+              body_site_text: "Печень",
+              resolution_status: "open",
+            },
+            {
+              finding_code: "F1",
+              finding_type_text: "Киста",
+              site_code: "S1",
+              body_site_text: "Печень",
+              resolution_status: "open",
+            },
+            {
+              finding_code: null,
+              finding_type_text: null,
+              site_code: null,
+              body_site_text: null,
+              resolution_status: "open",
+            },
+            {
+              finding_code: "F2",
+              finding_type_text: "Узел",
+              site_code: "S2",
+              body_site_text: "Щитовидка",
+              resolution_status: "resolved",
+            },
+          ],
+        },
+      ],
+      checkup_items: [
+        {
+          data: [{ id: "k-1", title: "ОАК", category: "lab", next_due_at: "2026-04-01" }],
+        },
+      ],
+    });
+
+    const candidates = await getIngestCandidates(stub.client, "p-1");
+
+    expect(candidates.conditions).toEqual([
+      { id: "c-1", name: "Дефицит B12", code: "E53.8", current_status: "active" },
+      { id: "c-2", name: "Гастрит", code: null, current_status: "resolved" },
+    ]);
+    expect(candidates.findings).toEqual([
+      {
+        finding_code: "F1",
+        finding_type_text: "Киста",
+        site_code: "S1",
+        body_site_text: "Печень",
+      },
+      {
+        finding_code: null,
+        finding_type_text: "Unknown finding",
+        site_code: null,
+        body_site_text: null,
+      },
+    ]);
+    expect(candidates.checkups).toEqual([
+      { id: "k-1", title: "ОАК", category: "lab", next_due_at: "2026-04-01" },
+    ]);
+    expect(stub.argsFor("conditions", "eq")).toEqual([["person_id", "p-1"]]);
+    expect(stub.argsFor("checkup_items", "eq")).toEqual(
+      expect.arrayContaining([
+        ["person_id", "p-1"],
+        ["status", "active"],
+      ]),
+    );
+  });
+
+  it("throws when the conditions query fails", async () => {
+    const stub = createSupabaseStub({
+      conditions: [{ error: { message: "conditions down" } }],
+      record_findings: [{ data: [] }],
+      checkup_items: [{ data: [] }],
+    });
+    await expect(getIngestCandidates(stub.client, "p-1")).rejects.toThrow(
+      "Failed to load what the document could close: conditions down",
+    );
+  });
+
+  it("throws when the findings query fails", async () => {
+    const stub = createSupabaseStub({
+      conditions: [{ data: [] }],
+      record_findings: [{ error: { message: "findings down" } }],
+      checkup_items: [{ data: [] }],
+    });
+    await expect(getIngestCandidates(stub.client, "p-1")).rejects.toThrow(
+      "Failed to load what the document could close: findings down",
+    );
+  });
+
+  it("throws when the checkups query fails", async () => {
+    const stub = createSupabaseStub({
+      conditions: [{ data: [] }],
+      record_findings: [{ data: [] }],
+      checkup_items: [{ error: { message: "checkups down" } }],
+    });
+    await expect(getIngestCandidates(stub.client, "p-1")).rejects.toThrow(
+      "Failed to load what the document could close: checkups down",
+    );
+  });
+});
+
+describe("getPendingCompletions", () => {
+  it("joins checkup titles and falls back to Чекап when a title is missing", async () => {
+    const stub = createSupabaseStub({
+      medical_records: [
+        {
+          data: {
+            llm_suggested_checkup_completions: [
+              {
+                checkup_item_id: "k-known",
+                suggested_done_at: "2026-03-06T12:00:00Z",
+                reason: "B12 в бланке",
+              },
+              {
+                checkup_item_id: "k-missing",
+                suggested_done_at: "2026-03-07",
+                reason: "без названия",
+              },
+            ],
+          },
+        },
+      ],
+      checkup_items: [{ data: [{ id: "k-known", title: "Витамин B12" }] }],
+    });
+
+    await expect(getPendingCompletions(stub.client, "rec-1")).resolves.toEqual([
+      {
+        checkup_item_id: "k-known",
+        title: "Витамин B12",
+        done_at: "2026-03-06",
+        reason: "B12 в бланке",
+      },
+      {
+        checkup_item_id: "k-missing",
+        title: "Чекап",
+        done_at: "2026-03-07",
+        reason: "без названия",
+      },
+    ]);
+    expect(stub.argsFor("checkup_items", "in")).toEqual([["id", ["k-known", "k-missing"]]]);
+  });
+
+  it("returns an empty list when nothing is suggested", async () => {
+    const stub = createSupabaseStub({
+      medical_records: [{ data: { llm_suggested_checkup_completions: null } }],
+    });
+    await expect(getPendingCompletions(stub.client, "rec-1")).resolves.toEqual([]);
+    expect(stub.argsFor("checkup_items", "select")).toEqual([]);
+  });
+
+  it("throws when the record cannot be loaded", async () => {
+    const stub = createSupabaseStub({
+      medical_records: [{ error: { message: "record gone" } }],
+    });
+    await expect(getPendingCompletions(stub.client, "rec-1")).rejects.toThrow(
+      "Failed to load the suggested completions: record gone",
+    );
+  });
+
+  it("throws when checkup titles cannot be loaded", async () => {
+    const stub = createSupabaseStub({
+      medical_records: [
+        {
+          data: {
+            llm_suggested_checkup_completions: [
+              { checkup_item_id: "k-1", suggested_done_at: "2026-03-06", reason: "ok" },
+            ],
+          },
+        },
+      ],
+      checkup_items: [{ error: { message: "titles down" } }],
+    });
+    await expect(getPendingCompletions(stub.client, "rec-1")).rejects.toThrow(
+      "Failed to load the checkups: titles down",
+    );
   });
 });
