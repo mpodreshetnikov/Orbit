@@ -269,6 +269,9 @@ Run on demand, deliberately kept out of the push path:
   (`just test-extraction`, or the `Extraction Eval` workflow from the Actions tab). A live run calls
   a paid provider, so it is manual by design; the default replays committed recordings and costs
   nothing.
+- **Money categorization quality is scored** against a synthetic merchant/line corpus
+  (`just test-money-categorization`, or the `Money Categorization Eval` workflow). Same ungated
+  cassette-replay posture as extraction.
 
 The quality operating model — which checks run at which stage, and the final gate before handoff —
 is written down in [`docs/QUALITY.md`](./docs/QUALITY.md).

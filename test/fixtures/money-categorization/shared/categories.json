@@ -1,0 +1,176 @@
+{
+  "$comment": "Pinned canonical money categories for the categorization eval. Ids match money_seed_canonical_categories(); do not invent new ids here.",
+  "candidateCategories": [
+    {
+      "id": "44000001-0000-4000-8000-000000000001",
+      "name_en": "Income",
+      "name_ru": "Доход",
+      "slug": "canonical-income",
+      "category_kind": "canonical",
+      "canonical_category_id": "44000001-0000-4000-8000-000000000001",
+      "canonical_system_key": "income"
+    },
+    {
+      "id": "44000001-0000-4000-8000-000000000002",
+      "name_en": "Transfers",
+      "name_ru": "Переводы",
+      "slug": "canonical-transfers",
+      "category_kind": "canonical",
+      "canonical_category_id": "44000001-0000-4000-8000-000000000002",
+      "canonical_system_key": "transfers"
+    },
+    {
+      "id": "44000001-0000-4000-8000-000000000003",
+      "name_en": "Housing",
+      "name_ru": "Жилье",
+      "slug": "canonical-housing",
+      "category_kind": "canonical",
+      "canonical_category_id": "44000001-0000-4000-8000-000000000003",
+      "canonical_system_key": "housing"
+    },
+    {
+      "id": "44000001-0000-4000-8000-000000000004",
+      "name_en": "Utilities",
+      "name_ru": "Коммунальные услуги",
+      "slug": "canonical-utilities",
+      "category_kind": "canonical",
+      "canonical_category_id": "44000001-0000-4000-8000-000000000004",
+      "canonical_system_key": "utilities"
+    },
+    {
+      "id": "44000001-0000-4000-8000-000000000005",
+      "name_en": "Food",
+      "name_ru": "Еда",
+      "slug": "canonical-food",
+      "category_kind": "canonical",
+      "canonical_category_id": "44000001-0000-4000-8000-000000000005",
+      "canonical_system_key": "food"
+    },
+    {
+      "id": "44000001-0000-4000-8000-000000000006",
+      "name_en": "Transport",
+      "name_ru": "Транспорт",
+      "slug": "canonical-transport",
+      "category_kind": "canonical",
+      "canonical_category_id": "44000001-0000-4000-8000-000000000006",
+      "canonical_system_key": "transport"
+    },
+    {
+      "id": "44000001-0000-4000-8000-000000000007",
+      "name_en": "Shopping",
+      "name_ru": "Покупки",
+      "slug": "canonical-shopping",
+      "category_kind": "canonical",
+      "canonical_category_id": "44000001-0000-4000-8000-000000000007",
+      "canonical_system_key": "shopping"
+    },
+    {
+      "id": "44000001-0000-4000-8000-000000000008",
+      "name_en": "Health",
+      "name_ru": "Здоровье",
+      "slug": "canonical-health",
+      "category_kind": "canonical",
+      "canonical_category_id": "44000001-0000-4000-8000-000000000008",
+      "canonical_system_key": "health"
+    },
+    {
+      "id": "44000001-0000-4000-8000-000000000009",
+      "name_en": "Education",
+      "name_ru": "Образование",
+      "slug": "canonical-education",
+      "category_kind": "canonical",
+      "canonical_category_id": "44000001-0000-4000-8000-000000000009",
+      "canonical_system_key": "education"
+    },
+    {
+      "id": "44000001-0000-4000-8000-00000000000a",
+      "name_en": "Entertainment",
+      "name_ru": "Развлечения",
+      "slug": "canonical-entertainment",
+      "category_kind": "canonical",
+      "canonical_category_id": "44000001-0000-4000-8000-00000000000a",
+      "canonical_system_key": "entertainment"
+    },
+    {
+      "id": "44000001-0000-4000-8000-00000000000b",
+      "name_en": "Travel",
+      "name_ru": "Путешествия",
+      "slug": "canonical-travel",
+      "category_kind": "canonical",
+      "canonical_category_id": "44000001-0000-4000-8000-00000000000b",
+      "canonical_system_key": "travel"
+    },
+    {
+      "id": "44000001-0000-4000-8000-00000000000c",
+      "name_en": "Family",
+      "name_ru": "Семья",
+      "slug": "canonical-family",
+      "category_kind": "canonical",
+      "canonical_category_id": "44000001-0000-4000-8000-00000000000c",
+      "canonical_system_key": "family"
+    },
+    {
+      "id": "44000001-0000-4000-8000-00000000000d",
+      "name_en": "Pets",
+      "name_ru": "Питомцы",
+      "slug": "canonical-pets",
+      "category_kind": "canonical",
+      "canonical_category_id": "44000001-0000-4000-8000-00000000000d",
+      "canonical_system_key": "pets"
+    },
+    {
+      "id": "44000001-0000-4000-8000-00000000000e",
+      "name_en": "Services & Fees",
+      "name_ru": "Сервисы и комиссии",
+      "slug": "canonical-services-fees",
+      "category_kind": "canonical",
+      "canonical_category_id": "44000001-0000-4000-8000-00000000000e",
+      "canonical_system_key": "services_fees"
+    },
+    {
+      "id": "44000001-0000-4000-8000-00000000000f",
+      "name_en": "Gifts & Donations",
+      "name_ru": "Подарки и пожертвования",
+      "slug": "canonical-gifts-donations",
+      "category_kind": "canonical",
+      "canonical_category_id": "44000001-0000-4000-8000-00000000000f",
+      "canonical_system_key": "gifts_donations"
+    },
+    {
+      "id": "44000001-0000-4000-8000-000000000010",
+      "name_en": "Taxes",
+      "name_ru": "Налоги",
+      "slug": "canonical-taxes",
+      "category_kind": "canonical",
+      "canonical_category_id": "44000001-0000-4000-8000-000000000010",
+      "canonical_system_key": "taxes"
+    },
+    {
+      "id": "44000001-0000-4000-8000-000000000011",
+      "name_en": "Savings & Investments",
+      "name_ru": "Сбережения и инвестиции",
+      "slug": "canonical-savings-investments",
+      "category_kind": "canonical",
+      "canonical_category_id": "44000001-0000-4000-8000-000000000011",
+      "canonical_system_key": "savings_investments"
+    },
+    {
+      "id": "44000001-0000-4000-8000-000000000012",
+      "name_en": "Business",
+      "name_ru": "Бизнес",
+      "slug": "canonical-business",
+      "category_kind": "canonical",
+      "canonical_category_id": "44000001-0000-4000-8000-000000000012",
+      "canonical_system_key": "business"
+    },
+    {
+      "id": "44000001-0000-4000-8000-000000000013",
+      "name_en": "Other",
+      "name_ru": "Другое",
+      "slug": "canonical-other",
+      "category_kind": "canonical",
+      "canonical_category_id": "44000001-0000-4000-8000-000000000013",
+      "canonical_system_key": "other"
+    }
+  ]
+}

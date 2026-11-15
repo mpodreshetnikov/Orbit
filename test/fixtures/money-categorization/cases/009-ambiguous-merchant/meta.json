@@ -1,0 +1,8 @@
+{
+  "language": "ru",
+  "kind": "ambiguous",
+  "notes": "No useful merchant/MCC/title — model should abstain (null).",
+  "judgement_calls": [
+    "Generic 'Оплата' + anonymous IP merchant without MCC is intentionally unlabeled."
+  ]
+}

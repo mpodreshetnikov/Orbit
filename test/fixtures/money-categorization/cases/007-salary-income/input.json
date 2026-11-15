@@ -1,0 +1,11 @@
+{
+  "line_item_id": "li-eval-007",
+  "title": "Заработная плата",
+  "amount": 120000.0,
+  "merchant_name": "ООО Пример",
+  "mcc": null,
+  "currency": "RUB",
+  "transaction_type": "income",
+  "brand_name": null,
+  "siblings": []
+}

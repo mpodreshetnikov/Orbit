@@ -1,0 +1,12 @@
+{
+  "line_item_id": "li-eval-005",
+  "title": "Steam Purchase",
+  "amount": -1499.0,
+  "merchant_name": "Steam",
+  "mcc": "5816",
+  "currency": "RUB",
+  "transaction_type": "expense",
+  "brand_name": "Steam",
+  "comment": "Digital game",
+  "siblings": []
+}

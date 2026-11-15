@@ -1,0 +1,23 @@
+{
+  "request_hash": "61b1c701562e90d2",
+  "stage": "categorize",
+  "model": "google/gemini-2.0-flash-001",
+  "response": {
+    "id": "synthetic-money-categorize",
+    "model": "google/gemini-2.0-flash-001",
+    "choices": [
+      {
+        "finish_reason": "stop",
+        "message": {
+          "role": "assistant",
+          "content": "{\"items\":[{\"line_item_id\":\"li-eval-006\",\"category_id\":\"44000001-0000-4000-8000-000000000008\",\"reason\":\"synthetic label for 006-apteka-health\"}]}"
+        }
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "cost": 0
+    }
+  }
+}

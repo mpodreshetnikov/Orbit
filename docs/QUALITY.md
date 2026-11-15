@@ -25,6 +25,7 @@ Use the full command list in **AGENTS.md** and `just --list --unsorted`. For day
 - CI runs `test-e2e` when change impact includes web, DB, or Supabase Edge Functions surfaces.
 - **`quality`**: static checks only (format, lint, typecheck). No builds or tests.
 - **`test-extraction`**: scored extraction quality against the fixture corpus in `test/fixtures/extraction/`. See "Extraction quality" below. **Not a gate** — it is not part of `ci`, `ci-fast`, `check` or `coverage-check`, and it never runs on a pull request.
+- **`test-money-categorization`**: scored money LLM categorization against `test/fixtures/money-categorization/`. See "Money categorization quality" below. **Not a gate** — same ungated posture as `test-extraction`.
 - **`test-mutation`**: Stryker incremental mutation on Vitest-covered JS/TS changed vs the PR base. **Required** in the PR Quality Gates job; hard gate is `mutationScoreCovered === 100` (no survivors); `NoCoverage` is allowed (line-coverage floors own that). No-op exit 0 when nothing mutable changed. See `docs/design/common/mutation-testing.md`.
 
 ## Extraction quality
@@ -56,6 +57,23 @@ CI never runs this on pull requests, deliberately: a scored run costs money per 
 `Extraction Eval` workflow is `workflow_dispatch` only — trigger it by hand from the Actions tab
 when you want a report. It needs an `OPENROUTER_API_KEY` repository secret for `live` mode;
 `cassette` mode needs no secret.
+
+## Money categorization quality
+
+`test-money-categorization` measures how well the OpenRouter money categorizer maps merchant/line
+titles to Orbit categories. It is a report, not a pass/fail gate — the same shape as
+`test-extraction`.
+
+- **Default is replay.** Recorded provider responses live in
+  `test/fixtures/money-categorization/cassettes/`. Committed synthetic cassettes make a fresh clone
+  free/offline; `--live` / `--record` call OpenRouter (`OPENROUTER_API_KEY`) to measure or refresh
+  real answers.
+- **Corpus is synthetic.** Cases under `test/fixtures/money-categorization/cases/` use fixture
+  merchants and the pinned canonical category ids — never production payloads.
+- **Scores are never gated on** unless `--fail-under` is passed explicitly. A non-zero exit means a
+  case failed to _run_, not that quality dropped.
+- CI never runs this on pull requests. The `Money Categorization Eval` workflow is
+  `workflow_dispatch` only.
 
 `ci-fast` is never a substitute for final pre-push validation on non-doc changes; final validation must include coverage gates.
 
