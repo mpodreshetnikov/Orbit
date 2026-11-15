@@ -51,8 +51,7 @@ export default defineConfig({
           // MCP env for draft→confirm e2e (B3); unused by UI specs.
           MCP_SERVER_ENABLED: process.env.MCP_SERVER_ENABLED ?? "1",
           MCP_OAUTH_SIGNING_SECRET:
-            process.env.MCP_OAUTH_SIGNING_SECRET ??
-            "e2e-local-mcp-oauth-signing-secret-min-32b",
+            process.env.MCP_OAUTH_SIGNING_SECRET ?? "e2e-local-mcp-oauth-signing-secret-min-32b",
           SUPABASE_JWT_SECRET: process.env.SUPABASE_JWT_SECRET ?? process.env.JWT_SECRET ?? "",
         },
       },

@@ -1,12 +1,8 @@
 /// <reference types="vite/client" />
 import { describe, expect, it, vi } from "vitest";
-import { __test__ } from "./tbank-web.js";
-import {
-  createCassettePlayer,
-  matchKey,
-  type Cassette,
-} from "../../../test/helpers/tbank/cassette-replay";
-import syntheticCassetteModule from "../../../test/fixtures/tbank/cassettes/synthetic-month/cassette.json";
+import { __test__ } from "../../../browserExtension/src/connectors/tbank-web.js";
+import { createCassettePlayer, matchKey, type Cassette } from "./cassette-replay";
+import syntheticCassetteModule from "../../fixtures/tbank/cassettes/synthetic-month/cassette.json";
 
 /**
  * Guards the connector against a recorded (or synthetic) bank session without signing in.
