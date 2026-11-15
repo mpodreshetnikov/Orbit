@@ -27,13 +27,18 @@ export default defineConfig({
   webServer: {
     command: `npx next dev --hostname ${webHost} --port ${webPort}`,
     cwd: process.cwd(),
-    url: baseURL,
+    // Hit /login: with auto-login off it returns 200. Root (/) can 307 into
+    // DEV_AUTH_BYPASS_AUTO_LOGIN and hang Playwright's readiness poll.
+    url: `${baseURL}/login`,
     reuseExistingServer: false,
     timeout: 180_000,
     env: {
       ...process.env,
       DEV_AUTH_BYPASS_ENABLED: process.env.DEV_AUTH_BYPASS_ENABLED ?? "1",
       NEXT_PUBLIC_DEV_AUTH_BYPASS_ENABLED: process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS_ENABLED ?? "1",
+      // Keep manual-login e2e deterministic; auto-login is covered by its own skipped-unless-enabled spec.
+      DEV_AUTH_BYPASS_AUTO_LOGIN_ENABLED: "0",
+      NEXT_PUBLIC_DEV_AUTH_BYPASS_AUTO_LOGIN_ENABLED: "0",
     },
   },
 });
