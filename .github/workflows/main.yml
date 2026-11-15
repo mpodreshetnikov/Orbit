@@ -334,6 +334,20 @@ jobs:
       - name: End-to-end tests
         if: steps.impact.outputs.webImpact == 'true' || steps.impact.outputs.dbImpact == 'true' || steps.impact.outputs.functionsImpact == 'true'
         run: just test-e2e
+      # Failure media only (playwright.config: retain/screenshot on failure → test-results/).
+      # Placed immediately after e2e so later unit/mutation failures do not upload an empty blob.
+      - name: Upload Playwright failure artifacts
+        if: >-
+          failure() &&
+          (steps.impact.outputs.webImpact == 'true' ||
+           steps.impact.outputs.dbImpact == 'true' ||
+           steps.impact.outputs.functionsImpact == 'true')
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-e2e-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 14
       # Read from the images on disk, not from `docker ps`, and only once every step that pulls one
       # has run. `docker ps` after `supabase start` sees only the containers the stack leaves
       # running, so a one-off container -- postgres-meta, which `supabase gen types` starts inside

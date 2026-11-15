@@ -23,6 +23,11 @@ Use the full command list in **AGENTS.md** and `just --list --unsorted`. For day
 - **`ci`**: full local gate (adds `build-local-all`, unit coverage, `coverage-check`, `test-e2e`). Use before push or PR.
 - **`test-e2e`**: Playwright end-to-end validation lane for user-facing product flows (including extraction) against local Supabase. Extraction-related suites run in deterministic `HEALTH_STRUCTURE_PARSER_MODE=e2e_stub` mode (no external LLM calls). Runner enforces this mode by restarting local Supabase when needed.
 - CI runs `test-e2e` when change impact includes web, DB, or Supabase Edge Functions surfaces.
+- **Playwright failure artifacts (CI):** On a failed e2e step in Quality Gates, GitHub Actions uploads
+  `test-results/` (traces, screenshots, and videos retained on failure by `e2e/playwright.config.ts`)
+  as workflow artifact `playwright-e2e-failure-<run_id>-<run_attempt>` (14-day retention). Passing
+  runs skip the upload. Find it on the failed run’s Artifacts list — same place as Maestro
+  `recordings`.
 - **`quality`**: static checks only (format, lint, typecheck). No builds or tests.
 - **`test-extraction`**: scored extraction quality against the fixture corpus in `test/fixtures/extraction/`. See "Extraction quality" below. **Not a gate** — it is not part of `ci`, `ci-fast`, `check` or `coverage-check`, and it never runs on a pull request.
 - **`test-money-categorization`**: scored money LLM categorization against `test/fixtures/money-categorization/`. See "Money categorization quality" below. **Not a gate** — same ungated posture as `test-extraction`.

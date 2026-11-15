@@ -7,6 +7,8 @@ const webPort = parsedBaseUrl.port || "3000";
 
 export default defineConfig({
   testDir: ".",
+  // Repo-root path (config lives in e2e/); matches /.gitignore and the CI upload path.
+  outputDir: "../test-results",
   timeout: 90_000,
   // The suite runs against `next dev`, which is not stable under parallel browser workers here.
   workers: 1,
