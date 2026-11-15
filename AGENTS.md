@@ -49,6 +49,7 @@ Use these command IDs in plans, PRs, and handoffs:
 - `lint-ext`: `just quality-lint-extension`
 - `lint-scripts`: `just quality-lint-scripts`
 - `lint-supabase`: `just quality-lint-supabase-functions`
+- `lint-boundaries`: `just quality-lint-boundaries` (warn-only architecture boundary pilot: mobile allowlist + L3→L1; see `docs/design/common/architecture-boundary-lint.md`)
 - `test-smell-lint`: `just test-smell-lint` (assertion-smell scan on `*.test.*`; warn by default; set `ORBIT_TEST_SMELL_FAIL=1` to gate)
 - `functions-lock-check`: `just quality-check-supabase-functions-lock` (verify Supabase Edge Functions lockfile format compatibility)
 - `functions-lock-refresh`: `just supabase-functions-lock-refresh` (regenerate `supabase/functions/deno.lock` with runtime-compatible Deno)

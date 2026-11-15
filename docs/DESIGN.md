@@ -48,6 +48,7 @@ Cross-links:
 ### Common
 
 - Layering and boundaries: [`docs/design/common/layering-and-boundaries.md`](./design/common/layering-and-boundaries.md)
+- Architecture boundary lint (pilot): [`docs/design/common/architecture-boundary-lint.md`](./design/common/architecture-boundary-lint.md)
 - State and data fetching: [`docs/design/common/state-and-data-fetching.md`](./design/common/state-and-data-fetching.md)
 - Auth, RLS, and trust boundaries: [`docs/design/common/auth-rls-and-trust-boundaries.md`](./design/common/auth-rls-and-trust-boundaries.md)
 - Async jobs and notifications: [`docs/design/common/async-jobs-and-notifications.md`](./design/common/async-jobs-and-notifications.md)

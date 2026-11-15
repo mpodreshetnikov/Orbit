@@ -27,6 +27,7 @@ const LINT_RECIPES = [
   "quality-lint-extension",
   "quality-lint-scripts",
   "quality-lint-supabase-functions",
+  "quality-lint-boundaries",
   "test-smell-lint",
 ];
 
