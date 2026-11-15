@@ -134,7 +134,8 @@ function applyE2EDefaultEnv() {
     process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS_ENABLED = "1";
   }
   if (!process.env.E2E_BASE_URL) {
-    process.env.E2E_BASE_URL = "http://localhost:3100";
+    // Prefer IPv4 loopback: `localhost` can resolve to ::1 while Next binds IPv4.
+    process.env.E2E_BASE_URL = "http://127.0.0.1:3100";
   }
 }
 
@@ -223,6 +224,17 @@ function applyE2EEnv(vars) {
   }
   if (!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY && process.env.ANON_KEY) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = process.env.ANON_KEY;
+  }
+  // MCP tools mint per-call Supabase JWTs from the local stack's JWT secret.
+  if (!process.env.SUPABASE_JWT_SECRET && process.env.JWT_SECRET) {
+    process.env.SUPABASE_JWT_SECRET = process.env.JWT_SECRET;
+  }
+  // Draft→confirm e2e hits /api/mcp; leave off unless the suite opts in via env.
+  if (!process.env.MCP_SERVER_ENABLED) {
+    process.env.MCP_SERVER_ENABLED = "1";
+  }
+  if (!process.env.MCP_OAUTH_SIGNING_SECRET) {
+    process.env.MCP_OAUTH_SIGNING_SECRET = "e2e-local-mcp-oauth-signing-secret-min-32b";
   }
 }
 

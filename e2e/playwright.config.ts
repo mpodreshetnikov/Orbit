@@ -25,13 +25,20 @@ export default defineConfig({
   webServer: {
     command: `npx next dev --hostname ${webHost} --port ${webPort}`,
     cwd: process.cwd(),
-    url: baseURL,
+    // `/` (and `/login`) 307 into a DEV_AUTH_BYPASS loop; Playwright's readiness
+    // probe follows redirects until it times out. `/api/mcp` answers 401/404 without
+    // a browser session and is enough to know Next is accepting connections.
+    url: `${baseURL.replace(/\/$/, "")}/api/mcp`,
     reuseExistingServer: false,
     timeout: 180_000,
     env: {
       ...process.env,
       DEV_AUTH_BYPASS_ENABLED: process.env.DEV_AUTH_BYPASS_ENABLED ?? "1",
       NEXT_PUBLIC_DEV_AUTH_BYPASS_ENABLED: process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS_ENABLED ?? "1",
+      MCP_SERVER_ENABLED: process.env.MCP_SERVER_ENABLED ?? "1",
+      MCP_OAUTH_SIGNING_SECRET:
+        process.env.MCP_OAUTH_SIGNING_SECRET ?? "e2e-local-mcp-oauth-signing-secret-min-32b",
+      SUPABASE_JWT_SECRET: process.env.SUPABASE_JWT_SECRET ?? process.env.JWT_SECRET ?? "",
     },
   },
 });
