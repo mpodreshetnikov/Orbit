@@ -61,19 +61,25 @@ describe("participant allowlist (D9/D14)", () => {
     expect(EXTRA_REJECTED_AGENT_MAILBOXES).toContain("cursor@cursor.com");
   });
 
-  it("refuses a foreign human mailbox with Igor TODO guidance", () => {
+  it("accepts Igor claim email and refuses a foreign mailbox", () => {
+    expect(participantOwnerProblem("workupnow@yandex.ru")).toBeNull();
+    expect(findParticipantByEmail("workupnow@yandex.ru")?.login).toBe("Kot-kAkos");
     const msg = participantOwnerProblem("alice@example.com");
-    expect(msg).toContain("'owner' is 'alice@example.com' — not on the participant allowlist.");
-    expect(msg).toContain("Known claim emails: mpodreshetnikov@gmail.com.");
-    expect(msg).toContain("D14: Igor email unknown until onboarding");
+    expect(msg).toContain("'owner' is 'alice@example.com' — not on the participant allowlist");
+    expect(msg).toContain("mpodreshetnikov@gmail.com");
+    expect(msg).toContain("workupnow@yandex.ru");
   });
 
-  it("allows Maxim GitHub noreply for authorship only", () => {
+  it("allows Maxim and Igor GitHub noreply for authorship only", () => {
     expect(
       participantAuthorProblem("44291329+mpodreshetnikov@users.noreply.github.com"),
     ).toBeNull();
     expect(ALL_AUTHOR_EMAILS.has("44291329+mpodreshetnikov@users.noreply.github.com")).toBe(true);
     expect(participantOwnerProblem("44291329+mpodreshetnikov@users.noreply.github.com")).toContain(
+      "not on the participant allowlist",
+    );
+    expect(participantAuthorProblem("59914044+Kot-kAkos@users.noreply.github.com")).toBeNull();
+    expect(participantOwnerProblem("59914044+Kot-kAkos@users.noreply.github.com")).toContain(
       "not on the participant allowlist",
     );
   });
@@ -84,9 +90,12 @@ describe("participant allowlist (D9/D14)", () => {
       "'cursoragent@cursor.com' is an agent mailbox; commits must use a participant identity",
     );
     expect(participantAuthorProblem("x+cursoragent@example.com")).toMatch(/agent mailbox/);
-    expect(participantAuthorProblem("alice@example.com")).toBe(
-      "'alice@example.com' is not a participant author email. Allowlist: mpodreshetnikov@gmail.com, 44291329+mpodreshetnikov@users.noreply.github.com.",
+    const authorMsg = participantAuthorProblem("alice@example.com");
+    expect(authorMsg).toContain(
+      "'alice@example.com' is not a participant author email. Allowlist:",
     );
+    expect(authorMsg).toContain("mpodreshetnikov@gmail.com");
+    expect(authorMsg).toContain("workupnow@yandex.ru");
   });
 });
 
