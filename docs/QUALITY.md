@@ -132,11 +132,11 @@ list on merged PR #276.
 
 ### Required status checks (strict up-to-date)
 
-| Check context     | Where it comes from                                                                                          | In-repo workflow path                         |
-| ----------------- | ------------------------------------------------------------------------------------------------------------ | --------------------------------------------- |
-| `Quality Gates`   | GitHub Actions job `quality-gates` in the Deploy workflow                                                    | `.github/workflows/main.yml`                  |
-| `Secret Scan`     | GitHub Actions job `secrets-scan` in the Deploy workflow                                                     | `.github/workflows/main.yml`                  |
-| `CodeQL`          | GitHub code scanning default setup (not a checked-in workflow). Companion jobs `Analyze (javascript-typescript)` and `Analyze (actions)` also appear on PRs; the **required** context name is `CodeQL`. | _none under `.github/workflows/`_ |
+| Check context   | Where it comes from                                                                                                                                                                                     | In-repo workflow path             |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| `Quality Gates` | GitHub Actions job `quality-gates` in the Deploy workflow                                                                                                                                               | `.github/workflows/main.yml`      |
+| `Secret Scan`   | GitHub Actions job `secrets-scan` in the Deploy workflow                                                                                                                                                | `.github/workflows/main.yml`      |
+| `CodeQL`        | GitHub code scanning default setup (not a checked-in workflow). Companion jobs `Analyze (javascript-typescript)` and `Analyze (actions)` also appear on PRs; the **required** context name is `CodeQL`. | _none under `.github/workflows/`_ |
 
 `strict_required_status_checks_policy` is on: the branch must be up to date with `main` before
 merge. That is what makes a PR verdict bind after another merge lands (same rule the Migration Order
