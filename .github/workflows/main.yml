@@ -333,7 +333,9 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: End-to-end tests
         if: steps.impact.outputs.webImpact == 'true' || steps.impact.outputs.dbImpact == 'true' || steps.impact.outputs.functionsImpact == 'true'
-        run: just test-e2e
+        # TEMP B1 proof: run only the controlled-failure spec so CI uploads test-results/
+        # without waiting for the full suite. Restored to `just test-e2e` after proof.
+        run: npx playwright test --config=e2e/playwright.config.ts e2e/_b1-artifact-upload-proof.spec.ts
       # Failure media only (playwright.config: retain/screenshot on failure → test-results/).
       # Placed immediately after e2e so later unit/mutation failures do not upload an empty blob.
       - name: Upload Playwright failure artifacts
