@@ -48,8 +48,12 @@ setting() {
 source "$here/ssh-target.sh"
 host_raw="$(setting ORBIT_SERVER_HOST)"
 [[ -n "$host_raw" ]] || fail "Set the ORBIT_SERVER_HOST variable to your server's IP address (optional :port) or hostname."
-parse_err="$(orbit_parse_ssh_target "$host_raw" "$(setting ORBIT_SERVER_PORT)" 2>&1)" ||
-  fail "$parse_err"
+# Must run in this shell (not $(…)): orbit_parse_ssh_target sets ORBIT_SSH_HOST / ORBIT_SSH_PORT.
+parse_err_file="$work/ssh-target.err"
+install -m 600 /dev/null "$parse_err_file"
+if ! orbit_parse_ssh_target "$host_raw" "$(setting ORBIT_SERVER_PORT)" 2>"$parse_err_file"; then
+  fail "$(cat "$parse_err_file")"
+fi
 host="$ORBIT_SSH_HOST"
 ssh_port="$ORBIT_SSH_PORT"
 [[ -n "$(setting ORBIT_SSH_PRIVATE_KEY)" ]] ||

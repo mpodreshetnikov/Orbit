@@ -39,4 +39,10 @@ expect_err "host.example" "0" "ORBIT_SERVER_PORT"
 expect_err "[2001:db8::1]:22" "" "IPv6"
 expect_err "2001:db8::1" "" "IPv6|multi-colon"
 
+# deploy.sh must call the function in-process (not under $(…)); vars must stick.
+ORBIT_SSH_HOST="" ORBIT_SSH_PORT=""
+orbit_parse_ssh_target "example.test" ""
+[[ -n "${ORBIT_SSH_HOST-}" && -n "${ORBIT_SSH_PORT-}" ]] ||
+  fail "ORBIT_SSH_HOST/PORT unset after in-shell parse (deploy.sh must not use command substitution)"
+
 echo "ssh-target.selftest: ok"
