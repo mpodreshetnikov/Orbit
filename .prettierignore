@@ -15,3 +15,6 @@ supabase/db/schema.snapshot.sql
 # stay byte-exact: Prettier collapses the tab-delimited result tables to single spaces, which
 # destroys the column structure the extractor has to read value, unit and reference range from.
 test/fixtures/extraction/cases/**/input.md
+
+# Bank cassette recordings are fixture data, not source. Drop them in as recorded.
+test/fixtures/tbank/cassettes/**/cassette.json
