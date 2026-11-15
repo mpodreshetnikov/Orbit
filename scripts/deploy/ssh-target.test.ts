@@ -1,21 +1,16 @@
 import { execFileSync } from "node:child_process";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-const helper = path.resolve(__dirname, "../../deploy/ci/ssh-target.sh");
+const helper = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../deploy/ci/ssh-target.sh");
 
+/** Run parse via bash argv (`$1`/`$2`/`$3`) — never interpolate paths into `-c` text. */
 function parse(host: string, port = ""): { ok: boolean; out: string; err: string } {
-  const script = `
-set -euo pipefail
-source ${JSON.stringify(helper)}
-if orbit_parse_ssh_target ${JSON.stringify(host)} ${JSON.stringify(port)}; then
-  printf '%s %s\\n' "$ORBIT_SSH_HOST" "$ORBIT_SSH_PORT"
-else
-  exit 1
-fi
-`;
+  const script =
+    'set -euo pipefail; source "$1"; if orbit_parse_ssh_target "$2" "$3"; then printf "%s %s\\n" "$ORBIT_SSH_HOST" "$ORBIT_SSH_PORT"; else exit 1; fi';
   try {
-    const out = execFileSync("bash", ["-c", script], {
+    const out = execFileSync("bash", ["-c", script, "--", helper, host, port], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     });
