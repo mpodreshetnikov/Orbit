@@ -26,8 +26,7 @@ function post(body: unknown): RequestInit {
 }
 
 function liveFetchReturning(payload: unknown, status = 200): typeof fetch {
-  return (async () =>
-    new Response(JSON.stringify(payload), { status })) as unknown as typeof fetch;
+  return (async () => new Response(JSON.stringify(payload), { status })) as unknown as typeof fetch;
 }
 
 describe("cassetteKey", () => {
@@ -131,7 +130,9 @@ describe("createCassetteFetch", () => {
         post({ ...REQUEST, messages: [{ role: "user", content: "drifted" }] }),
       ),
     ).rejects.toThrow(/cassette miss/);
-    expect(miss.misses()).toEqual([`categorize:${cassetteKey({ ...REQUEST, messages: [{ role: "user", content: "drifted" }] })}`]);
+    expect(miss.misses()).toEqual([
+      `categorize:${cassetteKey({ ...REQUEST, messages: [{ role: "user", content: "drifted" }] })}`,
+    ]);
   });
 
   it("records a live response, strips reasoning, and prunes stale keys", async () => {

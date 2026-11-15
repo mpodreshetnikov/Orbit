@@ -68,11 +68,7 @@ describe("scoreCase", () => {
   });
 
   it("counts a system-key-only mismatch even when category_id matches", () => {
-    const score = scoreCase(
-      "x",
-      expected(),
-      prediction({ canonical_system_key: "shopping" }),
-    );
+    const score = scoreCase("x", expected(), prediction({ canonical_system_key: "shopping" }));
     expect(score.correct).toBe(true);
     expect(score.fieldMismatches).toEqual([
       {

@@ -98,7 +98,7 @@ export async function createCassetteFetch(options: {
     const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
     const key = cassetteKey(body);
 
-      if (mode === "replay") {
+    if (mode === "replay") {
       const hit = existing.get(key);
       if (!hit) {
         misses.push(`${stage}:${key}`);
