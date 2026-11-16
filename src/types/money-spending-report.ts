@@ -535,7 +535,7 @@ export function formatChange(
       return `×${Math.max(1, Math.round(Math.abs(value) / Math.abs(base)))}`;
     }
     if (value !== undefined && value > COMPARISON_BASE_EPSILON * 0.005) {
-      return options.newLabel ?? "новое";
+      return options?.newLabel ?? "новое";
     }
     return null;
   }
