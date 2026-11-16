@@ -208,7 +208,7 @@ function loadBaselineAtRef(ref, relativePath = BASELINE_REPO_REL) {
 
 /**
  * @param {string[]} [argv]
- * @param {NodeJS.ProcessEnv} [env]
+ * @param {Record<string, string | undefined>} [env]
  * @param {(ref: string) => boolean} [exists]
  * @returns {string | null}
  */

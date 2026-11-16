@@ -641,17 +641,23 @@ describe("test-smell-lint ratchet", () => {
   it("rejects missing or non-object head baseline counts", () => {
     expect(evaluateBaselineGrowth(null, { counts: {} })).toEqual(["missing head baseline"]);
     expect(evaluateBaselineGrowth({}, { counts: {} })).toEqual(["missing head baseline"]);
-    expect(evaluateBaselineGrowth({ counts: "bad" }, { counts: {} })).toEqual([
-      "missing head baseline",
-    ]);
-    expect(evaluateRatchet({}, { counts: "bad" })).toEqual([
+    expect(
+      evaluateBaselineGrowth(
+        { counts: "bad" as unknown as Record<string, number> },
+        { counts: {} },
+      ),
+    ).toEqual(["missing head baseline"]);
+    expect(evaluateRatchet({}, { counts: "bad" as unknown as Record<string, number> })).toEqual([
       "missing baseline; run test-smell-lint --update-baseline",
     ]);
   });
 
   it("treats non-object base baseline counts as first introduction", () => {
     expect(
-      evaluateBaselineGrowth({ counts: { "a::lone-presence": 1 } }, { counts: "bad" }),
+      evaluateBaselineGrowth(
+        { counts: { "a::lone-presence": 1 } },
+        { counts: "bad" as unknown as Record<string, number> },
+      ),
     ).toEqual([]);
   });
 
@@ -669,28 +675,29 @@ describe("test-smell-lint ratchet", () => {
   });
 
   it("resolveBaselineBaseRef prefers --base, then env, skipping zero SHA", () => {
-    expect(resolveBaselineBaseRef(["node", "x", "--base", "explicit"], {}, () => false)).toBe(
+    const neverExists = () => false;
+    expect(resolveBaselineBaseRef(["node", "x", "--base", "explicit"], {}, neverExists)).toBe(
       "explicit",
     );
-    expect(() => resolveBaselineBaseRef(["node", "x", "--base"], {}, () => false)).toThrow(
+    expect(() => resolveBaselineBaseRef(["node", "x", "--base"], {}, neverExists)).toThrow(
       /Missing value for argument --base/,
     );
     expect(() =>
-      resolveBaselineBaseRef(["node", "x", "--base", "--other"], {}, () => false),
+      resolveBaselineBaseRef(["node", "x", "--base", "--other"], {}, neverExists),
     ).toThrow(/Missing value for argument --base/);
     expect(
-      resolveBaselineBaseRef(["node", "x"], { SMELL_BASELINE_BASE: "from-smell" }, () => false),
+      resolveBaselineBaseRef(["node", "x"], { SMELL_BASELINE_BASE: "from-smell" }, neverExists),
     ).toBe("from-smell");
     expect(
       resolveBaselineBaseRef(
         ["node", "x"],
         { SMELL_BASELINE_BASE: ZERO_SHA, PR_SIZE_BASE: "from-pr-size" },
-        () => false,
+        neverExists,
       ),
     ).toBe("from-pr-size");
     expect(resolveBaselineBaseRef(["node", "x"], {}, (ref) => ref === "origin/main")).toBe(
       "origin/main",
     );
-    expect(resolveBaselineBaseRef(["node", "x"], {}, () => false)).toBeNull();
+    expect(resolveBaselineBaseRef(["node", "x"], {}, neverExists)).toBeNull();
   });
 });
