@@ -9,9 +9,9 @@ describe("formatAgentSourceNote", () => {
   });
 
   it("names the evidence record and its date when both are present", () => {
-    expect(
-      formatAgentSourceNote({ title: "УЗИ", record_date: "2026-03-06" }),
-    ).toBe("Добавлено агентом по записи «УЗИ» от 2026-03-06.");
+    expect(formatAgentSourceNote({ title: "УЗИ", record_date: "2026-03-06" })).toBe(
+      "Добавлено агентом по записи «УЗИ» от 2026-03-06.",
+    );
   });
 
   it("omits the date clause when the evidence has no record_date", () => {
