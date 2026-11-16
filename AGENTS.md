@@ -51,7 +51,7 @@ Use these command IDs in plans, PRs, and handoffs:
 - `lint-scripts`: `just quality-lint-scripts`
 - `lint-supabase`: `just quality-lint-supabase-functions`
 - `lint-boundaries`: `just quality-lint-boundaries` (architecture boundary lint, error severity: mobile allowlist + L3→L1; see `docs/design/common/architecture-boundary-lint.md`)
-- `test-smell-lint`: `just test-smell-lint` (assertion-smell scan on `*.test.*`; warn by default; set `ORBIT_TEST_SMELL_FAIL=1` to gate)
+- `test-smell-lint`: `just test-smell-lint` (assertion-smell scan on `*.test.*`; default enforces the committed file+rule ratchet in `scripts/just/test-smell-baseline.json` — fails on exceed, new-file findings, or stale baseline; `--update-baseline` rewrites it; `ORBIT_TEST_SMELL_FAIL=1` / `--fail` hard-fails on any finding)
 - `functions-lock-check`: `just quality-check-supabase-functions-lock` (verify Supabase Edge Functions lockfile format compatibility)
 - `functions-lock-refresh`: `just supabase-functions-lock-refresh` (regenerate `supabase/functions/deno.lock` with runtime-compatible Deno)
 - `types`: `just quality-typecheck`

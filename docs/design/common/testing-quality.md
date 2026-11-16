@@ -20,8 +20,13 @@ HTML asserts) are a standing failure mode.
 - Pure functions: table-driven examples plus optional `fast-check` properties with explicit ranges.
   Pilots: `src/lib/mcp/zoned-time.property.test.ts`, `src/lib/money/rule-filter-text.property.test.ts`.
 - Dual SQL/TS rules: `docs/design/common/sql-ts-parity.md`.
-- Smell scan: command ID `test-smell-lint` (warn by default; `ORBIT_TEST_SMELL_FAIL=1` to gate).
-  Suppress only with `// test-smell-ok: <reason>` on the expect line. Do not add new smells.
+- Smell scan: command ID `test-smell-lint`. Default mode is a **file+rule ratchet** against
+  `scripts/just/test-smell-baseline.json` (committed counts of findings per test file and rule
+  kind). CI fails when any pair exceeds the baseline, when a finding appears in a file that is not
+  in the baseline, or when the baseline is stale (findings dropped without shrinking the baseline
+  in the same change — run `--update-baseline`). `--fail` / `ORBIT_TEST_SMELL_FAIL=1` hard-fails
+  on any finding (end state after cleanup removes the baseline). Suppress only with
+  `// test-smell-ok: <reason>` on the expect line — prefer fixing the oracle; do not add new smells.
 
 ## Coverage floor
 

@@ -165,9 +165,23 @@ list on merged PR #276.
 merge. That is what makes a PR verdict bind after another merge lands (same rule the Migration Order
 Policy relies on). A merge queue is not available on this user-owned repository.
 
-`Quality Gates` is the umbrella that already runs format/lint/typecheck (`just quality`), impact-gated
-mobile checks, unit coverage + `coverage-check`, `test-mutation`, and impact-gated `test-e2e`. Do not
-treat those steps as separate ruleset contexts — they fail the single `Quality Gates` check.
+`Quality Gates` is the umbrella that already runs format/lint/typecheck (`just quality`, including
+blocking `test-smell-lint` via the file+rule ratchet — see
+[`docs/design/common/testing-quality.md`](./design/common/testing-quality.md)), impact-gated mobile
+checks, unit coverage + `coverage-check`, `test-mutation`, and impact-gated `test-e2e`. Do not treat
+those steps as separate ruleset contexts — they fail the single `Quality Gates` check.
+
+**Smell-lint ratchet (ORB-104 / T-261116-num):** `just test-smell-lint` (inside `quality` /
+`quality-lint-parallel`) enforces `scripts/just/test-smell-baseline.json`. Counts are per
+`file::rule`. A PR fails Quality Gates if any count rises, if a smell appears in a file absent from
+the baseline, or if counts fell without updating the baseline in the same PR. Shrinking findings
+requires `--update-baseline` in that PR. Full hard-fail (zero smells, no baseline) is the cleanup
+exit of `T-261116-iui` (deadline 2026-11-30).
+
+**Mobile recordings vs iOS required checks:** `Mobile recordings` stays an acceptance artifact
+workflow (screenshots/MP4 for UI review), not a required `main protection` check and not a Deploy
+dependency. Automatic iOS workflow triggers and making the iOS build required are deferred to the
+close of registry task `T-0024` (Apple enrolment); do not restore them earlier.
 
 Deleting `/opt/hostedtoolcache/CodeQL` inside the Quality Gates job is only disk reclaim on the
 runner; it is not how CodeQL analysis is invoked.
@@ -377,7 +391,7 @@ Pass criteria: all steps exit successfully; coverage thresholds and ratchets are
 #### Reference: per-step pass criteria
 
 - Format: zero drift. Lint: zero warnings/errors (web, extension, scripts, Supabase functions). Types: no TS/Deno diagnostics.
-- Unit tests: all runtime-split suites pass. Coverage: artifacts under `coverage/` and `.coverage/deno/`; `src/**` at `>=80%` lines/branches (Vitest); per-function aggregates at `>=75%` lines/branches; ratchet and DB object mapping enforced. High-signal oracles, smell lint, and mutation (`mutationScoreCovered` = 100% on covered lines): canonical in [`docs/design/common/testing-quality.md`](./design/common/testing-quality.md).
+- Unit tests: all runtime-split suites pass. Coverage: artifacts under `coverage/` and `.coverage/deno/`; `src/**` at `>=80%` lines/branches (Vitest); per-function aggregates at `>=75%` lines/branches; coverage ratchet and DB object mapping enforced. High-signal oracles, smell-lint file+rule ratchet (blocking), and mutation (`mutationScoreCovered` = 100% on covered lines): canonical in [`docs/design/common/testing-quality.md`](./design/common/testing-quality.md).
 - E2E product flows: Playwright suites pass against local Supabase. For extraction-related suites, `HEALTH_STRUCTURE_PARSER_MODE=e2e_stub` must be active, validating happy and failure paths without external LLM calls.
 - Smoke: production build and static generation succeed.
 
