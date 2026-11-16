@@ -36,11 +36,21 @@ function checkClaimedTaskWithWaive({ repoRoot = REPO_ROOT, env = process.env } =
   }
   const registry = locateRegistry(repoRoot, env);
   if (!registry) {
-    return checkClaimedTask({ repoRoot, env });
+    return {
+      ok: false,
+      code: "no-registry",
+      message:
+        "spec-approve: REFUSED. Claimed task present but registry not reachable " +
+        "(link docs/tasks or set ORBIT_TASKS_ROOT).",
+    };
   }
   const loaded = loadTaskFile(taskId, registry);
   if (!loaded) {
-    return checkClaimedTask({ repoRoot, env });
+    return {
+      ok: false,
+      code: "unknown-task",
+      message: `spec-approve: REFUSED. Task ${taskId} not found under ${registry}/docs/tasks.`,
+    };
   }
   const fm = parseFrontMatter(loaded.text);
   return evaluateCodeGateWithOwnerWaive(evaluateCodeGate, {

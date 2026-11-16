@@ -121,6 +121,45 @@ describe("checkClaimedTaskWithWaive", () => {
       fs.rmSync(registry, { recursive: true, force: true });
     }
   });
+
+  it("refuses when a claim exists but the registry is unreachable", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "spec-gate-noreg-"));
+    try {
+      fs.mkdirSync(path.join(root, ".git"), { recursive: true });
+      fs.writeFileSync(path.join(root, ".git", "current-task"), "T-missing-reg\n");
+      const result = checkClaimedTaskWithWaive({
+        repoRoot: root,
+        env: {
+          ...process.env,
+          ORBIT_TASKS_ROOT: "",
+          ORBIT_TASKS_REGISTRY: "",
+        },
+      });
+      expect(result.ok).toBe(false);
+      expect(result.code).toBe("no-registry");
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses when the claimed task file is missing from the registry", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "spec-gate-nofile-"));
+    const registry = fs.mkdtempSync(path.join(os.tmpdir(), "spec-gate-emptyreg-"));
+    try {
+      fs.mkdirSync(path.join(root, ".git"), { recursive: true });
+      fs.writeFileSync(path.join(root, ".git", "current-task"), "T-absent\n");
+      fs.mkdirSync(path.join(registry, "docs", "tasks"), { recursive: true });
+      const result = checkClaimedTaskWithWaive({
+        repoRoot: root,
+        env: { ...process.env, ORBIT_TASKS_ROOT: registry },
+      });
+      expect(result.ok).toBe(false);
+      expect(result.code).toBe("unknown-task");
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(registry, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("parseSpecApprovalsEnv", () => {
