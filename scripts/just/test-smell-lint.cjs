@@ -11,7 +11,10 @@
  * (`scripts/just/test-smell-baseline.json`): CI fails when any file+rule count
  * exceeds the baseline, when a finding appears in a file absent from the
  * baseline, or when the baseline is stale (counts dropped without shrinking it).
- * `--update-baseline` rewrites the baseline from the current scan.
+ * The baseline itself may only shrink vs the PR base / previous main commit
+ * (`SMELL_BASELINE_BASE` or `--base`): raising a file+rule count or adding a new
+ * file via `--update-baseline` fails the check.
+ * `--update-baseline` rewrites the baseline from the current scan (refuses growth).
  * `--fail` / `ORBIT_TEST_SMELL_FAIL=1` fails on any finding (hard mode; cleanup
  * end state after the baseline is removed). `--warn-only` restores advisory exit 0.
  *
@@ -27,9 +30,13 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
+const { spawnSync } = require("node:child_process");
 
 const ROOT = path.resolve(__dirname, "../..");
 const BASELINE_PATH = path.join(ROOT, "scripts", "just", "test-smell-baseline.json");
+const BASELINE_REPO_REL = "scripts/just/test-smell-baseline.json";
+const BASE_REF_CANDIDATES = ["origin/main", "main"];
+const ZERO_SHA = "0000000000000000000000000000000000000000";
 const SCAN_ROOTS = [
   path.join(ROOT, "src"),
   path.join(ROOT, "browserExtension", "src"),
@@ -117,6 +124,101 @@ function evaluateRatchet(currentCounts, baseline) {
   }
 
   return failures;
+}
+
+/**
+ * Compare committed head baseline to the baseline on the PR base / previous main
+ * commit. Ratchet only goes down: no file+rule count may grow, and no new file
+ * may appear. Missing base baseline (first introduction) is allowed.
+ *
+ * @param {{ counts?: Record<string, number> } | null | undefined} headBaseline
+ * @param {{ counts?: Record<string, number> } | null | undefined} baseBaseline
+ * @returns {string[]}
+ */
+function evaluateBaselineGrowth(headBaseline, baseBaseline) {
+  if (!headBaseline || !headBaseline.counts || typeof headBaseline.counts !== "object") {
+    return ["missing head baseline"];
+  }
+  if (!baseBaseline || !baseBaseline.counts || typeof baseBaseline.counts !== "object") {
+    return [];
+  }
+
+  const headCounts = headBaseline.counts;
+  const baseCounts = baseBaseline.counts;
+  const failures = [];
+  const baseFiles = filesFromCounts(baseCounts);
+  const reportedNewFiles = new Set();
+
+  for (const [key, headRaw] of Object.entries(headCounts)) {
+    const sep = key.indexOf("::");
+    const file = sep === -1 ? key : key.slice(0, sep);
+    const kind = sep === -1 ? "?" : key.slice(sep + 2);
+    const head = Number(headRaw);
+    if (!baseFiles.has(file)) {
+      if (!reportedNewFiles.has(file)) {
+        reportedNewFiles.add(file);
+        failures.push(`baseline grew: new file ${file}`);
+      }
+      continue;
+    }
+    const base = Number(baseCounts[key] || 0);
+    if (head > base) {
+      failures.push(`baseline grew: ${file} ${kind}: ${head} > ${base}`);
+    }
+  }
+
+  return failures;
+}
+
+function runGit(args) {
+  return spawnSync("git", args, { cwd: ROOT, encoding: "utf8" });
+}
+
+function refExists(ref) {
+  return runGit(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]).status === 0;
+}
+
+/**
+ * @param {string[]} [argv]
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {string | null}
+ */
+function resolveBaselineBaseRef(argv = process.argv, env = process.env) {
+  const idx = argv.indexOf("--base");
+  if (idx !== -1) {
+    const value = argv[idx + 1];
+    if (!value || value.startsWith("--")) {
+      throw new Error("Missing value for argument --base");
+    }
+    return value;
+  }
+  for (const key of ["SMELL_BASELINE_BASE", "PR_SIZE_BASE"]) {
+    const value = env[key];
+    if (value && value !== ZERO_SHA) {
+      return value;
+    }
+  }
+  return BASE_REF_CANDIDATES.find((candidate) => refExists(candidate)) ?? null;
+}
+
+/**
+ * @param {string} ref
+ * @param {string} [relativePath]
+ * @returns {{ counts?: Record<string, number>, total?: number, generated_at?: string } | null}
+ */
+function loadBaselineAtRef(ref, relativePath = BASELINE_REPO_REL) {
+  if (!ref || !refExists(ref)) {
+    return null;
+  }
+  const result = runGit(["show", `${ref}:${relativePath}`]);
+  if (result.status !== 0) {
+    return null;
+  }
+  try {
+    return JSON.parse(result.stdout);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -496,8 +598,11 @@ function analyzeFile(file, source) {
  *   warnOnly?: boolean,
  *   enforceRatchet?: boolean,
  *   updateBaseline?: boolean,
+ *   checkBaselineGrowth?: boolean,
  *   roots?: string[],
  *   baselinePath?: string,
+ *   baselineBaseRef?: string | null,
+ *   baseBaseline?: { counts?: Record<string, number> } | null,
  *   silent?: boolean,
  * }} [opts]
  */
@@ -512,6 +617,9 @@ function run(opts = {}) {
   const enforceRatchet =
     opts.enforceRatchet === true ||
     (!warnOnly && !hardFail && !updateBaseline && opts.enforceRatchet !== false);
+  const checkBaselineGrowth =
+    opts.checkBaselineGrowth === true ||
+    (!warnOnly && opts.checkBaselineGrowth !== false && (enforceRatchet || updateBaseline));
   const roots = opts.roots ?? SCAN_ROOTS;
   const silent = opts.silent === true;
 
@@ -526,7 +634,42 @@ function run(opts = {}) {
 
   const counts = countByFileRule(findings);
 
+  /** @type {string[]} */
+  let growthFailures = [];
+  if (checkBaselineGrowth) {
+    const baseRef =
+      opts.baselineBaseRef !== undefined ? opts.baselineBaseRef : resolveBaselineBaseRef(argv);
+    const baseBaseline =
+      opts.baseBaseline !== undefined
+        ? opts.baseBaseline
+        : baseRef
+          ? loadBaselineAtRef(baseRef)
+          : null;
+    if (updateBaseline) {
+      growthFailures = evaluateBaselineGrowth({ counts }, baseBaseline);
+    } else {
+      growthFailures = evaluateBaselineGrowth(loadBaseline(baselinePath), baseBaseline);
+    }
+  }
+
   if (updateBaseline) {
+    if (growthFailures.length > 0) {
+      if (!silent) {
+        for (const failure of growthFailures) {
+          process.stderr.write(`[test-smell-baseline] ${failure}\n`);
+        }
+        process.stdout.write(
+          "test-smell-lint: refusing --update-baseline — baseline may only shrink vs base\n",
+        );
+      }
+      return {
+        findings,
+        counts,
+        exitCode: 1,
+        ratchetFailures: [],
+        growthFailures,
+      };
+    }
     const baseline = writeBaseline(counts, baselinePath);
     if (!silent) {
       process.stdout.write(
@@ -535,7 +678,7 @@ function run(opts = {}) {
           .replace(/\\/g, "/")}\n`,
       );
     }
-    return { findings, counts, exitCode: 0, ratchetFailures: [] };
+    return { findings, counts, exitCode: 0, ratchetFailures: [], growthFailures: [] };
   }
 
   // Stryker disable all: summary/ truncation stdout formatting; exitCode + findings are asserted
@@ -563,6 +706,9 @@ function run(opts = {}) {
   if (hardFail && findings.length > 0) {
     exitCode = 1;
     modeNote = " — failing (hard: any finding)";
+  } else if (growthFailures.length > 0) {
+    exitCode = 1;
+    modeNote = " — failing (baseline grew vs base)";
   } else if (enforceRatchet && ratchetFailures.length > 0) {
     exitCode = 1;
     modeNote = " — failing (ratchet)";
@@ -586,13 +732,16 @@ function run(opts = {}) {
         );
       }
     }
+    for (const failure of growthFailures) {
+      process.stderr.write(`[test-smell-baseline] ${failure}\n`);
+    }
     for (const failure of ratchetFailures) {
       process.stderr.write(`[test-smell-ratchet] ${failure}\n`);
     }
     process.stdout.write(`${summary}${modeNote}\n`);
   }
   // Stryker restore all
-  return { findings, counts, exitCode, ratchetFailures };
+  return { findings, counts, exitCode, ratchetFailures, growthFailures };
 }
 
 if (require.main === module) {
@@ -605,11 +754,15 @@ module.exports = {
   analyzeFile,
   countByFileRule,
   evaluateRatchet,
+  evaluateBaselineGrowth,
+  resolveBaselineBaseRef,
+  loadBaselineAtRef,
   writeBaseline,
   loadBaseline,
   fileRuleKey,
   filesFromCounts,
   BASELINE_PATH,
+  BASELINE_REPO_REL,
   WEAK_PRESENCE,
   MOCK_CALL_MATCHERS,
   inNonCode,

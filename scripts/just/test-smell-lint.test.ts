@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
@@ -6,6 +6,7 @@ import {
   analyzeFile,
   caseBodyRange,
   countByFileRule,
+  evaluateBaselineGrowth,
   evaluateRatchet,
   inNonCode,
   lastTopLevelArg,
@@ -458,6 +459,72 @@ describe("test-smell-lint ratchet", () => {
     });
     expect(result.exitCode).toBe(1);
     expect(result.ratchetFailures.some((f) => f.includes("new file with findings"))).toBe(true);
+  });
+
+  it("fails when the committed baseline grows a file+rule count vs base", () => {
+    const failures = evaluateBaselineGrowth(
+      { counts: { "src/a.test.ts::mock-call-only": 3 } },
+      { counts: { "src/a.test.ts::mock-call-only": 2 } },
+    );
+    expect(failures.some((f) => f.includes("baseline grew") && f.includes("3 > 2"))).toBe(true);
+  });
+
+  it("fails when the committed baseline adds a new file vs base", () => {
+    const failures = evaluateBaselineGrowth(
+      {
+        counts: {
+          "src/legacy.test.ts::lone-presence": 1,
+          "src/new.test.ts::lone-presence": 1,
+        },
+      },
+      { counts: { "src/legacy.test.ts::lone-presence": 1 } },
+    );
+    expect(failures.includes("baseline grew: new file src/new.test.ts")).toBe(true);
+    expect(failures.length).toBe(1);
+  });
+
+  it("allows shrinking the baseline and first introduction (no base baseline)", () => {
+    expect(
+      evaluateBaselineGrowth(
+        { counts: { "src/a.test.ts::lone-presence": 1 } },
+        { counts: { "src/a.test.ts::lone-presence": 2 } },
+      ),
+    ).toEqual([]);
+    expect(evaluateBaselineGrowth({ counts: { "src/a.test.ts::lone-presence": 5 } }, null)).toEqual(
+      [],
+    );
+  });
+
+  it("refuses --update-baseline that raises a file+rule count vs base", () => {
+    const dir = mkdtempSync(join(tmpdir(), "smell-raise-"));
+    temps.push(dir);
+    writeFileSync(
+      join(dir, "a.test.ts"),
+      [
+        'import { it, expect } from "vitest";',
+        'it("a", () => { expect(1).toBeTruthy(); });',
+        'it("b", () => { expect(2).toBeTruthy(); });',
+        "",
+      ].join("\n"),
+    );
+    const baselinePath = join(dir, "baseline.json");
+    const probed = run({ roots: [dir], fail: false, silent: true });
+    const key = Object.keys(probed.counts)[0];
+    expect(key).toMatch(/::lone-presence$/);
+    expect(probed.counts[key]).toBe(2);
+    const result = run({
+      roots: [dir],
+      updateBaseline: true,
+      baselinePath,
+      checkBaselineGrowth: true,
+      baseBaseline: { counts: { [key]: 1 } },
+      silent: true,
+    });
+    expect(result.exitCode).toBe(1);
+    expect(
+      result.growthFailures.some((f) => f.includes("baseline grew") && f.includes("2 > 1")),
+    ).toBe(true);
+    expect(existsSync(baselinePath)).toBe(false);
   });
 
   it("dry probe: exceed and stale also fail run()", () => {

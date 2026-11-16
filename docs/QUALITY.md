@@ -175,8 +175,10 @@ those steps as separate ruleset contexts — they fail the single `Quality Gates
 `quality-lint-parallel`) enforces `scripts/just/test-smell-baseline.json`. Counts are per
 `file::rule`. A PR fails Quality Gates if any count rises, if a smell appears in a file absent from
 the baseline, or if counts fell without updating the baseline in the same PR. Shrinking findings
-requires `--update-baseline` in that PR. Full hard-fail (zero smells, no baseline) is the cleanup
-exit of `T-261116-iui` (deadline 2026-11-30).
+requires `--update-baseline` in that PR. The baseline file itself is compared to the PR base tip
+(`SMELL_BASELINE_BASE=HEAD^1` on PRs; previous commit on `main` pushes): **no file+rule count may
+grow and no new file may appear** — `--update-baseline` cannot silently raise the bar. Full
+hard-fail (zero smells, no baseline) is the cleanup exit of `T-261116-iui` (deadline 2026-11-30).
 
 **Mobile recordings vs iOS required checks:** `Mobile recordings` stays an acceptance artifact
 workflow (screenshots/MP4 for UI review), not a required `main protection` check and not a Deploy

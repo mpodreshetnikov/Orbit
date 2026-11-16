@@ -24,9 +24,12 @@ HTML asserts) are a standing failure mode.
   `scripts/just/test-smell-baseline.json` (committed counts of findings per test file and rule
   kind). CI fails when any pair exceeds the baseline, when a finding appears in a file that is not
   in the baseline, or when the baseline is stale (findings dropped without shrinking the baseline
-  in the same change — run `--update-baseline`). `--fail` / `ORBIT_TEST_SMELL_FAIL=1` hard-fails
-  on any finding (end state after cleanup removes the baseline). Suppress only with
-  `// test-smell-ok: <reason>` on the expect line — prefer fixing the oracle; do not add new smells.
+  in the same change — run `--update-baseline`). The baseline itself **may only shrink** versus the
+  PR base / previous `main` commit (`SMELL_BASELINE_BASE` / `--base`): raising a file+rule count or
+  adding a new file via `--update-baseline` fails Quality Gates. `--fail` /
+  `ORBIT_TEST_SMELL_FAIL=1` hard-fails on any finding (end state after cleanup removes the
+  baseline). Suppress only with `// test-smell-ok: <reason>` on the expect line — prefer fixing the
+  oracle; do not add new smells.
 
 ## Coverage floor
 
