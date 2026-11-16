@@ -10,7 +10,6 @@ import {
   type SpendingForecast as SpendingForecastBase,
   type SpendingMerchant as SpendingMerchantBase,
   type SpendingReport as SpendingReportBase,
-  type SpendingReportMode,
 } from "./money-spending-report";
 
 export type SpendingMerchant = SpendingMerchantBase & {
@@ -58,7 +57,7 @@ function rows(value: unknown): Row[] {
 }
 
 function forecastRow(value: unknown): Row | null {
-  // Stryker disable next-line all: null/non-object/array guards overlap; any one yields null
+  // Stryker disable next-line ConditionalExpression,LogicalOperator,EqualityOperator,BooleanLiteral: overlapping null/non-object/array guards
   if (value == null || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Row;
 }
@@ -105,47 +104,4 @@ export function normalizeSpendingReport(value: unknown): SpendingReport {
       };
     }),
   };
-}
-
-/** Round chart axis ticks: nice steps (1/2/5 × 10ⁿ) covering `max` with about `target` ticks. */
-export function niceAxisTicks(max: number, target = 4): number[] {
-  if (!Number.isFinite(max) || max <= 0) return [0];
-  const safeTarget = Math.max(1, target);
-  const raw = max / safeTarget;
-  const power = 10 ** Math.floor(Math.log10(raw));
-  const normalized = raw / power;
-  let step: number;
-  if (normalized <= 1) step = power;
-  else if (normalized <= 2) step = 2 * power;
-  else if (normalized <= 5) step = 5 * power;
-  else step = 10 * power;
-  const top = Math.ceil(max / step) * step;
-  const tickCount = Math.round(top / step);
-  const ticks: number[] = [];
-  for (let i = 0; i <= tickCount; i += 1) {
-    ticks.push(Math.round(i * step * 1e6) / 1e6);
-  }
-  return ticks;
-}
-
-/** Ledger query for the report's period/accounts/category/merchant filters. */
-export function transactionsFeedQuery(input: {
-  start: string;
-  end: string;
-  accountIds?: string[];
-  categoryId?: string | null;
-  merchantName?: string | null;
-  mode?: SpendingReportMode;
-}): string {
-  const params = new URLSearchParams();
-  params.set("preset", "custom");
-  params.set("from", `${input.start}T00:00:00.000Z`);
-  params.set("to", `${input.end}T23:59:59.999Z`);
-  if (input.accountIds && input.accountIds.length > 0) {
-    params.set("accounts", input.accountIds.join(","));
-  }
-  if (input.categoryId) params.set("categories", input.categoryId);
-  if (input.merchantName) params.set("q", input.merchantName);
-  if (input.mode === "expense" || input.mode === "income") params.set("sign", input.mode);
-  return params.toString();
 }

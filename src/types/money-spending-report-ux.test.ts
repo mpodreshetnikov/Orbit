@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  niceAxisTicks,
-  normalizeSpendingReport,
-  transactionsFeedQuery,
-} from "./money-spending-report-ux";
+import { normalizeSpendingReport } from "@/types/money-spending-report-ux";
 
 describe("normalizeSpendingReport", () => {
   it("layers UX fields onto the shared report payload", () => {
@@ -46,6 +42,9 @@ describe("normalizeSpendingReport", () => {
       fx_status: { status: "ok", missing_conversions: [] },
     });
 
+    expect(report.period.start).toBe("2026-03-01");
+    expect(report.period.end).toBe("2026-03-31");
+    expect(report.period.days).toBe(31);
     expect(report.period.compare_days).toBe(16);
     expect(report.period.previous_compare_end).toBe("2026-02-13");
     expect(report.forecast).toEqual({
@@ -54,8 +53,11 @@ describe("normalizeSpendingReport", () => {
       net: 1450,
       days_left: 11,
     });
+    expect(report.merchants).toHaveLength(1);
     expect(report.merchants[0]).toMatchObject({
+      brand_id: null,
       name: "Cafe X",
+      expense: 300,
       previous_expense: 120,
       transaction_count: 1,
     });
@@ -90,6 +92,7 @@ describe("normalizeSpendingReport", () => {
       net: -2550,
       days_left: 11,
     });
+    expect(report.merchants[0]?.name).toBe("Cafe X");
     expect(report.merchants[0]?.previous_expense).toBe(0);
   });
 
@@ -181,74 +184,34 @@ describe("normalizeSpendingReport", () => {
       fx_status: { status: "ok" },
     });
     expect(report.period.compare_days).toBe(31);
-  });
-});
-
-describe("niceAxisTicks", () => {
-  it("returns [0] for non-positive or non-finite maxima", () => {
-    expect(niceAxisTicks(0)).toEqual([0]);
-    expect(niceAxisTicks(-5)).toEqual([0]);
-    expect(niceAxisTicks(Number.NaN)).toEqual([0]);
+    expect(report.period.previous_end).toBe("2026-02-28");
+    expect(report.period.previous_compare_end).toBe("2026-02-28");
   });
 
-  it("builds round Y-axis ticks covering the max across 1/2/5×10ⁿ bands", () => {
-    expect(niceAxisTicks(8, 4)).toEqual([0, 2, 4, 6, 8]);
-    expect(niceAxisTicks(40, 4)).toEqual([0, 10, 20, 30, 40]);
-    expect(niceAxisTicks(50, 4)).toEqual([0, 20, 40, 60]);
-    expect(niceAxisTicks(87)).toEqual([0, 50, 100]);
-    expect(niceAxisTicks(100, 4)).toEqual([0, 50, 100]);
-    // normalized === 5 must use 5×10ⁿ (kills < vs <= on the ≤5 band).
-    expect(niceAxisTicks(200, 4)).toEqual([0, 50, 100, 150, 200]);
-    expect(niceAxisTicks(120, 5)).toEqual([0, 50, 100, 150]);
-    expect(niceAxisTicks(250, 4)).toEqual([0, 100, 200, 300]);
-    expect(niceAxisTicks(1000)[niceAxisTicks(1000).length - 1]).toBeGreaterThanOrEqual(1000);
-    expect(niceAxisTicks(3)[niceAxisTicks(3).length - 1]).toBeGreaterThanOrEqual(3);
-    expect(niceAxisTicks(15)[niceAxisTicks(15).length - 1]).toBeGreaterThanOrEqual(15);
-  });
-});
-
-describe("transactionsFeedQuery", () => {
-  it("builds a shareable transactions feed query from report filters", () => {
-    expect(
-      transactionsFeedQuery({
-        start: "2026-11-01",
-        end: "2026-11-16",
-        accountIds: ["acc-1"],
-        categoryId: "cat-food",
-        merchantName: "Pyaterochka",
-        mode: "expense",
-      }),
-    ).toBe(
-      "preset=custom&from=2026-11-01T00%3A00%3A00.000Z&to=2026-11-16T23%3A59%3A59.999Z&accounts=acc-1&categories=cat-food&q=Pyaterochka&sign=expense",
-    );
-  });
-
-  it("omits optional filters, empty accounts, and non expense/income modes", () => {
-    expect(
-      transactionsFeedQuery({
-        start: "2026-11-01",
-        end: "2026-11-02",
-        accountIds: [],
-        mode: "income",
-      }),
-    ).toBe(
-      "preset=custom&from=2026-11-01T00%3A00%3A00.000Z&to=2026-11-02T23%3A59%3A59.999Z&sign=income",
-    );
-    expect(
-      transactionsFeedQuery({
-        start: "2026-11-01",
-        end: "2026-11-02",
-      }),
-    ).toBe("preset=custom&from=2026-11-01T00%3A00%3A00.000Z&to=2026-11-02T23%3A59%3A59.999Z");
-    expect(
-      transactionsFeedQuery({
-        start: "2026-01-01",
-        end: "2026-01-02",
-        accountIds: [],
-        categoryId: null,
-        merchantName: null,
-        mode: "net" as never,
-      }),
-    ).toBe("preset=custom&from=2026-01-01T00%3A00%3A00.000Z&to=2026-01-02T23%3A59%3A59.999Z");
+  it("keeps a negative compare_days from collapsing to the raw value via >= 0", () => {
+    const report = normalizeSpendingReport({
+      period: {
+        start: "2026-03-01",
+        end: "2026-03-31",
+        days: 31,
+        compare_days: -4,
+        previous_start: "2026-01-29",
+        previous_end: "2026-02-28",
+        last_year: 2025,
+      },
+      currency: "RUB",
+      totals: {},
+      forecast: null,
+      categories: [],
+      days: [],
+      merchants: [
+        { name: "A", expense: 1, previous_expense: 9, transaction_count: 1 },
+        { name: "B", expense: 2, previous_expense: 8, transaction_count: 1 },
+      ],
+      fx_status: { status: "ok" },
+    });
+    expect(report.period.compare_days).toBe(31);
+    expect(report.merchants.map((m) => m.previous_expense)).toEqual([9, 8]);
+    expect(report.merchants.map((m) => m.name)).toEqual(["A", "B"]);
   });
 });

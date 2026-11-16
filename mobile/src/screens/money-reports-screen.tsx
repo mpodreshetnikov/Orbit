@@ -1,4 +1,6 @@
+import { niceAxisTicks } from "@orbit-types/money-report-axis-ticks";
 import { formatChange, percentChange } from "@orbit-types/money-report-change";
+import { transactionsFeedQuery } from "@orbit-types/money-report-feed-query";
 import {
   amountOf,
   changeTone,
@@ -18,12 +20,7 @@ import {
   type SpendingPeriodKind,
   type SpendingReportMode,
 } from "@orbit-types/money-spending-report";
-import {
-  niceAxisTicks,
-  transactionsFeedQuery,
-  type SpendingMerchant,
-  type SpendingReport,
-} from "@orbit-types/money-spending-report-ux";
+import type { SpendingMerchant, SpendingReport } from "@orbit-types/money-spending-report-ux";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { Stack, useRouter, type Href } from "expo-router";
 import { ChevronDown, ChevronLeft, ChevronRight, Filter, X } from "lucide-react-native";

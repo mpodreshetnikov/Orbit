@@ -9,7 +9,9 @@ import { useMoneySpendingReport } from "@/hooks/use-money-spending-report";
 import { useIntlLocale } from "@/lib/date-locale";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/stores/ui-store";
+import { niceAxisTicks } from "@/types/money-report-axis-ticks";
 import { formatChange, percentChange } from "@/types/money-report-change";
+import { transactionsFeedQuery } from "@/types/money-report-feed-query";
 import {
   amountOf,
   changeTone,
@@ -30,12 +32,7 @@ import {
   type SpendingPeriodKind,
   type SpendingReportMode,
 } from "@/types/money-spending-report";
-import {
-  niceAxisTicks,
-  transactionsFeedQuery,
-  type SpendingMerchant,
-  type SpendingReport,
-} from "@/types/money-spending-report-ux";
+import type { SpendingMerchant, SpendingReport } from "@/types/money-spending-report-ux";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
