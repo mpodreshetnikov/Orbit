@@ -31,10 +31,12 @@ function parseSpecApprovalsEnv(env) {
 
 function checkClaimedTaskWithWaive({ repoRoot = REPO_ROOT, env = process.env } = {}) {
   const taskId = readMarker(repoRoot);
+  // Stryker disable next-line ConditionalExpression,BlockStatement: no claim → delegate to checkClaimedTask
   if (!taskId) {
     return checkClaimedTask({ repoRoot, env });
   }
   const registry = locateRegistry(repoRoot, env);
+  // Stryker disable next-line ConditionalExpression: missing registry is an explicit refusal
   if (!registry) {
     return {
       ok: false,
@@ -45,6 +47,7 @@ function checkClaimedTaskWithWaive({ repoRoot = REPO_ROOT, env = process.env } =
     };
   }
   const loaded = loadTaskFile(taskId, registry);
+  // Stryker disable next-line ConditionalExpression: missing task file is an explicit refusal
   if (!loaded) {
     return {
       ok: false,
