@@ -340,10 +340,25 @@ describe("reviewCheckupProposals", () => {
         schedule: { type: "interval", every: 1, unit: "year", anchor_date: "2026-03-06" },
         why_text: "Узел 4 мм, контроль через год",
         why_links: [{ type: "condition", id: "cond-1", label: "Узел" }],
-        notes: "Добавлено из Claude по записи «УЗИ» от 2026-03-06.",
+        notes: "Добавлено агентом по записи «УЗИ» от 2026-03-06.",
       },
     ]);
     expect(added).toEqual([{ id: "k-1", title: ultrasound.title, next_due_at: "2027-03-06" }]);
+  });
+
+  it("uses a neutral agent note without evidence", async () => {
+    const stub = createSupabaseStub({
+      checkup_items: [
+        { data: [{ id: "k-2", title: ultrasound.title, next_due_at: "2027-03-06" }] },
+      ],
+    });
+    await addProposedCheckups(stub.client, "p-1", {
+      accepted: [{ input: ultrasound, first_due_at: "2027-03-06", condition_name: null }],
+      refused: [],
+      evidence: null,
+    });
+    const inserted = stub.argsFor("checkup_items", "insert")[0][0] as Array<{ notes: string }>;
+    expect(inserted[0]?.notes).toBe("Добавлено агентом.");
   });
 });
 
