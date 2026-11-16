@@ -160,6 +160,25 @@ describe("the money tab", () => {
     expect(calls.rpc.at(-1)?.args).toMatchObject({ p_amount_sign: "income", p_search: null });
   });
 
+  it("hydrates report deep-link filters from the money route query", async () => {
+    await renderScreens(
+      routes,
+      "/money?q=Пятёрочка&sign=expense&from=2026-11-01T00:00:00.000Z&to=2026-11-16T23:59:59.999Z&accounts=acc-1&categories=cat-1",
+    );
+    await waitFor(() =>
+      expect(
+        calls.rpc.find((call) => call.name === "money_list_transactions_feed")?.args,
+      ).toMatchObject({
+        p_search: "Пятёрочка",
+        p_amount_sign: "expense",
+        p_from: "2026-11-01T00:00:00.000Z",
+        p_to: "2026-11-16T23:59:59.999Z",
+        p_account_ids: ["acc-1"],
+        p_category_ids: ["cat-1"],
+      }),
+    );
+  });
+
   it("loads the next page as the list nears its end", async () => {
     feed = Array.from({ length: 55 }, (_, index) => transaction(`p${index}`, 21, -index - 1));
     await renderScreens(routes, "/money");
