@@ -292,15 +292,17 @@ describe("useMoneySpendingReport (UX filters)", () => {
     const invoke = vi.fn(async () => ({ data: { ok: true }, error: null }));
     type RpcResult = { data: unknown; error: null };
     const second = Promise.withResolvers<RpcResult>();
-    const rpc = vi.fn().mockImplementation(async (_fn: string, args: { p_category_id: string | null }) => {
-      if (args.p_category_id === "food") {
-        return {
-          data: { currency: "RUB", totals: { expense: 1 }, forecast: null },
-          error: null,
-        } satisfies RpcResult;
-      }
-      return await second.promise;
-    });
+    const rpc = vi
+      .fn()
+      .mockImplementation(async (_fn: string, args: { p_category_id: string | null }) => {
+        if (args.p_category_id === "food") {
+          return {
+            data: { currency: "RUB", totals: { expense: 1 }, forecast: null },
+            error: null,
+          } satisfies RpcResult;
+        }
+        return await second.promise;
+      });
     createClientMock.mockReturnValue({ functions: { invoke }, rpc });
     let categoryId: string | null = "food";
     const { result, rerender } = renderHookWithQueryClient(() =>

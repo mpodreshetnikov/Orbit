@@ -8,10 +8,7 @@ import {
 } from "@/hooks/money-spending-report-rpc";
 import { spendingReportFxSyncRange } from "@/hooks/money-spending-report-sync";
 import { isoDay, type SpendingPeriod } from "@/types/money-spending-report";
-import {
-  normalizeSpendingReport,
-  type SpendingReport,
-} from "@/types/money-spending-report-ux";
+import { normalizeSpendingReport, type SpendingReport } from "@/types/money-spending-report-ux";
 
 type SupabaseMoneyReportClient = ReturnType<typeof createClient> & {
   rpc: (
