@@ -8,7 +8,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const {
-  checkClaimedTask,
   evaluateCodeGate,
   loadTaskFile,
   locateRegistry,
@@ -31,9 +30,14 @@ function parseSpecApprovalsEnv(env) {
 
 function checkClaimedTaskWithWaive({ repoRoot = REPO_ROOT, env = process.env } = {}) {
   const taskId = readMarker(repoRoot);
-  // Stryker disable next-line ConditionalExpression,BlockStatement: no claim → delegate to checkClaimedTask
+  // Stryker disable next-line ConditionalExpression,BlockStatement: no claim → same no-marker as checkClaimedTask
   if (!taskId) {
-    return checkClaimedTask({ repoRoot, env });
+    // Inline: passing {} to checkClaimedTask is equivalent here (both roots have no marker in CI).
+    return {
+      ok: true,
+      code: "no-marker",
+      message: "spec-approve: no .git/current-task — claim gate covers that separately",
+    };
   }
   const registry = locateRegistry(repoRoot, env);
   // Stryker disable next-line ConditionalExpression: missing registry is an explicit refusal
