@@ -16,6 +16,10 @@ describe("parseOwnerSpecWaive", () => {
     expect(parseOwnerSpecWaive("spec waived by @MPODRESHETNIKOV", maxim)).toEqual({
       login: "mpodreshetnikov",
     });
+    // \s+ must accept multiple spaces between tokens (kills \s mutants).
+    expect(parseOwnerSpecWaive("Spec  waived   by   mpodreshetnikov", maxim)).toEqual({
+      login: "mpodreshetnikov",
+    });
   });
 
   it("ignores waives by the other participant and unknown owners", () => {

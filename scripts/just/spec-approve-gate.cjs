@@ -20,37 +20,47 @@ const { applyOwnerSpecWaive, evaluateCodeGateWithOwnerWaive } = require("./spec-
 
 const REPO_ROOT = path.resolve(__dirname, "../..");
 
+function parseSpecApprovalsEnv(env) {
+  if (!env.SPEC_APPROVALS) return [];
+  return String(env.SPEC_APPROVALS)
+    .split(",")
+    .map((s) => s.trim())
+    .filter((login) => login.length > 0)
+    .map((login) => ({ login }));
+}
+
 function checkClaimedTaskWithWaive({ repoRoot = REPO_ROOT, env = process.env } = {}) {
-  const result = checkClaimedTask({ repoRoot, env });
-  if (result.ok || (result.code !== "no-spec" && result.code !== "no-second-approve")) {
-    return result;
-  }
   const taskId = readMarker(repoRoot);
-  if (!taskId) return result;
+  if (!taskId) {
+    return checkClaimedTask({ repoRoot, env });
+  }
   const registry = locateRegistry(repoRoot, env);
-  if (!registry) return result;
+  if (!registry) {
+    return checkClaimedTask({ repoRoot, env });
+  }
   const loaded = loadTaskFile(taskId, registry);
-  if (!loaded) return result;
+  if (!loaded) {
+    return checkClaimedTask({ repoRoot, env });
+  }
   const fm = parseFrontMatter(loaded.text);
-  return applyOwnerSpecWaive(result, { taskText: loaded.text, ownerEmail: fm.owner });
+  return evaluateCodeGateWithOwnerWaive(evaluateCodeGate, {
+    taskText: loaded.text,
+    ownerEmail: fm.owner,
+    actorEmail: fm.owner,
+    isAgentExecutor: false,
+    approvals: parseApprovalsFromTask(loaded.text),
+  });
 }
 
 function checkTaskFileWithWaive(filePath, { env = process.env } = {}) {
   const text = fs.readFileSync(filePath, "utf8");
   const fm = parseFrontMatter(text);
-  const extra = env.SPEC_APPROVALS
-    ? String(env.SPEC_APPROVALS)
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean)
-        .map((login) => ({ login }))
-    : [];
   return evaluateCodeGateWithOwnerWaive(evaluateCodeGate, {
     taskText: text,
     ownerEmail: fm.owner,
     actorEmail: fm.owner,
     isAgentExecutor: false,
-    approvals: [...parseApprovalsFromTask(text), ...extra],
+    approvals: [...parseApprovalsFromTask(text), ...parseSpecApprovalsEnv(env)],
   });
 }
 
@@ -81,6 +91,7 @@ module.exports = {
   checkTaskFileWithWaive,
   evaluateCodeGateWithOwnerWaive,
   applyOwnerSpecWaive,
+  parseSpecApprovalsEnv,
 };
 
 // Stryker disable next-line all: CLI entry — unreachable when the module is imported by tests

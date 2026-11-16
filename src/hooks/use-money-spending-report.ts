@@ -6,6 +6,7 @@ import {
   spendingReportMerchantQueryKey,
   spendingReportMerchantRpcArgs,
 } from "@/hooks/money-spending-report-rpc";
+import { spendingReportFxSyncRange } from "@/hooks/money-spending-report-sync";
 import { isoDay, type SpendingPeriod } from "@/types/money-spending-report";
 import {
   normalizeSpendingReport,
@@ -44,12 +45,12 @@ async function fetchMoneySpendingReport(
 ): Promise<SpendingReport> {
   const supabase = createClient() as SupabaseMoneyReportClient;
   const today = isoDay(new Date());
-  const syncEnd = request.period.end < today ? request.period.end : today;
-  if (request.period.start <= syncEnd) {
+  const syncRange = spendingReportFxSyncRange(request.period, today);
+  if (syncRange) {
     const { error: syncError } = await supabase.functions.invoke("money-fx-sync", {
       body: {
-        start_date: request.period.start,
-        end_date: syncEnd,
+        start_date: syncRange.start,
+        end_date: syncRange.end,
         base_currency: "USD",
         quote_currencies: ["RUB"],
       },
@@ -70,34 +71,42 @@ async function fetchMoneySpendingReport(
   return normalizeSpendingReport(data);
 }
 
+/** Stable React Query key; account ids are sorted so order does not fragment the cache. */
+export function moneySpendingReportQueryKey(
+  request: Omit<MoneySpendingReportRequest, "personId"> & { personId: string | null },
+): unknown[] {
+  const { personId, period, currency, accountIds, categoryId, brandId, merchantName } = request;
+  return [
+    "money-spending-report",
+    personId,
+    period.start,
+    period.end,
+    currency,
+    [...accountIds].sort().join(","),
+    categoryId,
+    ...spendingReportMerchantQueryKey({ brandId, merchantName }),
+  ];
+}
+
 export function useMoneySpendingReport(
   request: Omit<MoneySpendingReportRequest, "personId"> & {
     personId: string | null;
   },
 ) {
-  const { personId, period, currency, accountIds, categoryId, brandId, merchantName } = request;
   return useQuery({
-    queryKey: [
-      "money-spending-report",
-      personId,
-      period.start,
-      period.end,
-      currency,
-      [...accountIds].sort().join(","),
-      categoryId,
-      ...spendingReportMerchantQueryKey({ brandId, merchantName }),
-    ],
+    queryKey: moneySpendingReportQueryKey(request),
     queryFn: () =>
       fetchMoneySpendingReport({
-        personId: personId!,
-        period,
-        currency,
-        accountIds,
-        categoryId,
-        brandId,
-        merchantName,
+        personId: request.personId!,
+        period: request.period,
+        currency: request.currency,
+        accountIds: request.accountIds,
+        categoryId: request.categoryId,
+        brandId: request.brandId,
+        merchantName: request.merchantName,
       }),
-    enabled: Boolean(personId),
+    enabled: Boolean(request.personId),
+    // Stryker disable next-line ArrowFunction: identity placeholder; () => undefined drops prior data
     placeholderData: (previous) => previous,
   });
 }
