@@ -371,12 +371,16 @@ function TotalCards({
     // without scrolling, which three stacked cards would not allow.
     return (
       <div className="space-y-3">
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-3 gap-1.5">
           {cards.map((card) => (
-            <Card key={card.key} data-testid={`spending-total-${card.key}`}>
-              <CardContent className="space-y-1 p-3">
+            <Card
+              key={card.key}
+              className="min-w-0 overflow-hidden"
+              data-testid={`spending-total-${card.key}`}
+            >
+              <CardContent className="space-y-1 p-2">
                 <p className="text-xs text-muted-foreground">{card.title}</p>
-                <p className={cn("text-base font-bold leading-tight", netClass(card))}>
+                <p className={cn("text-sm font-bold leading-tight tabular-nums", netClass(card))}>
                   {card.value}
                 </p>
                 <p className="text-xs">
@@ -511,7 +515,8 @@ function CategoryMap({
             {tiny ? null : (
               <span
                 className={cn(
-                  "block break-words font-semibold leading-tight",
+                  // Keep whole words; overflow clips instead of letter-splitting (e.g. Uncategorize/d).
+                  "block overflow-hidden break-normal font-semibold leading-tight",
                   roomy && !isMobile ? "text-base" : "text-xs",
                 )}
               >
