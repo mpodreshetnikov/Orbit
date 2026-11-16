@@ -320,7 +320,7 @@ export const COMPARISON_BASE_EPSILON = 1;
 
 /** The change from `base` to `value` in whole percent, or null when there is nothing to compare with. */
 export function percentChange(value: number, base: number): number | null {
-  if (!Number.isFinite(base) || Math.abs(base) < COMPARISON_BASE_EPSILON) return null;
+  if (!Number.isFinite(base) || Math.abs(base) <= COMPARISON_BASE_EPSILON) return null;
   return Math.round(((value - base) / Math.abs(base)) * 100);
 }
 

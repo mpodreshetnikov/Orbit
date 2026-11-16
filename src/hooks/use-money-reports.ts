@@ -82,6 +82,8 @@ export interface SpendingReportRequest {
   currency: string;
   accountIds: string[];
   categoryId: string | null;
+  brandId?: string | null;
+  merchantName?: string | null;
 }
 
 /**
@@ -113,6 +115,8 @@ async function fetchMoneySpendingReport(request: SpendingReportRequest): Promise
     p_report_currency: request.currency,
     p_account_ids: request.accountIds.length > 0 ? request.accountIds : null,
     p_category_id: request.categoryId,
+    p_brand_id: request.brandId ?? null,
+    p_merchant_name: request.merchantName ?? null,
   });
   if (error) throw new Error(error.message);
   return normalizeSpendingReport(data);
@@ -123,7 +127,7 @@ export function useMoneySpendingReport(
     personId: string | null;
   },
 ) {
-  const { personId, period, currency, accountIds, categoryId } = request;
+  const { personId, period, currency, accountIds, categoryId, brandId, merchantName } = request;
   return useQuery({
     queryKey: [
       "money-spending-report",
@@ -133,9 +137,19 @@ export function useMoneySpendingReport(
       currency,
       [...accountIds].sort().join(","),
       categoryId,
+      brandId ?? null,
+      merchantName ?? null,
     ],
     queryFn: () =>
-      fetchMoneySpendingReport({ personId: personId!, period, currency, accountIds, categoryId }),
+      fetchMoneySpendingReport({
+        personId: personId!,
+        period,
+        currency,
+        accountIds,
+        categoryId,
+        brandId,
+        merchantName,
+      }),
     enabled: Boolean(personId),
     placeholderData: (previous) => previous,
   });

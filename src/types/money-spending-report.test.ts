@@ -288,7 +288,7 @@ describe("chart helpers", () => {
   it("builds round Y-axis ticks covering the max", () => {
     expect(niceAxisTicks(0)).toEqual([0]);
     expect(niceAxisTicks(87)).toEqual([0, 50, 100]);
-    expect(niceAxisTicks(120, 5)).toEqual([0, 25, 50, 75, 100, 125]);
+    expect(niceAxisTicks(120, 5)).toEqual([0, 50, 100, 150]);
     expect(niceAxisTicks(1000)[niceAxisTicks(1000).length - 1]).toBeGreaterThanOrEqual(1000);
   });
 

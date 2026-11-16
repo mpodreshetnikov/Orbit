@@ -4,7 +4,7 @@ import type {
   MoneyTransactionType,
 } from "@orbit-types/money";
 import { formatMoney, preferredComment } from "@orbit-types/money-feed";
-import { Stack, useRouter, type Href } from "expo-router";
+import { Stack, useLocalSearchParams, useRouter, type Href } from "expo-router";
 import {
   ArrowDownLeft,
   ArrowRightLeft,
@@ -26,6 +26,16 @@ import {
   usePerson,
 } from "@/lib/queries";
 import { space, usePalette, type Palette } from "@/theme";
+
+function paramOne(value: string | string[] | undefined): string | null {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
+}
+
+function paramList(value: string | string[] | undefined): string[] {
+  const raw = paramOne(value);
+  return raw ? raw.split(",").filter(Boolean) : [];
+}
 
 /** The web feed's icon and tone for each kind of transaction. */
 const TYPE_LOOK: Record<MoneyTransactionType, [LucideIcon, keyof Palette]> = {
@@ -90,18 +100,51 @@ export function rowMeta(item: MoneyTransactionFeedItem, categoryName: Map<string
 }
 
 /**
- * "Деньги" — dense transaction feed first: filters and a one-line sum, then rows by day. Reports
+ * "Деньги" — dense transaction feed first: filters and a one-line sum, then rows by day. Report deep
+ * links arrive as `q`, `sign`, `from`, `to`, `accounts`, `categories` on the route. Reports
  * and file import stay reachable as compact links above the list, not as tiles.
  */
 export default function MoneyScreen() {
   const palette = usePalette();
   const router = useRouter();
+  const params = useLocalSearchParams<{
+    q?: string | string[];
+    sign?: string | string[];
+    from?: string | string[];
+    to?: string | string[];
+    accounts?: string | string[];
+    categories?: string | string[];
+  }>();
   const person = usePerson();
   const personId = person.data?.id;
-  const [typed, setQuery] = useState("");
+  const initialQuery = paramOne(params.q) ?? "";
+  const initialSign = paramOne(params.sign);
+  const [typed, setQuery] = useState(initialQuery);
   const query = useDebounced(typed, SEARCH_DEBOUNCE_MS);
-  const [amountSign, setAmountSign] = useState<MoneyAmountSignFilter>("all");
-  const filters = useMemo(() => ({ query, amountSign }), [query, amountSign]);
+  const [amountSign, setAmountSign] = useState<MoneyAmountSignFilter>(
+    initialSign === "expense" || initialSign === "income" ? initialSign : "all",
+  );
+  const accountIds = useMemo(() => paramList(params.accounts), [params.accounts]);
+  const categoryIds = useMemo(() => paramList(params.categories), [params.categories]);
+  const from = paramOne(params.from);
+  const to = paramOne(params.to);
+  useEffect(() => {
+    const nextQuery = paramOne(params.q) ?? "";
+    setQuery(nextQuery);
+    const nextSign = paramOne(params.sign);
+    setAmountSign(nextSign === "expense" || nextSign === "income" ? nextSign : "all");
+  }, [params.q, params.sign]);
+  const filters = useMemo(
+    () => ({
+      query,
+      amountSign,
+      accountIds: accountIds.length ? accountIds : undefined,
+      categoryIds: categoryIds.length ? categoryIds : undefined,
+      from: from ?? null,
+      to: to ?? null,
+    }),
+    [query, amountSign, accountIds, categoryIds, from, to],
+  );
   const feed = useMoneyFeed(personId, filters);
   const summary = useMoneyFeedSummary(personId, filters);
   const accounts = useMoneyAccounts(personId);
