@@ -20,7 +20,12 @@ export function percentChange(value: number, base: number): number | null {
   return Math.round(((value - base) / Math.abs(base)) * 100);
 }
 
-function formatMultiple(value: number, base: number): string {
+function tryFormatMultiple(value: number, base: number | undefined): string | null {
+  if (base === undefined) return null;
+  if (!Number.isFinite(value)) return null;
+  if (!Number.isFinite(base)) return null;
+  if (Math.abs(base) <= COMPARISON_BASE_EPSILON) return null;
+  if (Math.abs(value) / Math.abs(base) <= COMPARISON_MAX_RATIO) return null;
   const ratio = Math.abs(value) / Math.abs(base);
   return `×${Math.max(1, Math.round(ratio))}`;
 }
