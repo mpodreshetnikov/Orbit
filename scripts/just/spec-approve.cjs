@@ -104,24 +104,6 @@ function parseApprovalsFromTask(text) {
  *   isAgentExecutor?: boolean,
  * }} input
  */
-
-/**
- * Owner may waive second-participant Spec for a complex task ("Spec waived by <owner-login>").
- * Only the task owner's login counts — not a self-serve bypass by the other participant.
- */
-function parseOwnerSpecWaive(text, ownerEmail) {
-  const owner = findParticipantByEmail(ownerEmail);
-  if (!owner) return null;
-  const re = /spec\s+waived\s+by\s+@?([A-Za-z0-9_-]+)/gi;
-  let m;
-  while ((m = re.exec(String(text)))) {
-    if (m[1].toLowerCase() === owner.login.toLowerCase()) {
-      return { login: owner.login };
-    }
-  }
-  return null;
-}
-
 function evaluateCodeGate(input) {
   const text = String(input.taskText || "");
   const fm = parseFrontMatter(text);
@@ -163,15 +145,6 @@ function evaluateCodeGate(input) {
       ok: true,
       code: "simple",
       message: "spec-approve: simple task — second approve not required",
-    };
-  }
-
-  const ownerWaive = parseOwnerSpecWaive(text, ownerEmail);
-  if (ownerWaive) {
-    return {
-      ok: true,
-      code: "waived",
-      message: `spec-approve: Spec waived by owner ${ownerWaive.login}`,
     };
   }
 
@@ -368,7 +341,6 @@ module.exports = {
   hasSpecSection,
   isAgentExecutorEnv,
   isComplexTask,
-  parseOwnerSpecWaive,
   loadTaskFile,
   locateRegistry,
   parseApprovalsFromTask,

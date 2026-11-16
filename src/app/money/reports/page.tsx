@@ -4,36 +4,38 @@ import React, { useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { ChevronDown, ChevronLeft, ChevronRight, Filter, X } from "lucide-react";
-import { useIsMobile, useMoneyAccounts, useMoneySpendingReport } from "@/hooks";
+import { useIsMobile, useMoneyAccounts } from "@/hooks";
+import { useMoneySpendingReport } from "@/hooks/use-money-spending-report";
 import { useIntlLocale } from "@/lib/date-locale";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/stores/ui-store";
+import { formatChange, percentChange } from "@/types/money-report-change";
 import {
   amountOf,
   changeTone,
   childCategories,
-  formatChange,
   formatReportAmount,
   isoDay,
   lastYearOf,
-  niceAxisTicks,
   parsePeriod,
-  percentChange,
   periodContaining,
   periodLabel,
   previousOf,
   shiftPeriod,
   squarify,
   topCategories,
-  transactionsFeedQuery,
   treemapShade,
   type SpendingCategory,
-  type SpendingMerchant,
   type SpendingPeriod,
   type SpendingPeriodKind,
-  type SpendingReport,
   type SpendingReportMode,
 } from "@/types/money-spending-report";
+import {
+  niceAxisTicks,
+  transactionsFeedQuery,
+  type SpendingMerchant,
+  type SpendingReport,
+} from "@/types/money-spending-report-ux";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";

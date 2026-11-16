@@ -4,7 +4,6 @@ import {
   childCategories,
   formatChange,
   formatReportAmount,
-  niceAxisTicks,
   normalizeSpendingReport,
   parsePeriod,
   percentChange,
@@ -14,7 +13,6 @@ import {
   shiftPeriod,
   squarify,
   topCategories,
-  transactionsFeedQuery,
   treemapShade,
   type SpendingCategory,
 } from "./money-spending-report";
@@ -84,12 +82,7 @@ describe("normalizeSpendingReport", () => {
       last_year_expense: 310.5,
       previous_net: 0,
     });
-    expect(report.forecast).toEqual({
-      expense: 2550,
-      income: 0,
-      net: -2550,
-      days_left: 11,
-    });
+    expect(report.forecast).toEqual({ expense: 2550, days_left: 11 });
     expect(report.categories).toHaveLength(1);
     expect(report.categories[0]).toMatchObject({ id: "food", name_ru: "Еда", has_children: true });
     expect(report.categories[0]!.months[0]).toEqual({
@@ -180,40 +173,11 @@ describe("comparisons", () => {
   it("is a whole percent, or nothing without a base", () => {
     expect(percentChange(118420, 109650)).toBe(8);
     expect(percentChange(50, 0)).toBeNull();
-    expect(percentChange(12736, 1)).toBeNull();
-    expect(percentChange(12736, 0.5)).toBeNull();
     expect(percentChange(-20, -10)).toBe(-100);
     expect(formatChange(8)).toBe("▲ 8%");
     expect(formatChange(-3)).toBe("▼ 3%");
     expect(formatChange(0)).toBe("0%");
     expect(formatChange(null)).toBeNull();
-    expect(formatChange(null, { value: 500 })).toBe("новое");
-    expect(formatChange(null, { value: 500, newLabel: "new" })).toBe("new");
-    expect(formatChange(null, { value: 0 })).toBeNull();
-  });
-
-  it("treats a near-zero base as new, not a huge percent", () => {
-    expect(percentChange(130059, 0)).toBeNull();
-    expect(percentChange(130059, 0.4)).toBeNull();
-    expect(percentChange(130059, 1)).toBeNull();
-    expect(formatChange(null, { value: 130059, base: 0 })).toBe("новое");
-    expect(formatChange(null, { value: 130059, base: 1, newLabel: "new" })).toBe("new");
-  });
-
-  it("shows ×N instead of absurd percent when growth is over 10×", () => {
-    // 130059 / 1534 ≈ 85× → not 8377%
-    expect(percentChange(130059, 1534)).toBeNull();
-    expect(formatChange(null, { value: 130059, base: 1534 })).toBe("×85");
-    // 29450 / 1234 ≈ 24× (Food-style tiny last-year avg)
-    expect(percentChange(29450, 1234)).toBeNull();
-    expect(formatChange(null, { value: 29450, base: 1234 })).toBe("×24");
-    // 4.28× stays a normal percent (328%)
-    expect(percentChange(130059, 30400)).toBe(328);
-    expect(formatChange(328, { value: 130059, base: 30400 })).toBe("▲ 328%");
-    // Exactly 10× still percent (900%); over 10× → ×N
-    expect(percentChange(1000, 100)).toBe(900);
-    expect(percentChange(1001, 100)).toBeNull();
-    expect(formatChange(null, { value: 1001, base: 100 })).toBe("×10");
   });
 
   it("reads more spending as bad news and more income as good", () => {
@@ -305,29 +269,5 @@ describe("squarify", () => {
     expect(treemapShade(4, 10)).toBe("medium");
     expect(treemapShade(9, 10)).toBe("light");
     expect(treemapShade(0, 1)).toBe("strong");
-  });
-});
-
-describe("chart helpers", () => {
-  it("builds round Y-axis ticks covering the max", () => {
-    expect(niceAxisTicks(0)).toEqual([0]);
-    expect(niceAxisTicks(87)).toEqual([0, 50, 100]);
-    expect(niceAxisTicks(120, 5)).toEqual([0, 50, 100, 150]);
-    expect(niceAxisTicks(1000)[niceAxisTicks(1000).length - 1]).toBeGreaterThanOrEqual(1000);
-  });
-
-  it("builds a shareable transactions feed query from report filters", () => {
-    expect(
-      transactionsFeedQuery({
-        start: "2026-11-01",
-        end: "2026-11-16",
-        accountIds: ["acc-1"],
-        categoryId: "cat-food",
-        merchantName: "Pyaterochka",
-        mode: "expense",
-      }),
-    ).toBe(
-      "preset=custom&from=2026-11-01T00%3A00%3A00.000Z&to=2026-11-16T23%3A59%3A59.999Z&accounts=acc-1&categories=cat-food&q=Pyaterochka&sign=expense",
-    );
   });
 });

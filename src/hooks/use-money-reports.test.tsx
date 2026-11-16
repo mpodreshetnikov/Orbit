@@ -157,8 +157,6 @@ describe("use-money-reports", () => {
       p_report_currency: "RUB",
       p_account_ids: ["acc-2", "acc-1"],
       p_category_id: "food",
-      p_brand_id: null,
-      p_merchant_name: null,
     });
     expect(result.current.data?.totals.expense).toBe(2200);
   });
