@@ -100,11 +100,12 @@ function Change({
   newLabel?: string;
 }) {
   const change = percentChange(value, base);
-  const text = formatChange(change, { value, newLabel });
+  const text = formatChange(change, { value, base, newLabel });
+  const isSpecial = text === (newLabel ?? "новое") || (text?.startsWith("×") ?? false);
   return (
     <span className={TONE_CLASS[changeTone(change, mode)]}>
       {text ?? "—"}
-      {label && text && text !== (newLabel ?? "новое") ? ` ${label}` : null}
+      {label && text && !isSpecial ? ` ${label}` : null}
     </span>
   );
 }
@@ -550,7 +551,7 @@ function Sparkline({
     timeZone: "UTC",
   });
   return (
-    <span className="flex h-6 items-end gap-0.5">
+    <span className="flex h-6 items-end gap-0.5" data-testid="spending-sparkline">
       {values.map((value, index) => {
         const month = category.months[index]?.month_start;
         const title = t("money.spendingMonthTooltip", {
@@ -558,9 +559,11 @@ function Sparkline({
           amount: formatReportAmount(value, currency, locale),
         });
         return (
-          <span
+          <button
             key={month ?? index}
+            type="button"
             title={title}
+            aria-label={title}
             className={cn(
               "w-1.5 rounded-sm",
               index === values.length - 1 ? BAR_CLASS[mode] : "bg-muted-foreground/30",
@@ -646,6 +649,21 @@ function CategoryList({
                       newLabel={t("money.spendingChangeNew")}
                     />
                   </span>
+                  {category.months.length > 0 ? (
+                    <span
+                      className="mt-1 block"
+                      onClick={(event) => event.stopPropagation()}
+                      onKeyDown={(event) => event.stopPropagation()}
+                    >
+                      <Sparkline
+                        category={category}
+                        mode={mode}
+                        currency={report.currency}
+                        locale={locale}
+                        t={t}
+                      />
+                    </span>
+                  ) : null}
                 </span>
                 <span className="text-right">
                   <span className="block text-[15px] font-semibold">

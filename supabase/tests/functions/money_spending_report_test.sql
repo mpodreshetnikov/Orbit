@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(25);
+SELECT plan(30);
 
 SELECT has_function(
   'public',
@@ -78,12 +78,13 @@ SELECT is((SELECT (body -> 'totals' ->> 'previous_expense')::numeric FROM report
   'incomplete period compares only the first compare_days of the previous window (drops Feb 25)');
 SELECT is((SELECT round((body -> 'totals' ->> 'last_year_expense')::numeric, 2) FROM report), 200.00::numeric,
   'last year''s average is scaled to the elapsed compare_days, not the full month');
-SELECT is((SELECT body -> 'period' ->> 'previous_start' FROM report), '2026-01-29', 'the previous period starts 31 days back');
+SELECT is((SELECT body -> 'period' ->> 'previous_start' FROM report), '2026-02-01',
+  'a calendar month compares against the previous calendar month (not equal-length slide)');
 SELECT is((SELECT (body -> 'period' ->> 'compare_days')::integer FROM report), 20, 'compare_days is elapsed days while incomplete');
-SELECT is((SELECT body -> 'period' ->> 'previous_compare_end' FROM report), '2026-02-17',
-  'previous_compare_end is previous_start + compare_days - 1');
+SELECT is((SELECT body -> 'period' ->> 'previous_compare_end' FROM report), '2026-02-20',
+  'previous_compare_end is the same day-count of the previous month (Mar 1–20 vs Feb 1–20)');
 
-SELECT is((SELECT round((body -> 'forecast' ->> 'expense')::numeric, 2) FROM report), 2550.00::numeric,
+SELECT is((SELECT round((body -> 'forecast' ->> 'expense')::numeric, 2) FROM report), 2570.83::numeric,
   'the forecast adds each remaining day''s weekday average over twelve weeks');
 SELECT ok(
   (SELECT body -> 'forecast' ? 'income' FROM report),
@@ -191,6 +192,35 @@ SELECT is(
   ) -> 'totals' ->> 'last_year_expense')::numeric, 2)),
   310.00::numeric,
   'a completed period scales last year to the full period length'
+);
+
+-- Calendar month incomplete: Nov 1–16 vs Oct 1–16 (same day-count of previous month).
+SELECT is(
+  (SELECT body -> 'period' ->> 'previous_start' FROM (
+    SELECT public.money_get_spending_report(
+      '7c000000-0000-0000-0000-000000000010', '2026-11-01', '2026-11-30', 'RUB', NULL, NULL, '2026-11-16'
+    ) AS body
+  ) AS nov),
+  '2026-10-01',
+  'incomplete November compares from October 1, not a 30-day slide to October 2'
+);
+SELECT is(
+  (SELECT body -> 'period' ->> 'previous_compare_end' FROM (
+    SELECT public.money_get_spending_report(
+      '7c000000-0000-0000-0000-000000000010', '2026-11-01', '2026-11-30', 'RUB', NULL, NULL, '2026-11-16'
+    ) AS body
+  ) AS nov),
+  '2026-10-16',
+  'incomplete November truncates previous to October 16 (Nov 1–16 vs Oct 1–16)'
+);
+SELECT is(
+  (SELECT (body -> 'period' ->> 'compare_days')::integer FROM (
+    SELECT public.money_get_spending_report(
+      '7c000000-0000-0000-0000-000000000010', '2026-11-01', '2026-11-30', 'RUB', NULL, NULL, '2026-11-16'
+    ) AS body
+  ) AS nov),
+  16,
+  'incomplete November elapsed day-count is 16'
 );
 
 SELECT throws_ok(

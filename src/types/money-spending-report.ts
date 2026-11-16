@@ -313,14 +313,20 @@ export function periodLabel(period: SpendingPeriod, locale: string): string {
 // ---------------------------------------------------------------------------------------------
 
 /**
- * Bases below one report-currency unit (or non-finite) are treated as no comparison — otherwise a
- * 1 ₽ prior yields absurd percentages like 1 273 600%.
+ * Bases at or below one report-currency unit (or non-finite) are no comparison — otherwise a 1 ₽
+ * prior yields absurd percentages like 1 273 600%. Growth above {@link COMPARISON_MAX_RATIO} also
+ * skips percent and is shown as ×N via {@link formatChange}.
  */
 export const COMPARISON_BASE_EPSILON = 1;
 
-/** The change from `base` to `value` in whole percent, or null when there is nothing to compare with. */
+/** When |value| / |base| exceeds this, show ×N instead of a multi-thousand percent. */
+export const COMPARISON_MAX_RATIO = 10;
+
+/** The change from `base` to `value` in whole percent, or null when percent is not meaningful. */
 export function percentChange(value: number, base: number): number | null {
   if (!Number.isFinite(base) || Math.abs(base) <= COMPARISON_BASE_EPSILON) return null;
+  if (!Number.isFinite(value)) return null;
+  if (Math.abs(value) / Math.abs(base) > COMPARISON_MAX_RATIO) return null;
   return Math.round(((value - base) / Math.abs(base)) * 100);
 }
 
@@ -509,15 +515,27 @@ export function formatReportAmount(amount: number, currency: string, locale: str
 }
 
 /**
- * "▲ 8%", "▼ 3%", "0%"; without a base: "новое" when the current amount is positive (new this
- * period), otherwise null so the UI can show "—".
+ * "▲ 8%", "▼ 3%", "0%"; when percent is not meaningful: "×N" if |value|/|base| > 10×, else
+ * "новое" when the current amount is positive, otherwise null so the UI can show "—".
  */
 export function formatChange(
   change: number | null,
-  options?: { value?: number; newLabel?: string },
+  options?: { value?: number; base?: number; newLabel?: string },
 ): string | null {
   if (change === null) {
-    if (options?.value !== undefined && options.value > COMPARISON_BASE_EPSILON * 0.005) {
+    const value = options?.value;
+    const base = options?.base;
+    if (
+      value !== undefined &&
+      base !== undefined &&
+      Number.isFinite(value) &&
+      Number.isFinite(base) &&
+      Math.abs(base) > COMPARISON_BASE_EPSILON &&
+      Math.abs(value) / Math.abs(base) > COMPARISON_MAX_RATIO
+    ) {
+      return `×${Math.max(1, Math.round(Math.abs(value) / Math.abs(base)))}`;
+    }
+    if (value !== undefined && value > COMPARISON_BASE_EPSILON * 0.005) {
       return options.newLabel ?? "новое";
     }
     return null;

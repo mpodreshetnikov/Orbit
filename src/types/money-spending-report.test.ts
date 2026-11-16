@@ -192,6 +192,30 @@ describe("comparisons", () => {
     expect(formatChange(null, { value: 0 })).toBeNull();
   });
 
+  it("treats a near-zero base as new, not a huge percent", () => {
+    expect(percentChange(130059, 0)).toBeNull();
+    expect(percentChange(130059, 0.4)).toBeNull();
+    expect(percentChange(130059, 1)).toBeNull();
+    expect(formatChange(null, { value: 130059, base: 0 })).toBe("новое");
+    expect(formatChange(null, { value: 130059, base: 1, newLabel: "new" })).toBe("new");
+  });
+
+  it("shows ×N instead of absurd percent when growth is over 10×", () => {
+    // 130059 / 1534 ≈ 85× → not 8377%
+    expect(percentChange(130059, 1534)).toBeNull();
+    expect(formatChange(null, { value: 130059, base: 1534 })).toBe("×85");
+    // 29450 / 1234 ≈ 24× (Food-style tiny last-year avg)
+    expect(percentChange(29450, 1234)).toBeNull();
+    expect(formatChange(null, { value: 29450, base: 1234 })).toBe("×24");
+    // 4.28× stays a normal percent (328%)
+    expect(percentChange(130059, 30400)).toBe(328);
+    expect(formatChange(328, { value: 130059, base: 30400 })).toBe("▲ 328%");
+    // Exactly 10× still percent (900%); over 10× → ×N
+    expect(percentChange(1000, 100)).toBe(900);
+    expect(percentChange(1001, 100)).toBeNull();
+    expect(formatChange(null, { value: 1001, base: 100 })).toBe("×10");
+  });
+
   it("reads more spending as bad news and more income as good", () => {
     expect(changeTone(8, "expense")).toBe("bad");
     expect(changeTone(-3, "expense")).toBe("good");

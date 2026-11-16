@@ -471,9 +471,10 @@ function Change({
   const scheme = useColorScheme();
   const change = percentChange(value, base);
   const newLabel = t("money.spendingChangeNew");
-  const text = formatChange(change, { value, newLabel });
+  const text = formatChange(change, { value, base, newLabel });
   const tone = changeTone(change, mode);
-  const suffix = label && text && text !== newLabel ? ` ${label}` : "";
+  const isSpecial = text === newLabel || (text?.startsWith("×") ?? false);
+  const suffix = label && text && !isSpecial ? ` ${label}` : "";
   return (
     <Text
       size="xs"

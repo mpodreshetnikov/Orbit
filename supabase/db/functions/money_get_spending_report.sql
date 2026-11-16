@@ -12,8 +12,9 @@
 --
 -- Expenses come back as positive amounts spent, income as positive amounts received, net as their
 -- signed difference. "Last year" is the calendar year before the period starts; its average is the
--- year's total scaled to the comparison day-count. While the selected period is still running, that
--- day-count is the elapsed days so far (e.g. Nov 1–16 vs Oct 1–16), not the full period length.
+-- year's total scaled to the comparison day-count. A calendar-month selection compares against the
+-- previous calendar month; while still running, only the elapsed day-count (e.g. Nov 1–16 vs
+-- Oct 1–16), not the whole prior month. Non-month ranges keep an equal-length previous window.
 -- The forecast covers spending and income: each is the amount so far plus, for every day still to
 -- come, what that weekday averaged over the twelve weeks before today. Forecast net is income
 -- forecast minus expense forecast.
@@ -70,7 +71,14 @@ BEGIN
 
   v_days := p_end - p_start + 1;
   v_previous_end := p_start - 1;
-  v_previous_start := p_start - v_days;
+  -- Calendar month (1st → last day): previous is the prior calendar month so incomplete
+  -- Nov 1–16 compares Oct 1–16. Other ranges keep an equal-length window ending yesterday.
+  IF p_start = date_trunc('month', p_start)::date
+     AND p_end = (date_trunc('month', p_start) + interval '1 month - 1 day')::date THEN
+    v_previous_start := (date_trunc('month', p_start) - interval '1 month')::date;
+  ELSE
+    v_previous_start := p_start - v_days;
+  END IF;
   -- Incomplete period: vs previous / vs last-year average use only the elapsed day-count.
   IF v_today >= p_start AND v_today < p_end THEN
     v_compare_days := v_today - p_start + 1;
