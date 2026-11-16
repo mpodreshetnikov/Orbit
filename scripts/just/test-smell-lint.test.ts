@@ -1,20 +1,28 @@
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   analyzeFile,
   caseBodyRange,
+  countByFileRule,
+  evaluateBaselineGrowth,
+  evaluateRatchet,
   inNonCode,
   lastTopLevelArg,
+  loadBaseline,
   matchingParen,
   MOCK_CALL_MATCHERS,
+  parseFileRuleKey,
+  resolveBaselineBaseRef,
   run,
   skipWs,
   TEST_NAME,
   testCallParens,
   walk,
   WEAK_PRESENCE,
+  writeBaseline,
+  ZERO_SHA,
 } from "./test-smell-lint.cjs";
 
 const temps: string[] = [];
@@ -363,5 +371,333 @@ describe("test-smell-lint helpers", () => {
     const clean = run({ roots: [cleanDir], fail: true });
     expect(clean.findings).toEqual([]);
     expect(clean.exitCode).toBe(0);
+  });
+});
+
+describe("test-smell-lint ratchet", () => {
+  it("counts findings by file+rule key", () => {
+    expect(
+      countByFileRule([
+        { file: "a.test.ts", kind: "lone-presence" },
+        { file: "a.test.ts", kind: "lone-presence" },
+        { file: "a.test.ts", kind: "mock-call-only" },
+        { file: "b.test.ts", kind: "lone-presence" },
+      ]),
+    ).toEqual({
+      "a.test.ts::lone-presence": 2,
+      "a.test.ts::mock-call-only": 1,
+      "b.test.ts::lone-presence": 1,
+    });
+  });
+
+  it("fails when baseline is missing", () => {
+    expect(evaluateRatchet({ "a.test.ts::lone-presence": 1 }, null)).toEqual([
+      "missing baseline; run test-smell-lint --update-baseline",
+    ]);
+  });
+
+  it("passes when current counts exactly match the baseline", () => {
+    const counts = { "src/a.test.ts::mock-call-only": 2 };
+    expect(evaluateRatchet(counts, { counts })).toEqual([]);
+  });
+
+  it("fails when a file+rule count exceeds the baseline", () => {
+    const failures = evaluateRatchet(
+      { "src/a.test.ts::mock-call-only": 3 },
+      { counts: { "src/a.test.ts::mock-call-only": 2 } },
+    );
+    expect(failures.some((f) => f.includes(">") && f.includes("baseline 2"))).toBe(true);
+  });
+
+  it("fails when a finding appears in a NEW file (proof probe)", () => {
+    const failures = evaluateRatchet(
+      {
+        "src/legacy.test.ts::lone-presence": 1,
+        "src/brand-new.test.ts::lone-presence": 1,
+      },
+      { counts: { "src/legacy.test.ts::lone-presence": 1 } },
+    );
+    expect(failures).toContain("new file with findings: src/brand-new.test.ts");
+    expect(failures.some((f) => f.includes("src/legacy.test.ts"))).toBe(false);
+  });
+
+  it("fails when the baseline is stale after findings shrink", () => {
+    const failures = evaluateRatchet(
+      { "src/a.test.ts::lone-presence": 1 },
+      { counts: { "src/a.test.ts::lone-presence": 2 } },
+    );
+    expect(failures.some((f) => f.includes("< baseline 2") && f.includes("shrink"))).toBe(true);
+  });
+
+  it("dry probe: run() exits 1 for a new-file finding against a baseline", () => {
+    const dir = mkdtempSync(join(tmpdir(), "smell-ratchet-"));
+    temps.push(dir);
+    const baselinePath = join(dir, "baseline.json");
+    writeFileSync(
+      join(dir, "legacy.test.ts"),
+      [
+        'import { it, expect } from "vitest";',
+        'it("weak", () => { expect(1).toBeTruthy(); });',
+        "",
+      ].join("\n"),
+    );
+    run({
+      roots: [dir],
+      updateBaseline: true,
+      baselinePath,
+      baseBaseline: null,
+      silent: true,
+    });
+    writeFileSync(
+      join(dir, "brand-new.test.ts"),
+      [
+        'import { it, expect } from "vitest";',
+        'it("also weak", () => { expect(0).toBeTruthy(); });',
+        "",
+      ].join("\n"),
+    );
+    const result = run({
+      roots: [dir],
+      enforceRatchet: true,
+      baselinePath,
+      baseBaseline: null,
+      silent: true,
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.ratchetFailures.some((f) => f.includes("new file with findings"))).toBe(true);
+  });
+
+  it("fails when the committed baseline grows a file+rule count vs base", () => {
+    const failures = evaluateBaselineGrowth(
+      { counts: { "src/a.test.ts::mock-call-only": 3 } },
+      { counts: { "src/a.test.ts::mock-call-only": 2 } },
+    );
+    expect(failures.some((f) => f.includes("baseline grew") && f.includes("3 > 2"))).toBe(true);
+  });
+
+  it("fails when the committed baseline adds a new file vs base", () => {
+    const failures = evaluateBaselineGrowth(
+      {
+        counts: {
+          "src/legacy.test.ts::lone-presence": 1,
+          "src/new.test.ts::lone-presence": 1,
+        },
+      },
+      { counts: { "src/legacy.test.ts::lone-presence": 1 } },
+    );
+    expect(failures.includes("baseline grew: new file src/new.test.ts")).toBe(true);
+    expect(failures.length).toBe(1);
+  });
+
+  it("allows shrinking the baseline and first introduction (no base baseline)", () => {
+    expect(
+      evaluateBaselineGrowth(
+        { counts: { "src/a.test.ts::lone-presence": 1 } },
+        { counts: { "src/a.test.ts::lone-presence": 2 } },
+      ),
+    ).toEqual([]);
+    expect(evaluateBaselineGrowth({ counts: { "src/a.test.ts::lone-presence": 5 } }, null)).toEqual(
+      [],
+    );
+  });
+
+  it("refuses --update-baseline that raises a file+rule count vs base", () => {
+    const dir = mkdtempSync(join(tmpdir(), "smell-raise-"));
+    temps.push(dir);
+    writeFileSync(
+      join(dir, "a.test.ts"),
+      [
+        'import { it, expect } from "vitest";',
+        'it("a", () => { expect(1).toBeTruthy(); });',
+        'it("b", () => { expect(2).toBeTruthy(); });',
+        "",
+      ].join("\n"),
+    );
+    const baselinePath = join(dir, "baseline.json");
+    const probed = run({ roots: [dir], fail: false, silent: true });
+    const key = Object.keys(probed.counts)[0];
+    expect(key).toMatch(/::lone-presence$/);
+    expect(probed.counts[key]).toBe(2);
+    const result = run({
+      roots: [dir],
+      updateBaseline: true,
+      baselinePath,
+      checkBaselineGrowth: true,
+      baseBaseline: { counts: { [key]: 1 } },
+      silent: true,
+    });
+    expect(result.exitCode).toBe(1);
+    expect(
+      result.growthFailures.some((f) => f.includes("baseline grew") && f.includes("2 > 1")),
+    ).toBe(true);
+    expect(existsSync(baselinePath)).toBe(false);
+  });
+
+  it("dry probe: exceed and stale also fail run()", () => {
+    const dir = mkdtempSync(join(tmpdir(), "smell-ratchet-ex-"));
+    temps.push(dir);
+    const baselinePath = join(dir, "baseline.json");
+    writeFileSync(
+      join(dir, "known.test.ts"),
+      [
+        'import { it, expect } from "vitest";',
+        'it("a", () => { expect(1).toBeTruthy(); });',
+        "",
+      ].join("\n"),
+    );
+    run({
+      roots: [dir],
+      updateBaseline: true,
+      baselinePath,
+      baseBaseline: null,
+      silent: true,
+    });
+    writeFileSync(
+      join(dir, "known.test.ts"),
+      [
+        'import { it, expect } from "vitest";',
+        'it("a", () => { expect(1).toBeTruthy(); });',
+        'it("b", () => { expect(2).toBeTruthy(); });',
+        "",
+      ].join("\n"),
+    );
+    const exceed = run({
+      roots: [dir],
+      enforceRatchet: true,
+      baselinePath,
+      baseBaseline: null,
+      silent: true,
+    });
+    expect(exceed.exitCode).toBe(1);
+    expect(exceed.ratchetFailures.some((f) => f.includes("> baseline 1"))).toBe(true);
+
+    // Stale: restore one finding but leave baseline at 2 via manual rewrite of counts.
+    writeFileSync(
+      join(dir, "known.test.ts"),
+      [
+        'import { it, expect } from "vitest";',
+        'it("a", () => { expect(1).toBeTruthy(); });',
+        "",
+      ].join("\n"),
+    );
+    const key = Object.keys(exceed.counts)[0];
+    writeBaseline({ [key]: 2 }, baselinePath);
+    const stale = run({
+      roots: [dir],
+      enforceRatchet: true,
+      baselinePath,
+      baseBaseline: null,
+      silent: true,
+    });
+    expect(stale.exitCode).toBe(1);
+    expect(stale.ratchetFailures.some((f) => f.includes("shrink baseline"))).toBe(true);
+  });
+
+  it("parseFileRuleKey splits file::rule and treats bare keys as unknown kind", () => {
+    expect(parseFileRuleKey("src/a.test.ts::lone-presence")).toEqual({
+      file: "src/a.test.ts",
+      kind: "lone-presence",
+    });
+    expect(parseFileRuleKey("orphan")).toEqual({ file: "orphan", kind: "?" });
+  });
+
+  it("reports unknown-kind messages for bare keys on exceed and stale", () => {
+    expect(
+      evaluateRatchet({ orphan: 2 }, { counts: { orphan: 1 } }).some(
+        (f) => f.includes("orphan ?") && f.includes("> baseline 1"),
+      ),
+    ).toBe(true);
+    expect(
+      evaluateRatchet({ orphan: 0 }, { counts: { orphan: 2 } }).some(
+        (f) => f.includes("orphan ?") && f.includes("shrink"),
+      ),
+    ).toBe(true);
+    expect(
+      evaluateBaselineGrowth({ counts: { orphan: 2 } }, { counts: { orphan: 1 } }).some(
+        (f) => f.includes("orphan ?") && f.includes("2 > 1"),
+      ),
+    ).toBe(true);
+  });
+
+  it("dedupes new-file messages when one new file has multiple rules", () => {
+    const ratchet = evaluateRatchet(
+      { "new.test.ts::lone-presence": 1, "new.test.ts::mock-call-only": 1 },
+      { counts: { "old.test.ts::lone-presence": 1 } },
+    );
+    expect(ratchet.filter((f) => f.includes("new file with findings")).length).toBe(1);
+
+    const growth = evaluateBaselineGrowth(
+      {
+        counts: {
+          "new.test.ts::lone-presence": 1,
+          "new.test.ts::mock-call-only": 1,
+        },
+      },
+      { counts: { "old.test.ts::lone-presence": 1 } },
+    );
+    expect(growth.filter((f) => f.includes("baseline grew: new file")).length).toBe(1);
+  });
+
+  it("rejects missing or non-object head baseline counts", () => {
+    expect(evaluateBaselineGrowth(null, { counts: {} })).toEqual(["missing head baseline"]);
+    expect(evaluateBaselineGrowth({}, { counts: {} })).toEqual(["missing head baseline"]);
+    expect(
+      evaluateBaselineGrowth(
+        { counts: "bad" as unknown as Record<string, number> },
+        { counts: {} },
+      ),
+    ).toEqual(["missing head baseline"]);
+    expect(evaluateRatchet({}, { counts: "bad" as unknown as Record<string, number> })).toEqual([
+      "missing baseline; run test-smell-lint --update-baseline",
+    ]);
+  });
+
+  it("treats non-object base baseline counts as first introduction", () => {
+    expect(
+      evaluateBaselineGrowth(
+        { counts: { "a::lone-presence": 1 } },
+        { counts: "bad" as unknown as Record<string, number> },
+      ),
+    ).toEqual([]);
+  });
+
+  it("writeBaseline totals counts and loadBaseline returns null when missing", () => {
+    const dir = mkdtempSync(join(tmpdir(), "smell-baseline-io-"));
+    temps.push(dir);
+    const baselinePath = join(dir, "baseline.json");
+    const written = writeBaseline(
+      { "a.test.ts::lone-presence": 2, "b.test.ts::mock-call-only": 3 },
+      baselinePath,
+    );
+    expect(written.total).toBe(5);
+    expect(loadBaseline(baselinePath)?.total).toBe(5);
+    expect(loadBaseline(join(dir, "missing.json"))).toBeNull();
+  });
+
+  it("resolveBaselineBaseRef prefers --base, then env, skipping zero SHA", () => {
+    const neverExists = () => false;
+    expect(resolveBaselineBaseRef(["node", "x", "--base", "explicit"], {}, neverExists)).toBe(
+      "explicit",
+    );
+    expect(() => resolveBaselineBaseRef(["node", "x", "--base"], {}, neverExists)).toThrow(
+      /Missing value for argument --base/,
+    );
+    expect(() =>
+      resolveBaselineBaseRef(["node", "x", "--base", "--other"], {}, neverExists),
+    ).toThrow(/Missing value for argument --base/);
+    expect(
+      resolveBaselineBaseRef(["node", "x"], { SMELL_BASELINE_BASE: "from-smell" }, neverExists),
+    ).toBe("from-smell");
+    expect(
+      resolveBaselineBaseRef(
+        ["node", "x"],
+        { SMELL_BASELINE_BASE: ZERO_SHA, PR_SIZE_BASE: "from-pr-size" },
+        neverExists,
+      ),
+    ).toBe("from-pr-size");
+    expect(resolveBaselineBaseRef(["node", "x"], {}, (ref) => ref === "origin/main")).toBe(
+      "origin/main",
+    );
+    expect(resolveBaselineBaseRef(["node", "x"], {}, neverExists)).toBeNull();
   });
 });

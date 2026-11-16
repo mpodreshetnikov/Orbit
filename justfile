@@ -138,7 +138,9 @@ mobile-start instance="":
 quality-lint-supabase-functions:
   deno lint --config supabase/functions/deno.json supabase/functions
 
-# Assertion-smell scan on unit tests (warn by default; ORBIT_TEST_SMELL_FAIL=1 to gate).
+# Assertion-smell scan on unit tests. Default enforces the file+rule ratchet baseline
+# (scripts/just/test-smell-baseline.json). --update-baseline rewrites it; --fail /
+# ORBIT_TEST_SMELL_FAIL=1 hard-fails on any finding; --warn-only is advisory.
 test-smell-lint:
   node scripts/just/test-smell-lint.cjs
 

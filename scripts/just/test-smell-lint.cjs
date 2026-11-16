@@ -7,8 +7,16 @@
  * - sole `toContain` in a case (HTML/string presence as the only proof)
  * - mock-call-only cases (every expect is `toHaveBeenCalled*`)
  *
- * Default mode is warn (exit 0) so `quality` stays green while counts drop.
- * Set `ORBIT_TEST_SMELL_FAIL=1` (or pass `--fail`) to exit non-zero when smells remain.
+ * Default mode enforces the committed file+rule ratchet
+ * (`scripts/just/test-smell-baseline.json`): CI fails when any file+rule count
+ * exceeds the baseline, when a finding appears in a file absent from the
+ * baseline, or when the baseline is stale (counts dropped without shrinking it).
+ * The baseline itself may only shrink vs the PR base / previous main commit
+ * (`SMELL_BASELINE_BASE` or `--base`): raising a file+rule count or adding a new
+ * file via `--update-baseline` fails the check.
+ * `--update-baseline` rewrites the baseline from the current scan (refuses growth).
+ * `--fail` / `ORBIT_TEST_SMELL_FAIL=1` fails on any finding (hard mode; cleanup
+ * end state after the baseline is removed). `--warn-only` restores advisory exit 0.
  *
  * Suppress a line with `// test-smell-ok: <reason>` on the same line as the expect.
  *
@@ -22,8 +30,13 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
+const { spawnSync } = require("node:child_process");
 
 const ROOT = path.resolve(__dirname, "../..");
+const BASELINE_PATH = path.join(ROOT, "scripts", "just", "test-smell-baseline.json");
+const BASELINE_REPO_REL = "scripts/just/test-smell-baseline.json";
+const BASE_REF_CANDIDATES = ["origin/main", "main"];
+const ZERO_SHA = "0000000000000000000000000000000000000000";
 const SCAN_ROOTS = [
   path.join(ROOT, "src"),
   path.join(ROOT, "browserExtension", "src"),
@@ -32,6 +45,222 @@ const SCAN_ROOTS = [
   path.join(ROOT, "shared"),
   path.join(ROOT, "native"),
 ];
+
+/** @param {string} file @param {string} kind */
+function fileRuleKey(file, kind) {
+  return `${file}::${kind}`;
+}
+
+/**
+ * @param {{ file: string, kind: string }[]} findings
+ * @returns {Record<string, number>}
+ */
+function countByFileRule(findings) {
+  /** @type {Record<string, number>} */
+  const counts = {};
+  for (const f of findings) {
+    const key = fileRuleKey(f.file, f.kind);
+    counts[key] = (counts[key] || 0) + 1;
+  }
+  return counts;
+}
+
+/**
+ * @param {string} key
+ * @returns {{ file: string, kind: string }}
+ */
+function parseFileRuleKey(key) {
+  const sep = key.indexOf("::");
+  if (sep === -1) {
+    return { file: key, kind: "?" };
+  }
+  return { file: key.slice(0, sep), kind: key.slice(sep + 2) };
+}
+
+/**
+ * @param {Record<string, number>} counts
+ * @returns {Set<string>}
+ */
+function filesFromCounts(counts) {
+  const files = new Set();
+  for (const key of Object.keys(counts)) {
+    files.add(parseFileRuleKey(key).file);
+  }
+  return files;
+}
+
+/**
+ * Compare current file+rule counts to the committed baseline.
+ * Exact match required: exceed / new file / stale (shrunk without update) all fail.
+ * @param {Record<string, number>} currentCounts
+ * @param {{ counts?: Record<string, number> } | null | undefined} baseline
+ * @returns {string[]}
+ */
+function evaluateRatchet(currentCounts, baseline) {
+  if (!baseline || !baseline.counts || typeof baseline.counts !== "object") {
+    return ["missing baseline; run test-smell-lint --update-baseline"];
+  }
+
+  const baselineCounts = baseline.counts;
+  const failures = [];
+  const baselineFiles = filesFromCounts(baselineCounts);
+  const reportedNewFiles = new Set();
+
+  for (const [key, current] of Object.entries(currentCounts)) {
+    const { file, kind } = parseFileRuleKey(key);
+    if (!baselineFiles.has(file)) {
+      if (!reportedNewFiles.has(file)) {
+        reportedNewFiles.add(file);
+        failures.push(`new file with findings: ${file}`);
+      }
+      continue;
+    }
+    const base = Number(baselineCounts[key] || 0);
+    if (current > base) {
+      failures.push(`${file} ${kind}: ${current} > baseline ${base}`);
+    }
+  }
+
+  for (const [key, baseRaw] of Object.entries(baselineCounts)) {
+    const base = Number(baseRaw);
+    const current = Number(currentCounts[key] || 0);
+    if (current < base) {
+      const { file, kind } = parseFileRuleKey(key);
+      failures.push(`${file} ${kind}: ${current} < baseline ${base} (shrink baseline in this PR)`);
+    }
+  }
+
+  return failures;
+}
+
+/**
+ * Compare committed head baseline to the baseline on the PR base / previous main
+ * commit. Ratchet only goes down: no file+rule count may grow, and no new file
+ * may appear. Missing base baseline (first introduction) is allowed.
+ *
+ * @param {{ counts?: Record<string, number> } | null | undefined} headBaseline
+ * @param {{ counts?: Record<string, number> } | null | undefined} baseBaseline
+ * @returns {string[]}
+ */
+function evaluateBaselineGrowth(headBaseline, baseBaseline) {
+  if (!headBaseline || !headBaseline.counts || typeof headBaseline.counts !== "object") {
+    return ["missing head baseline"];
+  }
+  if (!baseBaseline || !baseBaseline.counts || typeof baseBaseline.counts !== "object") {
+    return [];
+  }
+
+  const headCounts = headBaseline.counts;
+  const baseCounts = baseBaseline.counts;
+  const failures = [];
+  const baseFiles = filesFromCounts(baseCounts);
+  const reportedNewFiles = new Set();
+
+  for (const [key, headRaw] of Object.entries(headCounts)) {
+    const { file, kind } = parseFileRuleKey(key);
+    const head = Number(headRaw);
+    if (!baseFiles.has(file)) {
+      if (!reportedNewFiles.has(file)) {
+        reportedNewFiles.add(file);
+        failures.push(`baseline grew: new file ${file}`);
+      }
+      continue;
+    }
+    const base = Number(baseCounts[key] || 0);
+    if (head > base) {
+      failures.push(`baseline grew: ${file} ${kind}: ${head} > ${base}`);
+    }
+  }
+
+  return failures;
+}
+
+// Stryker disable all: git spawn I/O; base resolution is asserted via resolveBaselineBaseRef
+// unit tests and injectable baseBaseline on run().
+function runGit(args) {
+  return spawnSync("git", args, { cwd: ROOT, encoding: "utf8" });
+}
+
+function refExists(ref) {
+  return runGit(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]).status === 0;
+}
+
+/**
+ * @param {string} ref
+ * @param {string} [relativePath]
+ * @returns {{ counts?: Record<string, number>, total?: number, generated_at?: string } | null}
+ */
+function loadBaselineAtRef(ref, relativePath = BASELINE_REPO_REL) {
+  if (!ref || !refExists(ref)) {
+    return null;
+  }
+  const result = runGit(["show", `${ref}:${relativePath}`]);
+  if (result.status !== 0) {
+    return null;
+  }
+  try {
+    return JSON.parse(result.stdout);
+  } catch {
+    return null;
+  }
+}
+// Stryker restore all
+
+/**
+ * @param {string[]} [argv]
+ * @param {Record<string, string | undefined>} [env]
+ * @param {(ref: string) => boolean} [exists]
+ * @returns {string | null}
+ */
+function resolveBaselineBaseRef(argv = process.argv, env = process.env, exists = refExists) {
+  const idx = argv.indexOf("--base");
+  if (idx !== -1) {
+    const value = argv[idx + 1];
+    if (!value || value.startsWith("--")) {
+      throw new Error("Missing value for argument --base");
+    }
+    return value;
+  }
+  for (const key of ["SMELL_BASELINE_BASE", "PR_SIZE_BASE"]) {
+    const value = env[key];
+    if (value && value !== ZERO_SHA) {
+      return value;
+    }
+  }
+  return BASE_REF_CANDIDATES.find((candidate) => exists(candidate)) ?? null;
+}
+
+/**
+ * @param {Record<string, number>} counts
+ * @param {string} [baselinePath]
+ */
+function writeBaseline(counts, baselinePath = BASELINE_PATH) {
+  const total = Object.values(counts).reduce((sum, n) => sum + n, 0);
+  const sortedKeys = Object.keys(counts).toSorted();
+  /** @type {Record<string, number>} */
+  const sortedCounts = {};
+  for (const key of sortedKeys) {
+    sortedCounts[key] = counts[key];
+  }
+  const baseline = {
+    generated_at: new Date().toISOString(),
+    total,
+    counts: sortedCounts,
+  };
+  fs.writeFileSync(baselinePath, JSON.stringify(baseline, null, 2) + "\n");
+  return baseline;
+}
+
+/**
+ * @param {string} filePath
+ * @returns {{ counts?: Record<string, number>, total?: number, generated_at?: string } | null}
+ */
+function loadBaseline(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return null;
+  }
+  return JSON.parse(fs.readFileSync(filePath, "utf8"));
+}
 
 const TEST_NAME = /\.(?:test|spec)\.(?:ts|tsx|js|jsx|mjs|cjs)$/;
 /** Head of it/test, including optional modifiers and optional .each/.for (before any call). */
@@ -373,14 +602,36 @@ function analyzeFile(file, source) {
 }
 
 /**
- * @param {{ fail?: boolean, roots?: string[] }} [opts]
+ * @param {{
+ *   fail?: boolean,
+ *   warnOnly?: boolean,
+ *   enforceRatchet?: boolean,
+ *   updateBaseline?: boolean,
+ *   checkBaselineGrowth?: boolean,
+ *   roots?: string[],
+ *   baselinePath?: string,
+ *   baselineBaseRef?: string | null,
+ *   baseBaseline?: { counts?: Record<string, number> } | null,
+ *   silent?: boolean,
+ * }} [opts]
  */
 function run(opts = {}) {
-  const fail =
-    opts.fail === true ||
-    process.argv.includes("--fail") ||
-    process.env.ORBIT_TEST_SMELL_FAIL === "1";
+  const argv = process.argv;
+  const hardFail =
+    opts.fail === true || argv.includes("--fail") || process.env.ORBIT_TEST_SMELL_FAIL === "1";
+  // `fail: false` keeps the historical warn-only programmatic API used by unit tests.
+  const warnOnly = opts.warnOnly === true || argv.includes("--warn-only") || opts.fail === false;
+  const updateBaseline = opts.updateBaseline === true || argv.includes("--update-baseline");
+  const baselinePath = opts.baselinePath ?? BASELINE_PATH;
+  const enforceRatchet =
+    opts.enforceRatchet === true ||
+    (!warnOnly && !hardFail && !updateBaseline && opts.enforceRatchet !== false);
+  const checkBaselineGrowth =
+    opts.checkBaselineGrowth === true ||
+    (!warnOnly && opts.checkBaselineGrowth !== false && (enforceRatchet || updateBaseline));
   const roots = opts.roots ?? SCAN_ROOTS;
+  const silent = opts.silent === true;
+
   /** @type {{ file: string, line: number, kind: string, detail: string }[]} */
   const findings = [];
   for (const root of roots) {
@@ -388,6 +639,56 @@ function run(opts = {}) {
       const source = fs.readFileSync(file, "utf8");
       findings.push(...analyzeFile(file, source));
     });
+  }
+
+  const counts = countByFileRule(findings);
+
+  /** @type {string[]} */
+  let growthFailures = [];
+  if (checkBaselineGrowth) {
+    /** @type {{ counts?: Record<string, number> } | null} */
+    let baseBaseline;
+    if (opts.baseBaseline !== undefined) {
+      baseBaseline = opts.baseBaseline;
+    } else {
+      const baseRef =
+        opts.baselineBaseRef !== undefined ? opts.baselineBaseRef : resolveBaselineBaseRef(argv);
+      baseBaseline = baseRef ? loadBaselineAtRef(baseRef) : null;
+    }
+    if (updateBaseline) {
+      growthFailures = evaluateBaselineGrowth({ counts }, baseBaseline);
+    } else {
+      growthFailures = evaluateBaselineGrowth(loadBaseline(baselinePath), baseBaseline);
+    }
+  }
+
+  if (updateBaseline) {
+    if (growthFailures.length > 0) {
+      if (!silent) {
+        for (const failure of growthFailures) {
+          process.stderr.write(`[test-smell-baseline] ${failure}\n`);
+        }
+        process.stdout.write(
+          "test-smell-lint: refusing --update-baseline — baseline may only shrink vs base\n",
+        );
+      }
+      return {
+        findings,
+        counts,
+        exitCode: 1,
+        ratchetFailures: [],
+        growthFailures,
+      };
+    }
+    const baseline = writeBaseline(counts, baselinePath);
+    if (!silent) {
+      process.stdout.write(
+        `test-smell-lint: baseline updated (${baseline.total} finding(s)) → ${path
+          .relative(ROOT, baselinePath)
+          .replace(/\\/g, "/")}\n`,
+      );
+    }
+    return { findings, counts, exitCode: 0, ratchetFailures: [], growthFailures: [] };
   }
 
   // Stryker disable all: summary/ truncation stdout formatting; exitCode + findings are asserted
@@ -404,25 +705,53 @@ function run(opts = {}) {
       : ""
   }`;
 
-  if (findings.length === 0) {
-    process.stdout.write(`${summary}\n`);
-    return { findings, exitCode: 0 };
+  /** @type {string[]} */
+  let ratchetFailures = [];
+  if (enforceRatchet) {
+    ratchetFailures = evaluateRatchet(counts, loadBaseline(baselinePath));
   }
 
-  const shown = fail ? findings : findings.slice(0, 40);
-  for (const f of shown) {
-    process.stdout.write(`${f.file}:${f.line}: ${f.kind}: ${f.detail}\n`);
+  let exitCode = 0;
+  let modeNote = "";
+  if (hardFail && findings.length > 0) {
+    exitCode = 1;
+    modeNote = " — failing (hard: any finding)";
+  } else if (growthFailures.length > 0) {
+    exitCode = 1;
+    modeNote = " — failing (baseline grew vs base)";
+  } else if (enforceRatchet && ratchetFailures.length > 0) {
+    exitCode = 1;
+    modeNote = " — failing (ratchet)";
+  } else if (warnOnly) {
+    modeNote = " — warn only";
+  } else if (enforceRatchet) {
+    modeNote = " — ratchet ok";
   }
-  if (!fail && findings.length > shown.length) {
-    process.stdout.write(
-      `… ${findings.length - shown.length} more (run with --fail for full list)\n`,
-    );
+
+  if (!silent) {
+    const listFindings = hardFail || warnOnly || (enforceRatchet && exitCode !== 0);
+    if (listFindings && findings.length > 0) {
+      const showAll = hardFail || (enforceRatchet && exitCode !== 0);
+      const shown = showAll ? findings : findings.slice(0, 40);
+      for (const f of shown) {
+        process.stdout.write(`${f.file}:${f.line}: ${f.kind}: ${f.detail}\n`);
+      }
+      if (!showAll && findings.length > shown.length) {
+        process.stdout.write(
+          `… ${findings.length - shown.length} more (run with --fail for full list)\n`,
+        );
+      }
+    }
+    for (const failure of growthFailures) {
+      process.stderr.write(`[test-smell-baseline] ${failure}\n`);
+    }
+    for (const failure of ratchetFailures) {
+      process.stderr.write(`[test-smell-ratchet] ${failure}\n`);
+    }
+    process.stdout.write(`${summary}${modeNote}\n`);
   }
-  process.stdout.write(
-    `${summary}${fail ? " — failing" : " — warn only (ORBIT_TEST_SMELL_FAIL=1 or --fail to gate)"}\n`,
-  );
   // Stryker restore all
-  return { findings, exitCode: fail ? 1 : 0 };
+  return { findings, counts, exitCode, ratchetFailures, growthFailures };
 }
 
 if (require.main === module) {
@@ -433,6 +762,19 @@ if (require.main === module) {
 module.exports = {
   run,
   analyzeFile,
+  countByFileRule,
+  evaluateRatchet,
+  evaluateBaselineGrowth,
+  resolveBaselineBaseRef,
+  loadBaselineAtRef,
+  writeBaseline,
+  loadBaseline,
+  parseFileRuleKey,
+  fileRuleKey,
+  filesFromCounts,
+  ZERO_SHA,
+  BASELINE_PATH,
+  BASELINE_REPO_REL,
   WEAK_PRESENCE,
   MOCK_CALL_MATCHERS,
   inNonCode,
