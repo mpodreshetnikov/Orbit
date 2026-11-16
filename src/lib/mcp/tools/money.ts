@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { readTimezonePreference } from "@/lib/medications/regenerate-dose-events";
 import {
+  formatChange,
   isoDay,
   parsePeriod,
   percentChange,
@@ -63,6 +64,9 @@ function formatMoney(amount: number, currency: string): string {
 
 function formatDelta(value: number, base: number): string {
   const change = percentChange(value, base);
+  const text = formatChange(change, { value, base, newLabel: "new" });
+  if (!text) return "n/a";
+  if (text.startsWith("×") || text === "new") return text;
   if (change === null) return "n/a";
   return `${change > 0 ? "+" : ""}${change}%`;
 }
