@@ -40,15 +40,26 @@ function num(value: unknown): number {
 }
 
 function str(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value : null;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
 }
 
 function rowOf(value: unknown): Row {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Row) : {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as Row;
 }
 
 function rows(value: unknown): Row[] {
-  return Array.isArray(value) ? value.map(rowOf) : [];
+  if (!Array.isArray(value)) return [];
+  return value.map(rowOf);
+}
+
+function forecastRow(value: unknown): Row | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "object") return null;
+  if (Array.isArray(value)) return null;
+  return value as Row;
 }
 
 /** Normalize the RPC payload, then layer on UX-only comparison and forecast fields. */
@@ -56,53 +67,60 @@ export function normalizeSpendingReport(value: unknown): SpendingReport {
   const base = normalizeSpendingReportBase(value);
   const body = rowOf(value);
   const period = rowOf(body.period);
-  const forecastRaw =
-    body.forecast && typeof body.forecast === "object" ? rowOf(body.forecast) : null;
+  const forecastRaw = forecastRow(body.forecast);
   const merchantRows = rows(body.merchants);
   const days = base.period.days;
+  const compareDaysRaw = num(period.compare_days);
+  const previousCompareEnd = str(period.previous_compare_end);
+
+  let forecast: SpendingForecast | null = null;
+  if (base.forecast && forecastRaw) {
+    const income = num(forecastRaw.income);
+    const expense = num(forecastRaw.expense);
+    const netRaw = Number(forecastRaw.net);
+    forecast = {
+      expense: base.forecast.expense,
+      income,
+      net: Number.isFinite(netRaw) ? num(forecastRaw.net) : income - expense,
+      days_left: base.forecast.days_left,
+    };
+  }
 
   return {
     ...base,
     period: {
       ...base.period,
-      compare_days: num(period.compare_days) || days,
-      previous_compare_end: str(period.previous_compare_end) ?? base.period.previous_end,
+      compare_days: compareDaysRaw > 0 ? compareDaysRaw : days,
+      previous_compare_end: previousCompareEnd ?? base.period.previous_end,
     },
-    forecast: base.forecast
-      ? {
-          expense: base.forecast.expense,
-          income: num(forecastRaw?.income),
-          net: Number.isFinite(Number(forecastRaw?.net))
-            ? num(forecastRaw?.net)
-            : num(forecastRaw?.income) - num(forecastRaw?.expense),
-          days_left: base.forecast.days_left,
-        }
-      : null,
-    merchants: base.merchants.map((merchant, index) => ({
-      ...merchant,
-      previous_expense: num(merchantRows[index]?.previous_expense),
-    })),
+    forecast,
+    merchants: base.merchants.map((merchant, index) => {
+      const raw = merchantRows[index] ?? {};
+      return {
+        ...merchant,
+        previous_expense: num(raw.previous_expense),
+      };
+    }),
   };
 }
 
 /** Round chart axis ticks: nice steps (1/2/5 × 10ⁿ) covering `max` with about `target` ticks. */
 export function niceAxisTicks(max: number, target = 4): number[] {
   if (!Number.isFinite(max) || max <= 0) return [0];
-  const raw = max / Math.max(1, target);
+  const safeTarget = Math.max(1, target);
+  const raw = max / safeTarget;
   const power = 10 ** Math.floor(Math.log10(raw));
   const normalized = raw / power;
-  const step =
-    normalized <= 1
-      ? power
-      : normalized <= 2
-        ? 2 * power
-        : normalized <= 5
-          ? 5 * power
-          : 10 * power;
+  let step: number;
+  if (normalized <= 1) step = power;
+  else if (normalized <= 2) step = 2 * power;
+  else if (normalized <= 5) step = 5 * power;
+  else step = 10 * power;
   const top = Math.ceil(max / step) * step;
+  const tickCount = Math.round(top / step);
   const ticks: number[] = [];
-  for (let value = 0; value <= top + step * 0.001; value += step) {
-    ticks.push(Math.round(value * 1e6) / 1e6);
+  for (let i = 0; i <= tickCount; i += 1) {
+    ticks.push(Math.round(i * step * 1e6) / 1e6);
   }
   return ticks;
 }

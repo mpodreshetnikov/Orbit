@@ -13,10 +13,16 @@ export const COMPARISON_MAX_RATIO = 10;
 
 /** The change from `base` to `value` in whole percent, or null when percent is not meaningful. */
 export function percentChange(value: number, base: number): number | null {
-  if (!Number.isFinite(base) || Math.abs(base) <= COMPARISON_BASE_EPSILON) return null;
+  if (!Number.isFinite(base)) return null;
+  if (Math.abs(base) <= COMPARISON_BASE_EPSILON) return null;
   if (!Number.isFinite(value)) return null;
   if (Math.abs(value) / Math.abs(base) > COMPARISON_MAX_RATIO) return null;
   return Math.round(((value - base) / Math.abs(base)) * 100);
+}
+
+function formatMultiple(value: number, base: number): string {
+  const ratio = Math.abs(value) / Math.abs(base);
+  return `×${Math.max(1, Math.round(ratio))}`;
 }
 
 /**
@@ -28,21 +34,14 @@ export function formatChange(
   options?: { value?: number; base?: number; newLabel?: string },
 ): string | null {
   if (change === null) {
-    const value = options?.value;
-    const base = options?.base;
-    if (
-      value !== undefined &&
-      base !== undefined &&
-      Number.isFinite(value) &&
-      Number.isFinite(base) &&
-      Math.abs(base) > COMPARISON_BASE_EPSILON &&
-      Math.abs(value) / Math.abs(base) > COMPARISON_MAX_RATIO
-    ) {
-      return `×${Math.max(1, Math.round(Math.abs(value) / Math.abs(base)))}`;
-    }
-    if (value !== undefined && value > COMPARISON_BASE_EPSILON * 0.005) {
-      // Stryker disable next-line OptionalChaining: value is read from options, so options is defined here
-      return options?.newLabel ?? "новое";
+    if (!options) return null;
+    const { value, base, newLabel } = options;
+    // Stryker disable next-line ConditionalExpression: undefined value falls through to null either way
+    if (value === undefined) return null;
+    const multiple = tryFormatMultiple(value, base);
+    if (multiple !== null) return multiple;
+    if (value > COMPARISON_BASE_EPSILON * 0.005) {
+      return newLabel ?? "новое";
     }
     return null;
   }

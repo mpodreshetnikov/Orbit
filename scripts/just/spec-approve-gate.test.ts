@@ -2,7 +2,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { checkClaimedTaskWithWaive, checkTaskFileWithWaive } from "./spec-approve-gate.cjs";
+import {
+  checkClaimedTaskWithWaive,
+  checkTaskFileWithWaive,
+  parseSpecApprovalsEnv,
+} from "./spec-approve-gate.cjs";
 
 const maxim = "mpodreshetnikov@gmail.com";
 
@@ -54,17 +58,80 @@ describe("checkTaskFileWithWaive", () => {
     expect(result.ok).toBe(true);
     expect(result.code).toBe("approved");
   });
+
+  it("trims and drops empty SPEC_APPROVALS entries", () => {
+    const file = writeTask(`${complexHeader}\n## Spec\n\nDone.\n`);
+    const result = checkTaskFileWithWaive(file, {
+      env: { ...process.env, SPEC_APPROVALS: "  Kot-kAkos  ,  , " },
+    });
+    expect(result.ok).toBe(true);
+    expect(result.code).toBe("approved");
+  });
+
+  it("passes a simple task without needing Spec or waive", () => {
+    const file = writeTask(`---
+id: T-simple
+depth: note
+owner: ${maxim}
+---
+
+# Simple
+`);
+    const result = checkTaskFileWithWaive(file);
+    expect(result.ok).toBe(true);
+    expect(result.code).toBe("simple");
+  });
 });
 
 describe("checkClaimedTaskWithWaive", () => {
   it("returns no-marker when nothing is claimed", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "spec-gate-root-"));
     try {
-      const result = checkClaimedTaskWithWaive({ repoRoot: dir, env: {} });
+      const result = checkClaimedTaskWithWaive({
+        repoRoot: dir,
+        env: { ...process.env },
+      });
       expect(result.ok).toBe(true);
       expect(result.code).toBe("no-marker");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("applies owner waive for a claimed complex task", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "spec-gate-claim-"));
+    const registry = fs.mkdtempSync(path.join(os.tmpdir(), "spec-gate-reg-"));
+    try {
+      fs.mkdirSync(path.join(root, ".git"), { recursive: true });
+      fs.writeFileSync(path.join(root, ".git", "current-task"), "T-gate-waive\n");
+      const tasksDir = path.join(registry, "docs", "tasks");
+      fs.mkdirSync(tasksDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(tasksDir, "T-gate-waive-demo.md"),
+        `${complexHeader}\nSpec waived by mpodreshetnikov.\n`,
+      );
+      const result = checkClaimedTaskWithWaive({
+        repoRoot: root,
+        env: { ...process.env, ORBIT_TASKS_ROOT: registry },
+      });
+      expect(result.ok).toBe(true);
+      expect(result.code).toBe("waived");
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(registry, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("parseSpecApprovalsEnv", () => {
+  it("returns an empty list when unset", () => {
+    expect(parseSpecApprovalsEnv({})).toEqual([]);
+  });
+
+  it("trims entries and drops empties", () => {
+    expect(parseSpecApprovalsEnv({ SPEC_APPROVALS: "  Kot-kAkos , ,Maxim " })).toEqual([
+      { login: "Kot-kAkos" },
+      { login: "Maxim" },
+    ]);
   });
 });

@@ -61,7 +61,7 @@ describe("normalizeSpendingReport", () => {
     });
   });
 
-  it("defaults compare_days to period days and derives forecast net when missing", () => {
+  it("defaults compare_days and previous_compare_end; derives forecast net when missing", () => {
     const report = normalizeSpendingReport({
       period: {
         start: "2026-03-01",
@@ -70,6 +70,7 @@ describe("normalizeSpendingReport", () => {
         compare_days: 0,
         previous_start: "2026-01-29",
         previous_end: "2026-02-28",
+        previous_compare_end: "   ",
         last_year: 2025,
       },
       currency: "RUB",
@@ -81,7 +82,6 @@ describe("normalizeSpendingReport", () => {
       fx_status: { status: "ok" },
     });
 
-    // compare_days: 0 is falsy → fall back to period.days (||, not &&)
     expect(report.period.compare_days).toBe(31);
     expect(report.period.previous_compare_end).toBe("2026-02-28");
     expect(report.forecast).toEqual({
@@ -115,6 +115,48 @@ describe("normalizeSpendingReport", () => {
     expect(report.forecast?.net).toBe(0);
   });
 
+  it("ignores non-object forecasts, arrays, and non-array merchants", () => {
+    const asString = normalizeSpendingReport({
+      period: {
+        start: "2026-03-01",
+        end: "2026-03-31",
+        days: 10,
+        previous_start: "2026-01-29",
+        previous_end: "2026-02-28",
+        last_year: 2025,
+      },
+      currency: "RUB",
+      totals: {},
+      forecast: "nope",
+      categories: [],
+      days: [],
+      merchants: "nope",
+      fx_status: { status: "ok" },
+    });
+    expect(asString.forecast).toBeNull();
+    expect(asString.merchants).toEqual([]);
+
+    // Base normalize treats an array forecast as an empty object; UX must still drop it.
+    const asArray = normalizeSpendingReport({
+      period: {
+        start: "2026-03-01",
+        end: "2026-03-31",
+        days: 10,
+        previous_start: "2026-01-29",
+        previous_end: "2026-02-28",
+        last_year: 2025,
+      },
+      currency: "RUB",
+      totals: {},
+      forecast: [],
+      categories: [],
+      days: [],
+      merchants: [],
+      fx_status: { status: "ok" },
+    });
+    expect(asArray.forecast).toBeNull();
+  });
+
   it("leaves forecast null when the payload has none", () => {
     const report = normalizeSpendingReport(null);
     expect(report.forecast).toBeNull();
@@ -144,7 +186,6 @@ describe("normalizeSpendingReport", () => {
     });
     expect(report.period.compare_days).toBe(31);
   });
-
 });
 
 describe("niceAxisTicks", () => {
@@ -155,19 +196,16 @@ describe("niceAxisTicks", () => {
   });
 
   it("builds round Y-axis ticks covering the max across 1/2/5×10ⁿ bands", () => {
-    // normalized ≤1 → step = 10ⁿ
     expect(niceAxisTicks(8, 4)).toEqual([0, 2, 4, 6, 8]);
     expect(niceAxisTicks(40, 4)).toEqual([0, 10, 20, 30, 40]);
-    // normalized ≤2 → step = 2×10ⁿ
     expect(niceAxisTicks(50, 4)).toEqual([0, 20, 40, 60]);
-    // normalized ≤5 → step = 5×10ⁿ
     expect(niceAxisTicks(87)).toEqual([0, 50, 100]);
     expect(niceAxisTicks(100, 4)).toEqual([0, 50, 100]);
+    // normalized === 5 must use 5×10ⁿ (kills < vs <= on the ≤5 band).
+    expect(niceAxisTicks(200, 4)).toEqual([0, 50, 100, 150, 200]);
     expect(niceAxisTicks(120, 5)).toEqual([0, 50, 100, 150]);
-    // normalized >5 → step = 10×10ⁿ
     expect(niceAxisTicks(250, 4)).toEqual([0, 100, 200, 300]);
     expect(niceAxisTicks(1000)[niceAxisTicks(1000).length - 1]).toBeGreaterThanOrEqual(1000);
-    expect(niceAxisTicks(900, 4)[niceAxisTicks(900, 4).length - 1]).toBeGreaterThanOrEqual(900);
     expect(niceAxisTicks(3)[niceAxisTicks(3).length - 1]).toBeGreaterThanOrEqual(3);
     expect(niceAxisTicks(15)[niceAxisTicks(15).length - 1]).toBeGreaterThanOrEqual(15);
   });
