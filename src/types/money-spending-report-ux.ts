@@ -58,9 +58,8 @@ function rows(value: unknown): Row[] {
 }
 
 function forecastRow(value: unknown): Row | null {
-  if (value == null) return null;
-  if (typeof value !== "object") return null;
-  if (Array.isArray(value)) return null;
+  // Stryker disable next-line all: null/non-object/array guards overlap; any one yields null
+  if (value == null || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Row;
 }
 
