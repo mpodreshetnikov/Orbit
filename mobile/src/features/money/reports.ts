@@ -1,9 +1,8 @@
+import { isoDay, type SpendingPeriod } from "@orbit-types/money-spending-report";
 import {
-  isoDay,
   normalizeSpendingReport,
-  type SpendingPeriod,
   type SpendingReport,
-} from "@orbit-types/money-spending-report";
+} from "@orbit-types/money-spending-report-ux";
 import { supabase } from "@/lib/supabase";
 
 function check<T>({ data, error }: { data: T; error: { message: string } | null }): T {

@@ -1,7 +1,8 @@
 import React from "react";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { SpendingCategory, SpendingReport } from "@/types/money-spending-report";
+import type { SpendingCategory } from "@/types/money-spending-report";
+import type { SpendingReport } from "@/types/money-spending-report-ux";
 import MoneyReportsPage from "./page";
 
 const hookMocks = vi.hoisted(() => ({
@@ -33,6 +34,9 @@ vi.mock("@/stores/ui-store", () => ({
 vi.mock("@/hooks", () => ({
   useIsMobile: (...args: unknown[]) => hookMocks.useIsMobile(...args),
   useMoneyAccounts: (...args: unknown[]) => hookMocks.useMoneyAccounts(...args),
+}));
+
+vi.mock("@/hooks/use-money-spending-report", () => ({
   useMoneySpendingReport: (...args: unknown[]) => hookMocks.useMoneySpendingReport(...args),
 }));
 

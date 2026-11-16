@@ -66,8 +66,6 @@ describe("fetchMoneySpendingReport", () => {
       p_report_currency: "RUB",
       p_account_ids: null,
       p_category_id: null,
-      p_brand_id: null,
-      p_merchant_name: null,
       p_today: "2026-11-09",
     });
     expect(report.totals.expense).toBe(2);

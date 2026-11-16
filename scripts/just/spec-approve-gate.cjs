@@ -1,0 +1,89 @@
+/**
+ * Spec / second-approve gate with owner waive (CLI for pre-push and CI).
+ * Delegates core checks to spec-approve.cjs; waive lives in spec-owner-waive.cjs
+ * so spec-approve.cjs can stay identical to main under incremental mutation.
+ */
+"use strict";
+
+const fs = require("node:fs");
+const path = require("node:path");
+const {
+  checkClaimedTask,
+  evaluateCodeGate,
+  loadTaskFile,
+  locateRegistry,
+  parseApprovalsFromTask,
+  parseFrontMatter,
+  readMarker,
+} = require("./spec-approve.cjs");
+const { applyOwnerSpecWaive, evaluateCodeGateWithOwnerWaive } = require("./spec-owner-waive.cjs");
+
+const REPO_ROOT = path.resolve(__dirname, "../..");
+
+function checkClaimedTaskWithWaive({ repoRoot = REPO_ROOT, env = process.env } = {}) {
+  const result = checkClaimedTask({ repoRoot, env });
+  if (result.ok || (result.code !== "no-spec" && result.code !== "no-second-approve")) {
+    return result;
+  }
+  const taskId = readMarker(repoRoot);
+  if (!taskId) return result;
+  const registry = locateRegistry(repoRoot, env);
+  if (!registry) return result;
+  const loaded = loadTaskFile(taskId, registry);
+  if (!loaded) return result;
+  const fm = parseFrontMatter(loaded.text);
+  return applyOwnerSpecWaive(result, { taskText: loaded.text, ownerEmail: fm.owner });
+}
+
+function checkTaskFileWithWaive(filePath, { env = process.env } = {}) {
+  const text = fs.readFileSync(filePath, "utf8");
+  const fm = parseFrontMatter(text);
+  const extra = env.SPEC_APPROVALS
+    ? String(env.SPEC_APPROVALS)
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .map((login) => ({ login }))
+    : [];
+  return evaluateCodeGateWithOwnerWaive(evaluateCodeGate, {
+    taskText: text,
+    ownerEmail: fm.owner,
+    actorEmail: fm.owner,
+    isAgentExecutor: false,
+    approvals: [...parseApprovalsFromTask(text), ...extra],
+  });
+}
+
+function main(argv = process.argv.slice(2)) {
+  if (argv[0] === "--check-claimed") {
+    const result = checkClaimedTaskWithWaive();
+    (result.ok ? process.stdout : process.stderr).write(`${result.message}\n`);
+    process.exit(result.ok ? 0 : 1);
+  }
+  if (argv[0] === "--check-task-file") {
+    const file = argv[1];
+    if (!file) {
+      process.stderr.write("Usage: spec-approve-gate.cjs --check-task-file <path>\n");
+      process.exit(2);
+    }
+    const result = checkTaskFileWithWaive(file);
+    (result.ok ? process.stdout : process.stderr).write(`${result.message}\n`);
+    process.exit(result.ok ? 0 : 1);
+  }
+  process.stderr.write(
+    "Usage: spec-approve-gate.cjs --check-claimed | --check-task-file <path>\n",
+  );
+  process.exit(2);
+}
+
+module.exports = {
+  checkClaimedTaskWithWaive,
+  checkTaskFileWithWaive,
+  evaluateCodeGateWithOwnerWaive,
+  applyOwnerSpecWaive,
+};
+
+// Stryker disable next-line all: CLI entry — unreachable when the module is imported by tests
+if (require.main === module) {
+  main();
+}
