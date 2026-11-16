@@ -78,8 +78,10 @@ const REPORT: SpendingReport = {
     start: "2026-10-01",
     end: "2026-10-31",
     days: 31,
+    compare_days: 31,
     previous_start: "2026-08-31",
     previous_end: "2026-09-30",
+    previous_compare_end: "2026-09-30",
     last_year: 2025,
   },
   currency: "RUB",
@@ -94,7 +96,7 @@ const REPORT: SpendingReport = {
     last_year_expense: 122082,
     last_year_net: 52446,
   },
-  forecast: { expense: 131000, days_left: 3 },
+  forecast: { expense: 131000, income: 185000, net: 54000, days_left: 3 },
   categories: [
     category({
       id: "food",
@@ -120,6 +122,7 @@ const REPORT: SpendingReport = {
       logo_url: null,
       base_color: "#b91c1c",
       expense: 11240,
+      previous_expense: 9800,
       transaction_count: 14,
     },
   ],
@@ -164,6 +167,8 @@ describe("MoneyReportsPage", () => {
       currency: "RUB",
       accountIds: ["acc-1"],
       categoryId: "food",
+      brandId: null,
+      merchantName: null,
     });
     expect(screen.getByTestId("spending-total-expense")).toBeInTheDocument();
   });
@@ -178,9 +183,15 @@ describe("MoneyReportsPage", () => {
     expect(within(expense).getByText(/▼ 3% money.spendingVsLastYear\(2025\)/)).toHaveClass(
       "text-teal-800",
     );
-    const forecast = within(expense).getByTestId("spending-forecast");
+    const forecast = screen.getByTestId("spending-forecast");
     expect(forecast).toHaveTextContent("≈ RUB 131,000");
+    expect(forecast).toHaveTextContent("≈ RUB 185,000");
+    expect(forecast).toHaveTextContent("≈ +RUB 54,000");
     expect(forecast).toHaveTextContent("money.spendingForecastDaysLeft(3)");
+    expect(screen.getByTestId("spending-view-transactions")).toHaveAttribute(
+      "href",
+      expect.stringContaining("preset=custom"),
+    );
 
     const net = screen.getByTestId("spending-total-net");
     expect(within(net).getByText("+RUB 66,580")).toBeInTheDocument();
@@ -297,10 +308,14 @@ describe("MoneyReportsPage", () => {
 
   it("shows the days and the merchants", () => {
     render(<MoneyReportsPage />);
-    expect(screen.getByTestId("spending-days").children).toHaveLength(2);
+    expect(within(screen.getByTestId("spending-days")).getAllByRole("button")).toHaveLength(2);
+    expect(screen.getByTestId("spending-days-axis")).toBeInTheDocument();
     const merchants = screen.getByTestId("spending-merchants");
     expect(merchants).toHaveTextContent("Pyaterochka");
     expect(merchants).toHaveTextContent("money.spendingMerchantCount(14)");
+    fireEvent.click(within(merchants).getByRole("button", { name: /Pyaterochka/ }));
+    expect(lastUrl().get("merchant")).toBe("Pyaterochka");
+    expect(lastUrl().get("brand")).toBe("b1");
   });
 
   it("says when rates are missing, and when the report failed", () => {

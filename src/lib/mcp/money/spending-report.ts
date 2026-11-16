@@ -35,6 +35,8 @@ export interface SpendingReportQuery {
   currency: string;
   accountIds: string[];
   categoryId: string | null;
+  brandId?: string | null;
+  merchantName?: string | null;
   /** Calendar "today" for the forecast window; defaults to UTC today. */
   today?: string;
   /**
@@ -105,6 +107,8 @@ export async function fetchMoneySpendingReport(
     p_report_currency: query.currency,
     p_account_ids: query.accountIds.length > 0 ? query.accountIds : null,
     p_category_id: query.categoryId,
+    p_brand_id: query.brandId ?? null,
+    p_merchant_name: query.merchantName ?? null,
     p_today: today,
   });
   if (error) throw new Error(error.message);
