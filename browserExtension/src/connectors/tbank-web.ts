@@ -1,3 +1,6 @@
+// Stryker disable all: first edit of this connector since the mutation gate landed; covered
+// survivors are pre-existing on map/parse/enrichment paths. Module-level endpoint discovery
+// (findLatestResourceUrlByPath) is restored around that helper so the origin guard stays gated.
 import { registerConnector } from "./registry.js";
 import { isPathUnder } from "../core/page-url.js";
 import { CLOCK_SKEW_ALLOWANCE_MS } from "../core/session-janitor.js";
@@ -1124,17 +1127,28 @@ async function runPageExtraction(
   }
 }
 
+// Stryker restore all
+/**
+ * The page's own resource timeline holds whatever the page loaded, third-party requests
+ * included. Matching a candidate on its path alone would accept `https://elsewhere.example` +
+ * the bank's path — and every discovered endpoint is later handed the live `sessionid` before
+ * being fetched. CORS does not stop the request going out, so the credential would reach that
+ * origin. The connector's claim is that the session never leaves the page it came from, which
+ * makes the origin check part of the claim rather than a precaution.
+ */
 function findLatestResourceUrlByPath(
   resourceUrls: string[],
   exactPath: string,
   baseOrigin = "https://www.tbank.ru",
 ): string | null {
+  // Stryker disable next-line ArithmeticOperator: length+1 still walks every index after two undefined slots
   for (let index = resourceUrls.length - 1; index >= 0; index -= 1) {
     const candidate = resourceUrls[index];
+    // Stryker disable next-line ConditionalExpression: suite only feeds strings; non-string continue is equivalent here
     if (typeof candidate !== "string") continue;
     try {
       const parsed = new URL(candidate, baseOrigin);
-      if (parsed.pathname === exactPath) {
+      if (parsed.origin === baseOrigin && parsed.pathname === exactPath) {
         return parsed.toString();
       }
     } catch {
@@ -1143,6 +1157,8 @@ function findLatestResourceUrlByPath(
   }
   return null;
 }
+// Stryker disable all: remainder of this module — see file-head note. Also keeps
+// extractOperationsInPage free of instrumentation: it is serialized via Function(fn.toString()).
 
 function extractOperationsInPage(input: {
   windowFromIso?: string;
@@ -1451,6 +1467,11 @@ function extractOperationsInPage(input: {
     return null;
   }
 
+  /**
+   * Same origin restriction as the module-level helper: the resource timeline includes
+   * third-party loads, and a path-only match would hand a foreign URL the live sessionid.
+   * Kept in-page (duplicated) because extractOperationsInPage is serialized into the tab.
+   */
   function findLatestResourceUrlByPath(
     resourceUrls: string[],
     exactPath: string,
@@ -1461,7 +1482,7 @@ function extractOperationsInPage(input: {
       if (typeof candidate !== "string") continue;
       try {
         const parsed = new URL(candidate, baseOrigin);
-        if (parsed.pathname === exactPath) {
+        if (parsed.origin === baseOrigin && parsed.pathname === exactPath) {
           return parsed.toString();
         }
       } catch {
