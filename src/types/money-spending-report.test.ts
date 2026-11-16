@@ -4,6 +4,7 @@ import {
   childCategories,
   formatChange,
   formatReportAmount,
+  niceAxisTicks,
   normalizeSpendingReport,
   parsePeriod,
   percentChange,
@@ -13,6 +14,7 @@ import {
   shiftPeriod,
   squarify,
   topCategories,
+  transactionsFeedQuery,
   treemapShade,
   type SpendingCategory,
 } from "./money-spending-report";
@@ -82,7 +84,12 @@ describe("normalizeSpendingReport", () => {
       last_year_expense: 310.5,
       previous_net: 0,
     });
-    expect(report.forecast).toEqual({ expense: 2550, days_left: 11 });
+    expect(report.forecast).toEqual({
+      expense: 2550,
+      income: 0,
+      net: -2550,
+      days_left: 11,
+    });
     expect(report.categories).toHaveLength(1);
     expect(report.categories[0]).toMatchObject({ id: "food", name_ru: "Еда", has_children: true });
     expect(report.categories[0]!.months[0]).toEqual({
@@ -173,11 +180,16 @@ describe("comparisons", () => {
   it("is a whole percent, or nothing without a base", () => {
     expect(percentChange(118420, 109650)).toBe(8);
     expect(percentChange(50, 0)).toBeNull();
+    expect(percentChange(12736, 1)).toBeNull();
+    expect(percentChange(12736, 0.5)).toBeNull();
     expect(percentChange(-20, -10)).toBe(-100);
     expect(formatChange(8)).toBe("▲ 8%");
     expect(formatChange(-3)).toBe("▼ 3%");
     expect(formatChange(0)).toBe("0%");
     expect(formatChange(null)).toBeNull();
+    expect(formatChange(null, { value: 500 })).toBe("новое");
+    expect(formatChange(null, { value: 500, newLabel: "new" })).toBe("new");
+    expect(formatChange(null, { value: 0 })).toBeNull();
   });
 
   it("reads more spending as bad news and more income as good", () => {
@@ -269,5 +281,29 @@ describe("squarify", () => {
     expect(treemapShade(4, 10)).toBe("medium");
     expect(treemapShade(9, 10)).toBe("light");
     expect(treemapShade(0, 1)).toBe("strong");
+  });
+});
+
+describe("chart helpers", () => {
+  it("builds round Y-axis ticks covering the max", () => {
+    expect(niceAxisTicks(0)).toEqual([0]);
+    expect(niceAxisTicks(87)).toEqual([0, 50, 100]);
+    expect(niceAxisTicks(120, 5)).toEqual([0, 25, 50, 75, 100, 125]);
+    expect(niceAxisTicks(1000)[niceAxisTicks(1000).length - 1]).toBeGreaterThanOrEqual(1000);
+  });
+
+  it("builds a shareable transactions feed query from report filters", () => {
+    expect(
+      transactionsFeedQuery({
+        start: "2026-11-01",
+        end: "2026-11-16",
+        accountIds: ["acc-1"],
+        categoryId: "cat-food",
+        merchantName: "Pyaterochka",
+        mode: "expense",
+      }),
+    ).toBe(
+      "preset=custom&from=2026-11-01T00%3A00%3A00.000Z&to=2026-11-16T23%3A59%3A59.999Z&accounts=acc-1&categories=cat-food&q=Pyaterochka&sign=expense",
+    );
   });
 });

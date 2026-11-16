@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
+import { Alert } from "react-native";
 import MoneyReportsScreen from "@/screens/money-reports-screen";
 import MoneyScreen from "@/screens/money-screen";
 import { calls, fail, fakeSession, rpcHandlers, seed, setSession } from "../../test/fake-supabase";
@@ -48,8 +49,10 @@ const REPORT = {
     start: "2026-10-01",
     end: "2026-10-31",
     days: 31,
+    compare_days: 21,
     previous_start: "2026-08-31",
     previous_end: "2026-09-30",
+    previous_compare_end: "2026-09-20",
     last_year: 2025,
   },
   currency: "RUB",
@@ -64,7 +67,7 @@ const REPORT = {
     last_year_expense: 32000,
     last_year_net: 68000,
   },
-  forecast: { expense: 52000, days_left: 10 },
+  forecast: { expense: 52000, income: 110000, net: 58000, days_left: 10 },
   categories: [
     category(
       "food",
@@ -90,17 +93,29 @@ const REPORT = {
       brand_id: "b1",
       name: "Пятёрочка",
       logo_url: "https://logo.test/5.png",
+      base_color: null,
       expense: 12000,
+      previous_expense: 10000,
       transaction_count: 14,
     },
     {
       brand_id: "b2",
       name: "ВкусВилл",
+      logo_url: null,
       base_color: "#16a34a",
       expense: 8000,
+      previous_expense: 0,
       transaction_count: 1,
     },
-    { brand_id: null, name: "Кафе у дома", expense: 3000, transaction_count: 3 },
+    {
+      brand_id: null,
+      name: "Кафе у дома",
+      logo_url: null,
+      base_color: null,
+      expense: 3000,
+      previous_expense: 5000,
+      transaction_count: 3,
+    },
   ],
   fx_status: { status: "approximated", missing_conversions: [] },
 };
@@ -153,18 +168,27 @@ describe("the money report", () => {
     expect(screen.getByText("▲ 11% к пред.")).toBeOnTheScreen();
     expect(screen.getAllByText("0% к ср. 2025")).toHaveLength(2); // Income, and the food row.
     expect(screen.getByText("Октябрь 2026 г.")).toBeOnTheScreen();
-    expect(screen.getByText("Прогноз на 31 октября")).toBeOnTheScreen();
+    expect(screen.getByText("Прогноз расходов на 31 октября")).toBeOnTheScreen();
     expect(screen.getByTestId("spending-forecast")).toHaveTextContent(/^≈ 52\s000\s₽$/);
+    expect(screen.getByTestId("spending-forecast-income")).toHaveTextContent(/^≈ 110\s000\s₽$/);
+    expect(screen.getByTestId("spending-forecast-net")).toHaveTextContent(/^≈ \+58\s000\s₽$/);
+    expect(screen.getByText("Прогноз доходов на 31 октября")).toBeOnTheScreen();
+    expect(screen.getByText("Прогноз итога на 31 октября")).toBeOnTheScreen();
     expect(screen.getByText(/^осталось 10 дней · /)).toBeOnTheScreen();
     expect(screen.getByText("Для части операций взят ближайший прошлый курс.")).toBeOnTheScreen();
     expect(screen.getByTestId("spending-treemap")).toBeOnTheScreen();
     expect(screen.getByTestId("spending-row-food")).toBeOnTheScreen();
+    expect(screen.getByTestId("spending-sparkline-food")).toBeOnTheScreen();
     expect(screen.queryByTestId("spending-row-salary")).toBeNull();
     expect(screen.getByText("По дням")).toBeOnTheScreen();
+    expect(screen.getByTestId("spending-days-axis")).toBeOnTheScreen();
     expect(screen.getByText("Пятёрочка")).toBeOnTheScreen();
     expect(screen.getByText("14 операций")).toBeOnTheScreen();
     expect(screen.getByText("1 операция")).toBeOnTheScreen();
     expect(screen.getByText("К")).toBeOnTheScreen(); // The initial of a shop without a logo.
+    expect(screen.getAllByText("▲ 20% к пред.").length).toBeGreaterThanOrEqual(2); // food + Пятёрочка
+    expect(screen.getAllByText("новое").length).toBeGreaterThanOrEqual(1); // shop/category with no prior
+    expect(screen.getByText("Посмотреть транзакции из отчёта")).toBeOnTheScreen();
     expect(reportArgs().at(-1)).toEqual({
       p_person_id: PERSON.id,
       p_start: "2026-10-01",
@@ -172,6 +196,8 @@ describe("the money report", () => {
       p_report_currency: "RUB",
       p_account_ids: null,
       p_category_id: null,
+      p_brand_id: null,
+      p_merchant_name: null,
     });
     expect(calls.rpc.some(({ name }) => name === "money-fx-sync")).toBe(true);
   });
@@ -283,6 +309,59 @@ describe("the money report", () => {
     await waitFor(() => expect(reportArgs().at(-1)).toMatchObject({ p_category_id: null }));
   });
 
+  it("filters the report by a shop, and clears it from the chip", async () => {
+    await renderScreens(routes, "/money/reports");
+    await fireEvent.press(await screen.findByLabelText("Пятёрочка"));
+    await waitFor(() =>
+      expect(reportArgs().at(-1)).toMatchObject({
+        p_merchant_name: "Пятёрочка",
+        p_brand_id: "b1",
+      }),
+    );
+    expect(await screen.findByText("Магазин: Пятёрочка")).toBeOnTheScreen();
+    await fireEvent.press(screen.getByLabelText("Снять фильтр"));
+    await waitFor(() =>
+      expect(reportArgs().at(-1)).toMatchObject({
+        p_merchant_name: null,
+        p_brand_id: null,
+      }),
+    );
+    expect(screen.queryByText("Магазин: Пятёрочка")).toBeNull();
+  });
+
+  it("shows all categories and shops past the top ten, then collapses again", async () => {
+    rpcHandlers.money_get_spending_report = () => ({
+      ...REPORT,
+      categories: [
+        ...Array.from({ length: 12 }, (_, index) =>
+          category(`cat-${index}`, `Категория ${index}`, { expense: 1000 - index }),
+        ),
+        category("salary", "Зарплата", { income: 100000 }),
+      ],
+      merchants: Array.from({ length: 12 }, (_, index) => ({
+        brand_id: `b-${index}`,
+        name: `Магазин ${index}`,
+        logo_url: null,
+        base_color: null,
+        expense: 1000 - index,
+        previous_expense: 500,
+        transaction_count: 1,
+      })),
+    });
+    await renderScreens(routes, "/money/reports");
+    expect(await screen.findByTestId("spending-row-cat-0")).toBeOnTheScreen();
+    expect(screen.queryByTestId("spending-row-cat-10")).toBeNull();
+    expect(screen.getByText("Магазин 0")).toBeOnTheScreen();
+    expect(screen.queryByText("Магазин 10")).toBeNull();
+    const showAll = () => screen.getAllByText("Показать все");
+    await fireEvent.press(showAll()[0]!);
+    expect(await screen.findByTestId("spending-row-cat-10")).toBeOnTheScreen();
+    await fireEvent.press(screen.getByText("Свернуть"));
+    expect(screen.queryByTestId("spending-row-cat-10")).toBeNull();
+    await fireEvent.press(showAll()[showAll().length - 1]!);
+    expect(await screen.findByText("Магазин 10")).toBeOnTheScreen();
+  });
+
   it("closes an open row again", async () => {
     await renderScreens(routes, "/money/reports");
     await fireEvent.press(await screen.findByLabelText("Раскрыть «Продукты»"));
@@ -348,5 +427,33 @@ describe("the money report", () => {
       await client.invalidateQueries({ queryKey: ["money-spending-report"] });
     });
     await waitFor(() => expect(reportArgs().length).toBeGreaterThan(before));
+  });
+
+  it("alerts the exact day and month amounts when a chart bar is tapped", async () => {
+    const alert = jest.spyOn(Alert, "alert").mockImplementation(() => {});
+    await renderScreens(routes, "/money/reports");
+    await screen.findByTestId("spending-days");
+    await fireEvent.press(screen.getByLabelText(/^1 окт\..*: /));
+    expect(alert).toHaveBeenCalled();
+    expect(String(alert.mock.calls[0]![0])).toMatch(/1 окт/);
+    await fireEvent.press(screen.getAllByLabelText(/окт\. 2026.*: /)[0]!);
+    expect(alert.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("opens the transactions feed from the report CTA", async () => {
+    await renderScreens(routes, "/money/reports");
+    await fireEvent.press(await screen.findByTestId("spending-view-transactions"));
+    expect(await screen.findByText("Отчеты")).toBeOnTheScreen();
+  });
+
+  it("colours a negative forecast net", async () => {
+    rpcHandlers.money_get_spending_report = () => ({
+      ...REPORT,
+      forecast: { expense: 80000, income: 50000, net: -30000, days_left: 5 },
+    });
+    await renderScreens(routes, "/money/reports");
+    expect(await screen.findByTestId("spending-forecast-net")).toHaveTextContent(
+      /^≈ -30\s000\s₽$/,
+    );
   });
 });
