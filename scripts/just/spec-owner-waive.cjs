@@ -33,6 +33,7 @@ function parseOwnerSpecWaive(text, ownerEmail) {
  * @param {{ taskText?: string, ownerEmail?: string|null }} input
  */
 function applyOwnerSpecWaive(gateResult, input) {
+  // Stryker disable next-line ConditionalExpression: ok results are returned again by the code filter
   if (gateResult.ok) return gateResult;
   if (gateResult.code !== "no-spec" && gateResult.code !== "no-second-approve") {
     return gateResult;

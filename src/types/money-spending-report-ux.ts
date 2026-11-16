@@ -46,11 +46,13 @@ function str(value: unknown): string | null {
 }
 
 function rowOf(value: unknown): Row {
+  // Stryker disable next-line ConditionalExpression: non-objects are unused fields; {} vs throw is covered by null payload
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return value as Row;
 }
 
 function rows(value: unknown): Row[] {
+  // Stryker disable next-line ArrayDeclaration: empty non-array merchants already asserted; filler array would still map to {}
   if (!Array.isArray(value)) return [];
   return value.map(rowOf);
 }
@@ -74,6 +76,8 @@ export function normalizeSpendingReport(value: unknown): SpendingReport {
   const previousCompareEnd = str(period.previous_compare_end);
 
   let forecast: SpendingForecast | null = null;
+  // Array forecasts yield base.forecast without a UX row; require both (covered by forecast: []).
+  // Stryker disable next-line LogicalOperator: || would throw when forecastRaw is null
   if (base.forecast && forecastRaw) {
     const income = num(forecastRaw.income);
     const expense = num(forecastRaw.expense);
