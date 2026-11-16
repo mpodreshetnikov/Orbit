@@ -101,11 +101,10 @@ function Change({
 }) {
   const change = percentChange(value, base);
   const text = formatChange(change, { value, base, newLabel });
-  const isSpecial = text === (newLabel ?? "новое") || (text?.startsWith("×") ?? false);
   return (
     <span className={TONE_CLASS[changeTone(change, mode)]}>
       {text ?? "—"}
-      {label && text && !isSpecial ? ` ${label}` : null}
+      {label && text ? ` ${label}` : null}
     </span>
   );
 }
@@ -421,7 +420,9 @@ function TotalCards({
           <Card key={card.key} data-testid={`spending-total-${card.key}`}>
             <CardContent className="space-y-2 p-5">
               <p className="text-sm text-muted-foreground">{card.title}</p>
-              <p className={cn("text-3xl font-bold tracking-tight", netClass(card))}>{card.value}</p>
+              <p className={cn("text-3xl font-bold tracking-tight", netClass(card))}>
+                {card.value}
+              </p>
               <p className="flex flex-wrap gap-x-3 text-sm">
                 <Change
                   value={card.current}
@@ -559,13 +560,13 @@ function Sparkline({
           amount: formatReportAmount(value, currency, locale),
         });
         return (
-          <button
+          <span
             key={month ?? index}
-            type="button"
             title={title}
             aria-label={title}
+            role="img"
             className={cn(
-              "w-1.5 rounded-sm",
+              "inline-block w-1.5 rounded-sm",
               index === values.length - 1 ? BAR_CLASS[mode] : "bg-muted-foreground/30",
             )}
             style={{ height: `${max > 0 ? Math.max(2, (value / max) * 24) : 2}px` }}
@@ -858,7 +859,10 @@ function DaysChart({
               <span key={tick}>{formatReportAmount(tick, report.currency, locale)}</span>
             ))}
           </div>
-          <div data-testid="spending-days" className="relative flex h-36 min-w-0 flex-1 items-end gap-0.5 border-b">
+          <div
+            data-testid="spending-days"
+            className="relative flex h-36 min-w-0 flex-1 items-end gap-0.5 border-b"
+          >
             {ticks.slice(1).map((tick) => (
               <span
                 key={`grid-${tick}`}

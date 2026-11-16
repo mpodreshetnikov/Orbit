@@ -350,6 +350,45 @@ describe("MoneyReportsPage", () => {
     expect(lastUrl().get("category")).toBe("food");
   });
 
+  it("keeps short labels on ×N and new comparisons so totals stay unambiguous", () => {
+    hookMocks.useIsMobile.mockReturnValue(true);
+    hookMocks.useMoneySpendingReport.mockReturnValue({
+      data: {
+        ...REPORT,
+        totals: {
+          ...REPORT.totals,
+          income: 180000,
+          previous_income: 180000,
+          last_year_income: 0,
+          expense: 130059,
+          previous_expense: 95500,
+          last_year_expense: 1534,
+          net: 49941,
+          previous_net: 84500,
+          last_year_net: 1534,
+        },
+      },
+      isError: false,
+    });
+    render(<MoneyReportsPage />);
+    const income = screen.getByTestId("spending-total-income");
+    expect(within(income).getByText(/0% money\.spendingVsPreviousShort/)).toBeInTheDocument();
+    expect(
+      within(income).getByText(/money\.spendingChangeNew money\.spendingVsLastYear\(2025\)/),
+    ).toBeInTheDocument();
+    const expense = screen.getByTestId("spending-total-expense");
+    expect(within(expense).getByText(/×85 money\.spendingVsLastYear\(2025\)/)).toBeInTheDocument();
+  });
+
+  it("does not nest sparkline controls inside the category row button", () => {
+    hookMocks.useIsMobile.mockReturnValue(true);
+    render(<MoneyReportsPage />);
+    const food = screen.getByTestId("spending-row-food");
+    const expand = within(food).getByRole("button", { name: "money.spendingExpand(Food)" });
+    expect(within(expand).queryAllByRole("button")).toHaveLength(0);
+    expect(within(food).getByTestId("spending-sparkline")).toBeInTheDocument();
+  });
+
   it("says so when the period has nothing in it", () => {
     hookMocks.useMoneySpendingReport.mockReturnValue({
       data: { ...REPORT, categories: [], merchants: [], forecast: null },
