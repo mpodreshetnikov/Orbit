@@ -194,6 +194,26 @@ owner: ${maxim}
     expect(result.ok).toBe(true);
     expect(result.code).toBe("simple");
   });
+
+  it("passes when the owner waives Spec on a complex task", () => {
+    const result = evaluateCodeGate({
+      taskText: `${complexTask}\n\nSpec waived by mpodreshetnikov for small polish.\n`,
+      ownerEmail: maxim,
+      actorEmail: maxim,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.code).toBe("waived");
+  });
+
+  it("does not accept Spec waived by the other participant as owner waive", () => {
+    const result = evaluateCodeGate({
+      taskText: `${complexTask}\n\nSpec waived by Kot-kAkos.\n`,
+      ownerEmail: maxim,
+      actorEmail: maxim,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe("no-second-approve");
+  });
 });
 
 describe("human-authorship trailers (D13)", () => {
