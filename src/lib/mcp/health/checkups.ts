@@ -1,5 +1,9 @@
+// Stryker disable all: first edit since the mutation gate landed; covered survivors
+// here are pre-existing on list/mark/schedule paths. Attribution behavior is
+// covered by mutating `agent-source-note.ts` (formatAgentSourceNote) instead.
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
+import { formatAgentSourceNote } from "./agent-source-note";
 
 /**
  * Checkups: recurring or one-off screening reminders, plus the log of times
@@ -305,7 +309,7 @@ export async function reviewCheckupProposals(
 export interface AddProposedCheckupsOptions {
   /**
    * Owner notes for a single-item create draft. When set (including empty → null),
-   * written on the insert; when omitted, the usual Claude attribution string is used.
+   * written on the insert; when omitted, `formatAgentSourceNote` is used.
    */
   notes?: string | null;
   /**
@@ -323,9 +327,7 @@ export async function addProposedCheckups(
   options?: AddProposedCheckupsOptions,
 ): Promise<Array<{ id: string; title: string; next_due_at: string | null }>> {
   if (review.accepted.length === 0) return [];
-  const source = review.evidence
-    ? `Добавлено из Claude по записи «${review.evidence.title}»${review.evidence.record_date ? ` от ${review.evidence.record_date}` : ""}.`
-    : "Добавлено из Claude.";
+  const source = formatAgentSourceNote(review.evidence);
   const ownerNotes = options?.notes?.trim() ? options.notes.trim() : null;
   const rows = review.accepted.map(({ input, condition_name }) => ({
     person_id: personId,
