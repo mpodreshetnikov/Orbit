@@ -2,6 +2,10 @@ import React from "react";
 import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestQueryClient, createTestQueryWrapper } from "../../test/utils/web/render";
+import {
+  moneySpendingReportQueryKey,
+  useMoneySpendingReport,
+} from "@/hooks/use-money-spending-report";
 
 const { createClientMock } = vi.hoisted(() => ({
   createClientMock: vi.fn(),
@@ -54,7 +58,6 @@ describe("useMoneySpendingReport (UX filters)", () => {
     }));
     createClientMock.mockReturnValue({ functions: { invoke }, rpc });
 
-    const { useMoneySpendingReport } = await import("./use-money-spending-report");
     const { result } = renderHookWithQueryClient(() =>
       useMoneySpendingReport({
         personId: "person-1",
@@ -96,7 +99,6 @@ describe("useMoneySpendingReport (UX filters)", () => {
     }));
     createClientMock.mockReturnValue({ functions: { invoke }, rpc });
 
-    const { useMoneySpendingReport } = await import("./use-money-spending-report");
     const { result } = renderHookWithQueryClient(() =>
       useMoneySpendingReport({
         personId: "person-1",
@@ -126,7 +128,6 @@ describe("useMoneySpendingReport (UX filters)", () => {
 
     const invokeFail = vi.fn(async () => ({ data: null, error: { message: "sync failed" } }));
     createClientMock.mockReturnValue({ functions: { invoke: invokeFail }, rpc: vi.fn() });
-    const { useMoneySpendingReport } = await import("./use-money-spending-report");
     const failed = renderHookWithQueryClient(() =>
       useMoneySpendingReport({
         personId: "person-1",
@@ -158,7 +159,6 @@ describe("useMoneySpendingReport (UX filters)", () => {
   it("waits for a person before querying", async () => {
     const rpc = vi.fn();
     createClientMock.mockReturnValue({ functions: { invoke: vi.fn() }, rpc });
-    const { useMoneySpendingReport } = await import("./use-money-spending-report");
     const { result } = renderHookWithQueryClient(() =>
       useMoneySpendingReport({
         personId: null,
@@ -176,7 +176,6 @@ describe("useMoneySpendingReport (UX filters)", () => {
     const invoke = vi.fn(async () => ({ data: null, error: null }));
     const rpc = vi.fn(async () => ({ data: null, error: { message: "rpc failed" } }));
     createClientMock.mockReturnValue({ functions: { invoke }, rpc });
-    const { useMoneySpendingReport } = await import("./use-money-spending-report");
     const { result } = renderHookWithQueryClient(() =>
       useMoneySpendingReport({
         personId: "person-1",
@@ -196,7 +195,6 @@ describe("useMoneySpendingReport (UX filters)", () => {
     const invoke = vi.fn(async () => ({ data: { ok: true }, error: null }));
     const rpc = vi.fn(async () => ({ data: { currency: "RUB", totals: {} }, error: null }));
     createClientMock.mockReturnValue({ functions: { invoke }, rpc });
-    const { useMoneySpendingReport } = await import("./use-money-spending-report");
     const { result } = renderHookWithQueryClient(() =>
       useMoneySpendingReport({
         personId: "person-1",
@@ -223,7 +221,6 @@ describe("useMoneySpendingReport (UX filters)", () => {
     const invoke = vi.fn(async () => ({ data: { ok: true }, error: null }));
     const rpc = vi.fn(async () => ({ data: { currency: "RUB", totals: {} }, error: null }));
     createClientMock.mockReturnValue({ functions: { invoke }, rpc });
-    const { useMoneySpendingReport } = await import("./use-money-spending-report");
     const { result } = renderHookWithQueryClient(() =>
       useMoneySpendingReport({
         personId: "person-1",
@@ -249,7 +246,6 @@ describe("useMoneySpendingReport (UX filters)", () => {
   });
 
   it("builds a sorted query key that includes merchant filters", async () => {
-    const { moneySpendingReportQueryKey } = await import("./use-money-spending-report");
     const base = {
       personId: "person-1",
       period: { start: "2026-10-01", end: "2026-10-31" },
@@ -306,7 +302,6 @@ describe("useMoneySpendingReport (UX filters)", () => {
       return await second.promise;
     });
     createClientMock.mockReturnValue({ functions: { invoke }, rpc });
-    const { useMoneySpendingReport } = await import("./use-money-spending-report");
     let categoryId: string | null = "food";
     const { result, rerender } = renderHookWithQueryClient(() =>
       useMoneySpendingReport({
