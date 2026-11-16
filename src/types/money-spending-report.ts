@@ -137,8 +137,7 @@ export function normalizeSpendingReport(value: unknown): SpendingReport {
       compare_days: num(period.compare_days) || days,
       previous_start: str(period.previous_start) ?? "",
       previous_end: str(period.previous_end) ?? "",
-      previous_compare_end:
-        str(period.previous_compare_end) ?? str(period.previous_end) ?? "",
+      previous_compare_end: str(period.previous_compare_end) ?? str(period.previous_end) ?? "",
       last_year: num(period.last_year),
     },
     currency: str(body.currency) ?? "RUB",
@@ -551,7 +550,13 @@ export function niceAxisTicks(max: number, target = 4): number[] {
   const power = 10 ** Math.floor(Math.log10(raw));
   const normalized = raw / power;
   const step =
-    normalized <= 1 ? power : normalized <= 2 ? 2 * power : normalized <= 5 ? 5 * power : 10 * power;
+    normalized <= 1
+      ? power
+      : normalized <= 2
+        ? 2 * power
+        : normalized <= 5
+          ? 5 * power
+          : 10 * power;
   const top = Math.ceil(max / step) * step;
   const ticks: number[] = [];
   for (let value = 0; value <= top + step * 0.001; value += step) {

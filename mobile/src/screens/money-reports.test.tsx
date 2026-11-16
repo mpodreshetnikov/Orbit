@@ -187,7 +187,7 @@ describe("the money report", () => {
     expect(screen.getByText("1 операция")).toBeOnTheScreen();
     expect(screen.getByText("К")).toBeOnTheScreen(); // The initial of a shop without a logo.
     expect(screen.getAllByText("▲ 20% к пред.").length).toBeGreaterThanOrEqual(2); // food + Пятёрочка
-    expect(screen.getAllByText("новое").length).toBeGreaterThanOrEqual(1); // shop/category with no prior
+    expect(screen.getAllByText(/новое/).length).toBeGreaterThanOrEqual(1); // shop/category with no prior
     expect(screen.getByText("Посмотреть транзакции из отчёта")).toBeOnTheScreen();
     expect(reportArgs().at(-1)).toEqual({
       p_person_id: PERSON.id,
@@ -452,8 +452,6 @@ describe("the money report", () => {
       forecast: { expense: 80000, income: 50000, net: -30000, days_left: 5 },
     });
     await renderScreens(routes, "/money/reports");
-    expect(await screen.findByTestId("spending-forecast-net")).toHaveTextContent(
-      /^≈ -30\s000\s₽$/,
-    );
+    expect(await screen.findByTestId("spending-forecast-net")).toHaveTextContent(/^≈ -30\s000\s₽$/);
   });
 });

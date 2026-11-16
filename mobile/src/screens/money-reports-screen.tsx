@@ -266,14 +266,14 @@ export default function MoneyReportsScreen() {
           variant="outline"
           onPress={() =>
             router.push(
-              (`/money?${transactionsFeedQuery({
+              `/money?${transactionsFeedQuery({
                 start: period.start,
                 end: period.end,
                 accountIds,
                 categoryId,
                 merchantName,
                 mode,
-              })}`) as Href,
+              })}` as Href,
             )
           }
         />
@@ -473,8 +473,7 @@ function Change({
   const newLabel = t("money.spendingChangeNew");
   const text = formatChange(change, { value, base, newLabel });
   const tone = changeTone(change, mode);
-  const isSpecial = text === newLabel || (text?.startsWith("×") ?? false);
-  const suffix = label && text && !isSpecial ? ` ${label}` : "";
+  const suffix = label && text ? ` ${label}` : "";
   return (
     <Text
       size="xs"
