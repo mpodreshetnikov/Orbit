@@ -66,14 +66,25 @@ function countByFileRule(findings) {
 }
 
 /**
+ * @param {string} key
+ * @returns {{ file: string, kind: string }}
+ */
+function parseFileRuleKey(key) {
+  const sep = key.indexOf("::");
+  if (sep === -1) {
+    return { file: key, kind: "?" };
+  }
+  return { file: key.slice(0, sep), kind: key.slice(sep + 2) };
+}
+
+/**
  * @param {Record<string, number>} counts
  * @returns {Set<string>}
  */
 function filesFromCounts(counts) {
   const files = new Set();
   for (const key of Object.keys(counts)) {
-    const sep = key.indexOf("::");
-    files.add(sep === -1 ? key : key.slice(0, sep));
+    files.add(parseFileRuleKey(key).file);
   }
   return files;
 }
@@ -96,9 +107,7 @@ function evaluateRatchet(currentCounts, baseline) {
   const reportedNewFiles = new Set();
 
   for (const [key, current] of Object.entries(currentCounts)) {
-    const sep = key.indexOf("::");
-    const file = sep === -1 ? key : key.slice(0, sep);
-    const kind = sep === -1 ? "?" : key.slice(sep + 2);
+    const { file, kind } = parseFileRuleKey(key);
     if (!baselineFiles.has(file)) {
       if (!reportedNewFiles.has(file)) {
         reportedNewFiles.add(file);
@@ -116,9 +125,7 @@ function evaluateRatchet(currentCounts, baseline) {
     const base = Number(baseRaw);
     const current = Number(currentCounts[key] || 0);
     if (current < base) {
-      const sep = key.indexOf("::");
-      const file = sep === -1 ? key : key.slice(0, sep);
-      const kind = sep === -1 ? "?" : key.slice(sep + 2);
+      const { file, kind } = parseFileRuleKey(key);
       failures.push(`${file} ${kind}: ${current} < baseline ${base} (shrink baseline in this PR)`);
     }
   }
@@ -150,9 +157,7 @@ function evaluateBaselineGrowth(headBaseline, baseBaseline) {
   const reportedNewFiles = new Set();
 
   for (const [key, headRaw] of Object.entries(headCounts)) {
-    const sep = key.indexOf("::");
-    const file = sep === -1 ? key : key.slice(0, sep);
-    const kind = sep === -1 ? "?" : key.slice(sep + 2);
+    const { file, kind } = parseFileRuleKey(key);
     const head = Number(headRaw);
     if (!baseFiles.has(file)) {
       if (!reportedNewFiles.has(file)) {
@@ -170,35 +175,14 @@ function evaluateBaselineGrowth(headBaseline, baseBaseline) {
   return failures;
 }
 
+// Stryker disable all: git spawn I/O; base resolution is asserted via resolveBaselineBaseRef
+// unit tests and injectable baseBaseline on run().
 function runGit(args) {
   return spawnSync("git", args, { cwd: ROOT, encoding: "utf8" });
 }
 
 function refExists(ref) {
   return runGit(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]).status === 0;
-}
-
-/**
- * @param {string[]} [argv]
- * @param {NodeJS.ProcessEnv} [env]
- * @returns {string | null}
- */
-function resolveBaselineBaseRef(argv = process.argv, env = process.env) {
-  const idx = argv.indexOf("--base");
-  if (idx !== -1) {
-    const value = argv[idx + 1];
-    if (!value || value.startsWith("--")) {
-      throw new Error("Missing value for argument --base");
-    }
-    return value;
-  }
-  for (const key of ["SMELL_BASELINE_BASE", "PR_SIZE_BASE"]) {
-    const value = env[key];
-    if (value && value !== ZERO_SHA) {
-      return value;
-    }
-  }
-  return BASE_REF_CANDIDATES.find((candidate) => refExists(candidate)) ?? null;
 }
 
 /**
@@ -219,6 +203,31 @@ function loadBaselineAtRef(ref, relativePath = BASELINE_REPO_REL) {
   } catch {
     return null;
   }
+}
+// Stryker restore all
+
+/**
+ * @param {string[]} [argv]
+ * @param {NodeJS.ProcessEnv} [env]
+ * @param {(ref: string) => boolean} [exists]
+ * @returns {string | null}
+ */
+function resolveBaselineBaseRef(argv = process.argv, env = process.env, exists = refExists) {
+  const idx = argv.indexOf("--base");
+  if (idx !== -1) {
+    const value = argv[idx + 1];
+    if (!value || value.startsWith("--")) {
+      throw new Error("Missing value for argument --base");
+    }
+    return value;
+  }
+  for (const key of ["SMELL_BASELINE_BASE", "PR_SIZE_BASE"]) {
+    const value = env[key];
+    if (value && value !== ZERO_SHA) {
+      return value;
+    }
+  }
+  return BASE_REF_CANDIDATES.find((candidate) => exists(candidate)) ?? null;
 }
 
 /**
@@ -637,14 +646,15 @@ function run(opts = {}) {
   /** @type {string[]} */
   let growthFailures = [];
   if (checkBaselineGrowth) {
-    const baseRef =
-      opts.baselineBaseRef !== undefined ? opts.baselineBaseRef : resolveBaselineBaseRef(argv);
-    const baseBaseline =
-      opts.baseBaseline !== undefined
-        ? opts.baseBaseline
-        : baseRef
-          ? loadBaselineAtRef(baseRef)
-          : null;
+    /** @type {{ counts?: Record<string, number> } | null} */
+    let baseBaseline;
+    if (opts.baseBaseline !== undefined) {
+      baseBaseline = opts.baseBaseline;
+    } else {
+      const baseRef =
+        opts.baselineBaseRef !== undefined ? opts.baselineBaseRef : resolveBaselineBaseRef(argv);
+      baseBaseline = baseRef ? loadBaselineAtRef(baseRef) : null;
+    }
     if (updateBaseline) {
       growthFailures = evaluateBaselineGrowth({ counts }, baseBaseline);
     } else {
@@ -759,8 +769,10 @@ module.exports = {
   loadBaselineAtRef,
   writeBaseline,
   loadBaseline,
+  parseFileRuleKey,
   fileRuleKey,
   filesFromCounts,
+  ZERO_SHA,
   BASELINE_PATH,
   BASELINE_REPO_REL,
   WEAK_PRESENCE,
