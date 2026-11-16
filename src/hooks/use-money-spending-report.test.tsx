@@ -294,20 +294,16 @@ describe("useMoneySpendingReport (UX filters)", () => {
 
   it("keeps previous report data as placeholder while the category filter changes", async () => {
     const invoke = vi.fn(async () => ({ data: { ok: true }, error: null }));
-    let resolveSecond: ((value: {
-      data: unknown;
-      error: null;
-    }) => void) | null = null;
+    type RpcResult = { data: unknown; error: null };
+    const second = Promise.withResolvers<RpcResult>();
     const rpc = vi.fn().mockImplementation(async (_fn: string, args: { p_category_id: string | null }) => {
       if (args.p_category_id === "food") {
         return {
           data: { currency: "RUB", totals: { expense: 1 }, forecast: null },
           error: null,
-        };
+        } satisfies RpcResult;
       }
-      return await new Promise<{ data: unknown; error: null }>((resolve) => {
-        resolveSecond = resolve;
-      });
+      return await second.promise;
     });
     createClientMock.mockReturnValue({ functions: { invoke }, rpc });
     const { useMoneySpendingReport } = await import("./use-money-spending-report");
@@ -329,7 +325,7 @@ describe("useMoneySpendingReport (UX filters)", () => {
     await waitFor(() => expect(result.current.isPlaceholderData).toBe(true));
     expect(result.current.data?.totals.expense).toBe(1);
 
-    resolveSecond?.({
+    second.resolve({
       data: { currency: "RUB", totals: { expense: 99 }, forecast: null },
       error: null,
     });

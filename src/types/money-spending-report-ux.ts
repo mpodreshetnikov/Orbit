@@ -58,7 +58,7 @@ function rows(value: unknown): Row[] {
 }
 
 function forecastRow(value: unknown): Row | null {
-  if (value === null || value === undefined) return null;
+  if (value == null) return null;
   if (typeof value !== "object") return null;
   if (Array.isArray(value)) return null;
   return value as Row;

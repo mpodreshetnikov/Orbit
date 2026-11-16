@@ -21,6 +21,7 @@ export function percentChange(value: number, base: number): number | null {
 }
 
 function tryFormatMultiple(value: number, base: number | undefined): string | null {
+  // Stryker disable next-line ConditionalExpression: undefined base fails Number.isFinite next
   if (base === undefined) return null;
   if (!Number.isFinite(value)) return null;
   if (!Number.isFinite(base)) return null;

@@ -116,36 +116,32 @@ describe("normalizeSpendingReport", () => {
   });
 
   it("ignores non-object forecasts, arrays, and non-array merchants", () => {
-    const asString = normalizeSpendingReport({
-      period: {
-        start: "2026-03-01",
-        end: "2026-03-31",
-        days: 10,
-        previous_start: "2026-01-29",
-        previous_end: "2026-02-28",
-        last_year: 2025,
-      },
-      currency: "RUB",
-      totals: {},
-      forecast: "nope",
-      categories: [],
-      days: [],
-      merchants: "nope",
-      fx_status: { status: "ok" },
-    });
-    expect(asString.forecast).toBeNull();
-    expect(asString.merchants).toEqual([]);
+    const period = {
+      start: "2026-03-01",
+      end: "2026-03-31",
+      days: 10,
+      previous_start: "2026-01-29",
+      previous_end: "2026-02-28",
+      last_year: 2025,
+    };
+    for (const forecast of ["nope", 12, true, null, undefined] as const) {
+      const report = normalizeSpendingReport({
+        period,
+        currency: "RUB",
+        totals: {},
+        forecast,
+        categories: [],
+        days: [],
+        merchants: "nope",
+        fx_status: { status: "ok" },
+      });
+      expect(report.forecast).toBeNull();
+      expect(report.merchants).toEqual([]);
+    }
 
     // Base normalize treats an array forecast as an empty object; UX must still drop it.
     const asArray = normalizeSpendingReport({
-      period: {
-        start: "2026-03-01",
-        end: "2026-03-31",
-        days: 10,
-        previous_start: "2026-01-29",
-        previous_end: "2026-02-28",
-        last_year: 2025,
-      },
+      period,
       currency: "RUB",
       totals: {},
       forecast: [],
