@@ -39,6 +39,33 @@ describe("tbank-web connector", () => {
     expect(url).toBe("https://www.tbank.ru/api/common/v1/operations?start=1&end=2");
   });
 
+  it("never selects a URL from another origin even when its path matches", () => {
+    // The resource timeline holds whatever the page loaded, third parties included. Matching a
+    // candidate on path alone would accept a foreign origin, and the request builder then
+    // appends the live session id and fetches it — CORS does not stop the request going out.
+    // Foreign entry is last so a path-only scan would prefer it; origin guard must skip it.
+    const url = __test__.findLatestResourceUrlByPath(
+      [
+        "https://www.tbank.ru/api/common/v1/operations?sessionid=ours&start=1&end=2",
+        "https://elsewhere.example/api/common/v1/operations?sessionid=stolen&start=1&end=2",
+      ],
+      "/api/common/v1/operations",
+      "https://www.tbank.ru",
+    );
+
+    expect(url).toBe("https://www.tbank.ru/api/common/v1/operations?sessionid=ours&start=1&end=2");
+  });
+
+  it("returns null when only a foreign-origin candidate matches the path", () => {
+    const url = __test__.findLatestResourceUrlByPath(
+      ["https://elsewhere.example/api/common/v1/operations?sessionid=stolen"],
+      "/api/common/v1/operations",
+      "https://www.tbank.ru",
+    );
+
+    expect(url).toBeNull();
+  });
+
   it("estimates full-mode receipt time using the current pause and cooldown window", () => {
     expect(__test__.estimateFullModeReceiptEnrichmentMs(0)).toBe(0);
     expect(__test__.estimateFullModeReceiptEnrichmentMs(1)).toBe(30750);

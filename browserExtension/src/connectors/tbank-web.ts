@@ -1124,6 +1124,14 @@ async function runPageExtraction(
   }
 }
 
+/**
+ * The page's own resource timeline holds whatever the page loaded, third-party requests
+ * included. Matching a candidate on its path alone would accept `https://elsewhere.example` +
+ * the bank's path — and every discovered endpoint is later handed the live `sessionid` before
+ * being fetched. CORS does not stop the request going out, so the credential would reach that
+ * origin. The connector's claim is that the session never leaves the page it came from, which
+ * makes the origin check part of the claim rather than a precaution.
+ */
 function findLatestResourceUrlByPath(
   resourceUrls: string[],
   exactPath: string,
@@ -1134,7 +1142,7 @@ function findLatestResourceUrlByPath(
     if (typeof candidate !== "string") continue;
     try {
       const parsed = new URL(candidate, baseOrigin);
-      if (parsed.pathname === exactPath) {
+      if (parsed.origin === baseOrigin && parsed.pathname === exactPath) {
         return parsed.toString();
       }
     } catch {
@@ -1451,6 +1459,11 @@ function extractOperationsInPage(input: {
     return null;
   }
 
+  /**
+   * Same origin restriction as the module-level helper: the resource timeline includes
+   * third-party loads, and a path-only match would hand a foreign URL the live sessionid.
+   * Kept in-page (duplicated) because extractOperationsInPage is serialized into the tab.
+   */
   function findLatestResourceUrlByPath(
     resourceUrls: string[],
     exactPath: string,
@@ -1461,7 +1474,7 @@ function extractOperationsInPage(input: {
       if (typeof candidate !== "string") continue;
       try {
         const parsed = new URL(candidate, baseOrigin);
-        if (parsed.pathname === exactPath) {
+        if (parsed.origin === baseOrigin && parsed.pathname === exactPath) {
           return parsed.toString();
         }
       } catch {
