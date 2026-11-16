@@ -93,9 +93,7 @@ function main(argv = process.argv.slice(2)) {
     (result.ok ? process.stdout : process.stderr).write(`${result.message}\n`);
     process.exit(result.ok ? 0 : 1);
   }
-  process.stderr.write(
-    "Usage: spec-approve-gate.cjs --check-claimed | --check-task-file <path>\n",
-  );
+  process.stderr.write("Usage: spec-approve-gate.cjs --check-claimed | --check-task-file <path>\n");
   process.exit(2);
 }
 

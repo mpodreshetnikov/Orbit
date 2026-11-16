@@ -13,18 +13,14 @@ describe("spendingReportMerchantRpcArgs", () => {
   });
 
   it("passes through brand and merchant names", () => {
-    expect(
-      spendingReportMerchantRpcArgs({ brandId: "b-1", merchantName: "Cafe" }),
-    ).toEqual({
+    expect(spendingReportMerchantRpcArgs({ brandId: "b-1", merchantName: "Cafe" })).toEqual({
       p_brand_id: "b-1",
       p_merchant_name: "Cafe",
     });
   });
 
   it("coerces undefined filter values to null", () => {
-    expect(
-      spendingReportMerchantRpcArgs({ brandId: undefined, merchantName: undefined }),
-    ).toEqual({
+    expect(spendingReportMerchantRpcArgs({ brandId: undefined, merchantName: undefined })).toEqual({
       p_brand_id: null,
       p_merchant_name: null,
     });
