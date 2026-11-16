@@ -69,11 +69,14 @@ export interface SpendingMerchant {
   logo_url: string | null;
   base_color: string | null;
   expense: number;
+  previous_expense: number;
   transaction_count: number;
 }
 
 export interface SpendingForecast {
   expense: number;
+  income: number;
+  net: number;
   days_left: number;
 }
 
@@ -82,8 +85,11 @@ export interface SpendingReport {
     start: string;
     end: string;
     days: number;
+    /** Day-count used for vs-previous / vs-last-year (elapsed while the period is incomplete). */
+    compare_days: number;
     previous_start: string;
     previous_end: string;
+    previous_compare_end: string;
     last_year: number;
   };
   currency: string;
@@ -122,13 +128,17 @@ export function normalizeSpendingReport(value: unknown): SpendingReport {
   const fx = rowOf(body.fx_status);
   const fxStatus = str(fx.status);
 
+  const days = num(period.days);
   return {
     period: {
       start: str(period.start) ?? "",
       end: str(period.end) ?? "",
-      days: num(period.days),
+      days,
+      compare_days: num(period.compare_days) || days,
       previous_start: str(period.previous_start) ?? "",
       previous_end: str(period.previous_end) ?? "",
+      previous_compare_end:
+        str(period.previous_compare_end) ?? str(period.previous_end) ?? "",
       last_year: num(period.last_year),
     },
     currency: str(body.currency) ?? "RUB",
@@ -144,7 +154,14 @@ export function normalizeSpendingReport(value: unknown): SpendingReport {
       last_year_net: num(totals.last_year_net),
     },
     forecast: forecast
-      ? { expense: num(forecast.expense), days_left: num(forecast.days_left) }
+      ? {
+          expense: num(forecast.expense),
+          income: num(forecast.income),
+          net: Number.isFinite(Number(forecast.net))
+            ? num(forecast.net)
+            : num(forecast.income) - num(forecast.expense),
+          days_left: num(forecast.days_left),
+        }
       : null,
     categories: rows(body.categories)
       .filter((row) => str(row.id))
@@ -178,6 +195,7 @@ export function normalizeSpendingReport(value: unknown): SpendingReport {
       logo_url: str(merchant.logo_url),
       base_color: str(merchant.base_color),
       expense: num(merchant.expense),
+      previous_expense: num(merchant.previous_expense),
       transaction_count: num(merchant.transaction_count),
     })),
     fx_status: {
@@ -294,9 +312,15 @@ export function periodLabel(period: SpendingPeriod, locale: string): string {
 // Comparisons
 // ---------------------------------------------------------------------------------------------
 
+/**
+ * Bases below one report-currency unit (or non-finite) are treated as no comparison — otherwise a
+ * 1 ₽ prior yields absurd percentages like 1 273 600%.
+ */
+export const COMPARISON_BASE_EPSILON = 1;
+
 /** The change from `base` to `value` in whole percent, or null when there is nothing to compare with. */
 export function percentChange(value: number, base: number): number | null {
-  if (!Number.isFinite(base) || Math.abs(base) < 0.005) return null;
+  if (!Number.isFinite(base) || Math.abs(base) < COMPARISON_BASE_EPSILON) return null;
   return Math.round(((value - base) / Math.abs(base)) * 100);
 }
 
@@ -484,11 +508,60 @@ export function formatReportAmount(amount: number, currency: string, locale: str
   }
 }
 
-/** "▲ 8%", "▼ 3%", "0%"; null without a base to compare with. */
-export function formatChange(change: number | null): string | null {
-  if (change === null) return null;
+/**
+ * "▲ 8%", "▼ 3%", "0%"; without a base: "новое" when the current amount is positive (new this
+ * period), otherwise null so the UI can show "—".
+ */
+export function formatChange(
+  change: number | null,
+  options?: { value?: number; newLabel?: string },
+): string | null {
+  if (change === null) {
+    if (options?.value !== undefined && options.value > COMPARISON_BASE_EPSILON * 0.005) {
+      return options.newLabel ?? "новое";
+    }
+    return null;
+  }
   if (change === 0) return "0%";
   return `${change > 0 ? "▲" : "▼"} ${Math.abs(change)}%`;
+}
+
+/** Round chart axis ticks: nice steps (1/2/5 × 10ⁿ) covering `max` with about `target` ticks. */
+export function niceAxisTicks(max: number, target = 4): number[] {
+  if (!Number.isFinite(max) || max <= 0) return [0];
+  const raw = max / Math.max(1, target);
+  const power = 10 ** Math.floor(Math.log10(raw));
+  const normalized = raw / power;
+  const step =
+    normalized <= 1 ? power : normalized <= 2 ? 2 * power : normalized <= 5 ? 5 * power : 10 * power;
+  const top = Math.ceil(max / step) * step;
+  const ticks: number[] = [];
+  for (let value = 0; value <= top + step * 0.001; value += step) {
+    ticks.push(Math.round(value * 1e6) / 1e6);
+  }
+  return ticks;
+}
+
+/** Ledger query for the report's period/accounts/category/merchant filters. */
+export function transactionsFeedQuery(input: {
+  start: string;
+  end: string;
+  accountIds?: string[];
+  categoryId?: string | null;
+  merchantName?: string | null;
+  mode?: SpendingReportMode;
+}): string {
+  const params = new URLSearchParams();
+  params.set("preset", "custom");
+  params.set("from", `${input.start}T00:00:00.000Z`);
+  params.set("to", `${input.end}T23:59:59.999Z`);
+  if (input.accountIds && input.accountIds.length > 0) {
+    params.set("accounts", input.accountIds.join(","));
+  }
+  if (input.categoryId) params.set("categories", input.categoryId);
+  if (input.merchantName) params.set("q", input.merchantName);
+  if (input.mode === "expense" || input.mode === "income") params.set("sign", input.mode);
+  return params.toString();
 }
 
 /**
