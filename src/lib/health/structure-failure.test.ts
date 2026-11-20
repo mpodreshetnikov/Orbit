@@ -67,11 +67,11 @@ describe("formatClientStructureFailure", () => {
   });
 
   it("embeds the fixed English summary for each client cause", () => {
-    expect(formatClientStructureFailure("service_unreachable")).toContain(
-      "the structuring service could not be reached",
+    expect(formatClientStructureFailure("service_unreachable")).toBe(
+      "structure_cause:service_unreachable the structuring service could not be reached",
     );
-    expect(formatClientStructureFailure("not_authenticated")).toContain(
-      "the session is not signed in",
+    expect(formatClientStructureFailure("not_authenticated")).toBe(
+      "structure_cause:not_authenticated the session is not signed in",
     );
   });
 });
@@ -90,8 +90,8 @@ describe("durableClientStructureFailure", () => {
   });
 
   it("classifies transport failures as service_unreachable", () => {
-    expect(durableClientStructureFailure(new TypeError("Failed to fetch"))).toContain(
-      "structure_cause:service_unreachable",
+    expect(durableClientStructureFailure(new TypeError("Failed to fetch"))).toBe(
+      "structure_cause:service_unreachable the structuring service could not be reached: Failed to fetch",
     );
   });
 
