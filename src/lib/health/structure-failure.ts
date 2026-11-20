@@ -48,22 +48,32 @@ export const STRUCTURE_CAUSE_PREFIX = "structure_cause:";
  */
 export const MAX_STRUCTURE_ERROR_LENGTH = 500;
 
-const CLIENT_SUMMARIES: Record<(typeof CLIENT_STRUCTURE_CAUSES)[number], string> = {
-  service_unreachable: "the structuring service could not be reached",
-  not_authenticated: "the session is not signed in",
-};
+function clientStructureSummary(cause: (typeof CLIENT_STRUCTURE_CAUSES)[number]): string {
+  switch (cause) {
+    case "service_unreachable":
+      return "the structuring service could not be reached";
+    case "not_authenticated":
+      return "the session is not signed in";
+  }
+}
 
 /** Compose a durable failure string for a failure that happened in the browser. */
 export function formatClientStructureFailure(
   cause: (typeof CLIENT_STRUCTURE_CAUSES)[number],
   detail?: string,
 ): string {
-  const summary = CLIENT_SUMMARIES[cause];
-  if (!summary) {
-    throw new Error(`missing client structure summary for ${cause}`);
-  }
+  const summary = clientStructureSummary(cause);
   const composed = `${STRUCTURE_CAUSE_PREFIX}${cause} ${detail ? `${summary}: ${detail}` : summary}`;
   return composed.slice(0, MAX_STRUCTURE_ERROR_LENGTH);
+}
+
+/** The cause a stored message carries, or null for a message written before this vocabulary. */
+export function parseStructureFailureCause(
+  message: string | null | undefined,
+): StructureFailureCause | null {
+  if (!message?.startsWith(STRUCTURE_CAUSE_PREFIX)) return null;
+  const code = message.slice(STRUCTURE_CAUSE_PREFIX.length).split(/\s/, 1)[0];
+  return ALL_CAUSES.includes(code) ? (code as StructureFailureCause) : null;
 }
 
 /**
@@ -75,7 +85,10 @@ export function formatClientStructureFailure(
  */
 export function durableClientStructureFailure(error: unknown): string {
   const raw = error instanceof Error ? error.message : "";
-  if (parseStructureFailureCause(raw)) return raw.slice(0, MAX_STRUCTURE_ERROR_LENGTH);
+  if (parseStructureFailureCause(raw)) {
+    // Cap even when the server already classified — the column is 500 characters.
+    return raw.slice(0, MAX_STRUCTURE_ERROR_LENGTH);
+  }
   if (/not authenticated/i.test(raw)) {
     return formatClientStructureFailure("not_authenticated");
   }
@@ -86,15 +99,6 @@ export function durableClientStructureFailure(error: unknown): string {
     return formatClientStructureFailure("service_unreachable", raw || "processing failed");
   }
   return (raw || "Structure extraction failed").slice(0, MAX_STRUCTURE_ERROR_LENGTH);
-}
-
-/** The cause a stored message carries, or null for a message written before this vocabulary. */
-export function parseStructureFailureCause(
-  message: string | null | undefined,
-): StructureFailureCause | null {
-  if (!message?.startsWith(STRUCTURE_CAUSE_PREFIX)) return null;
-  const code = message.slice(STRUCTURE_CAUSE_PREFIX.length).split(/\s/, 1)[0];
-  return ALL_CAUSES.includes(code) ? (code as StructureFailureCause) : null;
 }
 
 /**

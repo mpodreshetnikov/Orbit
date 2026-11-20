@@ -83,14 +83,36 @@ describe("durableClientStructureFailure", () => {
     expect(durableClientStructureFailure(new Error(classified))).toBe(classified);
   });
 
+  it("does not re-wrap a classified message that mentions authentication", () => {
+    // Without the classified early-return, `/not authenticated/i` would rematch the prose and
+    // replace the server's cause with a client one.
+    const classified =
+      "structure_cause:provider_auth the structuring service said not authenticated for this key";
+    expect(durableClientStructureFailure(new Error(classified))).toBe(classified);
+  });
+
+  it("caps an overlong classified message", () => {
+    const classified = `structure_cause:internal ${"y".repeat(2000)}`;
+    const result = durableClientStructureFailure(new Error(classified));
+    expect(result.length).toBe(MAX_STRUCTURE_ERROR_LENGTH);
+    expect(parseStructureFailureCause(result)).toBe("internal");
+  });
+
   it("classifies a missing session", () => {
     expect(durableClientStructureFailure(new Error("Not authenticated"))).toBe(
       "structure_cause:not_authenticated the session is not signed in",
     );
   });
 
-  it("classifies transport failures as service_unreachable", () => {
-    expect(durableClientStructureFailure(new TypeError("Failed to fetch"))).toBe(
+  it("classifies a TypeError even when its message is not a known network phrase", () => {
+    // Kills `TypeError || regex` → `TypeError && regex`.
+    expect(durableClientStructureFailure(new TypeError("connection reset"))).toBe(
+      "structure_cause:service_unreachable the structuring service could not be reached: connection reset",
+    );
+  });
+
+  it("classifies a network Error that is not a TypeError", () => {
+    expect(durableClientStructureFailure(new Error("Failed to fetch"))).toBe(
       "structure_cause:service_unreachable the structuring service could not be reached: Failed to fetch",
     );
   });
@@ -99,6 +121,15 @@ describe("durableClientStructureFailure", () => {
     expect(durableClientStructureFailure(new Error("OPENROUTER_API_KEY is required"))).toBe(
       "OPENROUTER_API_KEY is required",
     );
+  });
+
+  it("caps an overlong unclassified explanation", () => {
+    const long = "z".repeat(2000);
+    expect(durableClientStructureFailure(new Error(long)).length).toBe(MAX_STRUCTURE_ERROR_LENGTH);
+  });
+
+  it("uses a fixed fallback when there is no Error message", () => {
+    expect(durableClientStructureFailure("not-an-error")).toBe("Structure extraction failed");
   });
 });
 
