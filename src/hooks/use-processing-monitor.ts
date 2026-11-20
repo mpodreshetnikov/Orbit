@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { useTranslations } from "next-intl";
 import { createClient } from "@/lib/supabase";
 import { translateOcrFailure } from "@/lib/health/ocr-failure";
+import { translateStructureFailure } from "@/lib/health/structure-failure";
 import { useProcessingQueueStore } from "@/stores/processing-queue-store";
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 
@@ -124,6 +125,14 @@ export function useProcessingMonitor(personId: string | null) {
           });
           continue;
         }
+        // Structuring failures return to ocr_review with structure_error set — not a completion.
+        if (record.status === "ocr_review" && record.structure_error) {
+          store.updateJob(job.id, {
+            stage: "failed",
+            error: translateStructureFailure(record.structure_error, t),
+          });
+          continue;
+        }
         // Past OCR: the transcription finished while nothing was listening. There is no toast
         // for it -- the moment to announce it has passed -- but the queue must stop claiming
         // the document is still being read.
@@ -169,9 +178,12 @@ export function useProcessingMonitor(personId: string | null) {
 
         const failure = readFailure(oldStatus, newRecord);
         if (failure && processingRecordsRef.current.has(newRecord.id)) {
-          // OCR failures carry a cause code the user's language has a sentence for; a
-          // structuring failure still carries the server's own English, so it falls through.
-          const message = translateOcrFailure(failure.message, t);
+          // OCR and structuring each have their own cause vocabulary; routing both through
+          // translateOcrFailure left structure_cause: strings untranslated in the toast/queue.
+          const message =
+            oldStatus === "structuring"
+              ? translateStructureFailure(failure.message, t)
+              : translateOcrFailure(failure.message, t);
           console.log("[Realtime] Record failed processing:", newRecord.id, newStatus);
           processingRecordsRef.current.delete(newRecord.id);
           updateJob(newRecord.id, { stage: "failed", error: message });

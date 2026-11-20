@@ -122,19 +122,19 @@ describe("use-structure-extraction", () => {
     expect(toastErrorMock).toHaveBeenCalledWith(
       "processing.structureFailed",
       expect.objectContaining({
-        description: "Not authenticated",
+        description: "processing.structureCause.not_authenticated",
       }),
     );
     // The reason outlives the toast: a failure that never reached the edge function is written here.
     expect(updateMock).toHaveBeenCalledWith({
       status: "ocr_review",
-      structure_error: "Not authenticated",
+      structure_error: "structure_cause:not_authenticated the session is not signed in",
     });
     expect(eqMock).toHaveBeenCalledWith("id", "record-1");
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["medical-records"] });
     expect(response).toEqual({
       success: false,
-      error: "Not authenticated",
+      error: "structure_cause:not_authenticated the session is not signed in",
     });
   });
 

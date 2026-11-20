@@ -5,6 +5,7 @@ import {
   processFindingsToResolve,
 } from "./resolution.ts";
 import type { EdgeTelemetry } from "../_shared/observability.ts";
+import { classifyStructureError, formatStructureFailure } from "./failure.ts";
 import type { HealthStructureRepository } from "./repository.ts";
 import { usageAttrs } from "../_shared/llm-usage.ts";
 import type { StructuredDataWithEntities, StructuredParseOutcome } from "./types.ts";
@@ -544,10 +545,17 @@ export async function runHealthStructureService(
       },
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
+    const rawMessage = error instanceof Error ? error.message : "Unknown error";
+    // Guard/auth failures never reach a structuring attempt: keep their contract strings.
+    // Once the record was claimed, classify so structure_error is translatable.
+    const failureCause = mayRecordFailure ? classifyStructureError(error) : null;
+    const durableMessage = failureCause
+      ? formatStructureFailure(failureCause, rawMessage)
+      : rawMessage;
     telemetry?.error("health_structure_service_failed", {
       record_id: input.recordId ?? "missing",
-      error_message: message,
+      error_message: durableMessage,
+      ...(failureCause ? { structure_failure_cause: failureCause } : {}),
     });
     // Durable trace of the failure, and only for a caller who got past authentication and whose
     // record was found. Best-effort on purpose: the original error is what the caller must see,
@@ -557,7 +565,7 @@ export async function runHealthStructureService(
         await deps.repository.updateMedicalRecord(
           input.recordId,
           {
-            structure_error: message,
+            structure_error: durableMessage,
             // Back to where a retry starts from. Leaving `structuring` behind would show the
             // record as being worked on by a run that no longer exists -- the client-side
             // rollback only happens when a browser is still there to do it.
@@ -576,13 +584,13 @@ export async function runHealthStructureService(
     }
     await serviceSpan?.end({
       status: "error",
-      statusMessage: message,
+      statusMessage: durableMessage,
     });
     return {
       status: 400,
       payload: {
         success: false,
-        error: message,
+        error: durableMessage,
       },
     };
   }

@@ -1255,6 +1255,15 @@
       "service_unreachable": "The text recognition service could not be reached. Check your connection and try again.",
       "not_authenticated": "Your session has expired. Sign in again and retry.",
       "upload_failed": "The document could not be uploaded. Check your connection and try again."
+    },
+    "structureCause": {
+      "provider_auth": "The structuring service rejected this app's credentials. The document is fine — an administrator needs to fix the API key.",
+      "provider_no_endpoint": "The structuring service could not route the request as this app has configured it — either the model it names is not served, or the request asks for an option that model does not support. The document is fine; an administrator needs to fix the configuration.",
+      "provider_rejected": "The structuring service refused the request. This is a configuration problem, not a problem with the document.",
+      "provider_unavailable": "The structuring service was unavailable. Try again in a few minutes.",
+      "internal": "Structuring failed for an unexpected reason. Try again, and tell an administrator if it keeps happening.",
+      "service_unreachable": "The structuring service could not be reached. Check your connection and try again.",
+      "not_authenticated": "Your session has expired. Sign in again and retry."
     }
   },
   "catalogs": {

@@ -7,6 +7,7 @@ import Link from "next/link";
 import { format } from "date-fns";
 import { useDateFnsLocale } from "@/lib/date-locale";
 import { translateOcrFailure } from "@/lib/health/ocr-failure";
+import { translateStructureFailure } from "@/lib/health/structure-failure";
 import {
   ArrowLeft,
   Calendar,
@@ -853,7 +854,9 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
           // reason is shown here until a run succeeds and clears it.
           <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4">
             <p className="text-sm font-medium">{t("processing.structureFailed")}</p>
-            <p className="mt-1 text-sm text-muted-foreground">{record.structure_error}</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {translateStructureFailure(record.structure_error, t)}
+            </p>
           </div>
         ) : null}
         <OcrReviewStep

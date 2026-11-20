@@ -6,6 +6,12 @@ import { useTranslations } from "next-intl";
 import { useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase";
 import { fetchEdgeFunctionWithTelemetry } from "@/lib/observability/edge-function-fetch";
+import {
+  formatClientStructureFailure,
+  MAX_STRUCTURE_ERROR_LENGTH,
+  parseStructureFailureCause,
+  translateStructureFailure,
+} from "@/lib/health/structure-failure";
 import type { HealthStructureResponse, StructuredData } from "@/types";
 
 interface StructureExtractionInput {
@@ -18,6 +24,29 @@ interface StructureExtractionResult {
   error?: string;
   /** The edge function refused because another run already owns this record. */
   alreadyRunning?: boolean;
+}
+
+/**
+ * Make a failure the browser is about to persist translatable.
+ *
+ * Anything already classified is left as it is — the service's message must never be re-wrapped.
+ * Unclassified server explanations (auth, missing key, guard strings) stay as capped prose so the
+ * toast and banner keep the actionable detail. Only real transport failures become
+ * `service_unreachable`.
+ */
+function asDurableClientFailure(error: unknown): string {
+  const raw = error instanceof Error ? error.message : "";
+  if (parseStructureFailureCause(raw)) return raw.slice(0, MAX_STRUCTURE_ERROR_LENGTH);
+  if (/not authenticated/i.test(raw)) {
+    return formatClientStructureFailure("not_authenticated");
+  }
+  if (
+    error instanceof TypeError ||
+    /failed to fetch|networkerror|load failed|network request failed/i.test(raw)
+  ) {
+    return formatClientStructureFailure("service_unreachable", raw || "processing failed");
+  }
+  return (raw || "Structure extraction failed").slice(0, MAX_STRUCTURE_ERROR_LENGTH);
 }
 
 export function useStructureExtraction() {
@@ -78,15 +107,26 @@ export function useStructureExtraction() {
           return { success: false, error: "already_running", alreadyRunning: true };
         }
 
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`Structure extraction failed: ${errorText || response.statusText}`);
+        // Prefer the JSON body even on non-2xx: the service returns the same classified
+        // `structure_error` string in `error`, and re-wrapping it as free prose was the defect.
+        let data: HealthStructureResponse | null = null;
+        try {
+          data = (await response.json()) as HealthStructureResponse;
+        } catch {
+          data = null;
         }
 
-        const data: HealthStructureResponse = await response.json();
+        if (!response.ok) {
+          if (data?.error && parseStructureFailureCause(data.error)) {
+            throw new Error(data.error);
+          }
+          throw new Error(
+            `Structure extraction failed: ${data?.error || response.statusText || response.status}`,
+          );
+        }
 
-        if (!data.success) {
-          throw new Error(data.error || "Structure extraction failed");
+        if (!data?.success) {
+          throw new Error(data?.error || "Structure extraction failed");
         }
 
         // Success toast is shown by useProcessingMonitor when status flips to structure_review
@@ -127,11 +167,11 @@ export function useStructureExtraction() {
 
         return { success: true, structured_data: data.structured_data };
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : "Structure extraction failed";
+        const errorMessage = asDurableClientFailure(error);
 
         // Show error toast
         toast.error(t("processing.structureFailed"), {
-          description: errorMessage,
+          description: translateStructureFailure(errorMessage, t),
         });
 
         // Update record status back to ocr_review (so user can try again), and leave the reason

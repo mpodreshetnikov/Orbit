@@ -326,7 +326,8 @@ describe("use-processing-monitor", () => {
           title: "Panel",
           status: "ocr_review",
           person_id: "person-1",
-          structure_error: "Model returned invalid JSON",
+          structure_error:
+            "structure_cause:provider_unavailable the structuring service was unavailable: OpenRouter returned invalid JSON content",
         },
       });
     });
@@ -334,7 +335,7 @@ describe("use-processing-monitor", () => {
     await waitFor(() =>
       expect(updateJobMock).toHaveBeenCalledWith("record-2", {
         stage: "failed",
-        error: "Model returned invalid JSON",
+        error: "processing.structureCause.provider_unavailable",
       }),
     );
   });

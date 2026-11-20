@@ -10,6 +10,7 @@ import {
   withLlmRetry,
 } from "../../_shared/llm-retry.ts";
 import { parseLlmUsage } from "../../_shared/llm-usage.ts";
+import { StructureProviderError } from "../failure.ts";
 import { StagedParseClaimLostError, type StageContext, type StageUsage } from "./types.ts";
 
 /**
@@ -141,7 +142,8 @@ export async function callStageJson(
               parseRetryAfterMs(response.headers.get("retry-after"), Date.now()),
             );
           }
-          throw new Error(message);
+          // Typed so classifyStructureError can map 401/403/404 without parsing the message.
+          throw new StructureProviderError(message, response.status);
         }
 
         const payload = asObject(await response.json());

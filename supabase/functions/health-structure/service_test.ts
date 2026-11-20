@@ -331,7 +331,7 @@ Deno.test("runHealthStructureService handles missing record and missing OCR text
   );
   assertEquals(
     noOcrResult.payload.error,
-    "No OCR text found for this record. Run health-ocr first.",
+    "structure_cause:internal structuring failed for an unexpected reason: No OCR text found for this record. Run health-ocr first.",
   );
 
   const missingPerson = createRepositoryMock({
@@ -477,7 +477,10 @@ Deno.test("runHealthStructureService returns error when parser fails", async () 
   );
 
   assertEquals(result.status, 400);
-  assertEquals(result.payload.error, "OpenRouter timeout");
+  assertEquals(
+    result.payload.error,
+    "structure_cause:provider_unavailable the structuring service was unavailable: OpenRouter timeout",
+  );
 });
 
 Deno.test("runHealthStructureService applies catalog/checkup fallback mappings", async () => {
@@ -555,7 +558,10 @@ Deno.test("runHealthStructureService handles non-Error parse failures", async ()
   );
 
   assertEquals(result.status, 400);
-  assertEquals(result.payload.error, "Unknown error");
+  assertEquals(
+    result.payload.error,
+    "structure_cause:internal structuring failed for an unexpected reason: Unknown error",
+  );
 });
 
 Deno.test(
@@ -683,7 +689,10 @@ Deno.test("runHealthStructureService leaves a durable structure_error on failure
   assertEquals(result.status, 400);
   const errorWrite = state.updatedRecords.find((update) => "structure_error" in update.patch);
   assertEquals(errorWrite?.recordId, "record-1");
-  assertEquals(errorWrite?.patch.structure_error, "OpenRouter timeout");
+  assertEquals(
+    errorWrite?.patch.structure_error,
+    "structure_cause:provider_unavailable the structuring service was unavailable: OpenRouter timeout",
+  );
 });
 
 Deno.test("runHealthStructureService clears structure_error when the run succeeds", async () => {
@@ -725,7 +734,10 @@ Deno.test(
     );
 
     assertEquals(result.status, 400);
-    assertEquals(result.payload.error, "OpenRouter timeout");
+    assertEquals(
+      result.payload.error,
+      "structure_cause:provider_unavailable the structuring service was unavailable: OpenRouter timeout",
+    );
   },
 );
 
@@ -860,7 +872,10 @@ Deno.test("runHealthStructureService hands a failed record back to review", asyn
   // Leaving `structuring` behind would show the record as worked on by a run that is gone; the
   // client-side rollback only happens when a browser is still there to do it.
   assertEquals(patch.status, "ocr_review");
-  assertEquals(patch.structure_error, "OpenRouter timeout");
+  assertEquals(
+    patch.structure_error,
+    "structure_cause:provider_unavailable the structuring service was unavailable: OpenRouter timeout",
+  );
   assertEquals(patch.processing_run_id, null);
 });
 

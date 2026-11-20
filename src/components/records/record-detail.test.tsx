@@ -642,7 +642,8 @@ describe("RecordDetail", () => {
     hookMocks.useMedicalRecord.mockReturnValue({
       data: baseRecord({
         status: "ocr_review",
-        structure_error: "Structure extraction failed: 502",
+        structure_error:
+          "structure_cause:provider_unavailable the structuring service was unavailable: OpenRouter request failed: 502",
       }),
       isLoading: false,
       error: null,
@@ -651,7 +652,7 @@ describe("RecordDetail", () => {
     const view = render(<RecordDetail recordId="record-1" />);
     // The toast that announced it is long gone; the reason has to survive a refresh.
     expect(screen.getByText("processing.structureFailed")).toBeInTheDocument();
-    expect(screen.getByText("Structure extraction failed: 502")).toBeInTheDocument();
+    expect(screen.getByText("processing.structureCause.provider_unavailable")).toBeInTheDocument();
     view.unmount();
 
     hookMocks.useMedicalRecord.mockReturnValue({
