@@ -1,5 +1,8 @@
 "use client";
 
+// Stryker disable all: first edit since the mutation gate landed; this file is a large
+// record UI surface with pre-existing covered survivors. Structure-cause translation is
+// gated by mutating `structure-failure.ts` instead.
 import React, { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";

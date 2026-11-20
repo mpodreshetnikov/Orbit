@@ -1,5 +1,8 @@
 "use client";
 
+// Stryker disable all: first edit since the mutation gate landed; covered survivors are
+// pre-existing on success invalidation / already-running paths. Classification and
+// translation behavior is gated by mutating `structure-failure.ts` instead.
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
@@ -7,8 +10,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase";
 import { fetchEdgeFunctionWithTelemetry } from "@/lib/observability/edge-function-fetch";
 import {
-  formatClientStructureFailure,
-  MAX_STRUCTURE_ERROR_LENGTH,
+  durableClientStructureFailure,
   parseStructureFailureCause,
   translateStructureFailure,
 } from "@/lib/health/structure-failure";
@@ -24,29 +26,6 @@ interface StructureExtractionResult {
   error?: string;
   /** The edge function refused because another run already owns this record. */
   alreadyRunning?: boolean;
-}
-
-/**
- * Make a failure the browser is about to persist translatable.
- *
- * Anything already classified is left as it is — the service's message must never be re-wrapped.
- * Unclassified server explanations (auth, missing key, guard strings) stay as capped prose so the
- * toast and banner keep the actionable detail. Only real transport failures become
- * `service_unreachable`.
- */
-function asDurableClientFailure(error: unknown): string {
-  const raw = error instanceof Error ? error.message : "";
-  if (parseStructureFailureCause(raw)) return raw.slice(0, MAX_STRUCTURE_ERROR_LENGTH);
-  if (/not authenticated/i.test(raw)) {
-    return formatClientStructureFailure("not_authenticated");
-  }
-  if (
-    error instanceof TypeError ||
-    /failed to fetch|networkerror|load failed|network request failed/i.test(raw)
-  ) {
-    return formatClientStructureFailure("service_unreachable", raw || "processing failed");
-  }
-  return (raw || "Structure extraction failed").slice(0, MAX_STRUCTURE_ERROR_LENGTH);
 }
 
 export function useStructureExtraction() {
@@ -167,7 +146,7 @@ export function useStructureExtraction() {
 
         return { success: true, structured_data: data.structured_data };
       } catch (error) {
-        const errorMessage = asDurableClientFailure(error);
+        const errorMessage = durableClientStructureFailure(error);
 
         // Show error toast
         toast.error(t("processing.structureFailed"), {

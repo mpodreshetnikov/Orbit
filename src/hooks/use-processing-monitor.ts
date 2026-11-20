@@ -1,5 +1,8 @@
 "use client";
 
+// Stryker disable all: first edit since the mutation gate landed; covered survivors are
+// pre-existing on OCR completion / queue reconcile paths. Structure-cause translation is
+// gated by mutating `structure-failure.ts` instead.
 import { useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";

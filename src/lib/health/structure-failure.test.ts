@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   CLIENT_STRUCTURE_CAUSES,
+  durableClientStructureFailure,
   formatClientStructureFailure,
   MAX_STRUCTURE_ERROR_LENGTH,
   parseStructureFailureCause,
@@ -63,6 +64,41 @@ describe("formatClientStructureFailure", () => {
     const message = formatClientStructureFailure("service_unreachable", "x".repeat(2000));
     expect(message.length).toBe(MAX_STRUCTURE_ERROR_LENGTH);
     expect(parseStructureFailureCause(message)).toBe("service_unreachable");
+  });
+
+  it("embeds the fixed English summary for each client cause", () => {
+    expect(formatClientStructureFailure("service_unreachable")).toContain(
+      "the structuring service could not be reached",
+    );
+    expect(formatClientStructureFailure("not_authenticated")).toContain(
+      "the session is not signed in",
+    );
+  });
+});
+
+describe("durableClientStructureFailure", () => {
+  it("keeps an already-classified server message", () => {
+    const classified =
+      "structure_cause:provider_auth the structuring service rejected this deployment's credentials";
+    expect(durableClientStructureFailure(new Error(classified))).toBe(classified);
+  });
+
+  it("classifies a missing session", () => {
+    expect(durableClientStructureFailure(new Error("Not authenticated"))).toBe(
+      "structure_cause:not_authenticated the session is not signed in",
+    );
+  });
+
+  it("classifies transport failures as service_unreachable", () => {
+    expect(durableClientStructureFailure(new TypeError("Failed to fetch"))).toContain(
+      "structure_cause:service_unreachable",
+    );
+  });
+
+  it("preserves unclassified server explanations", () => {
+    expect(durableClientStructureFailure(new Error("OPENROUTER_API_KEY is required"))).toBe(
+      "OPENROUTER_API_KEY is required",
+    );
   });
 });
 

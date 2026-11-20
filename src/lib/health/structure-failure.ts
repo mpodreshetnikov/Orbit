@@ -59,8 +59,33 @@ export function formatClientStructureFailure(
   detail?: string,
 ): string {
   const summary = CLIENT_SUMMARIES[cause];
+  if (!summary) {
+    throw new Error(`missing client structure summary for ${cause}`);
+  }
   const composed = `${STRUCTURE_CAUSE_PREFIX}${cause} ${detail ? `${summary}: ${detail}` : summary}`;
   return composed.slice(0, MAX_STRUCTURE_ERROR_LENGTH);
+}
+
+/**
+ * Make a failure the browser is about to persist translatable.
+ *
+ * Anything already classified is left as it is. Unclassified server explanations stay as capped
+ * prose so the toast and banner keep the actionable detail. Only real transport failures become
+ * `service_unreachable`.
+ */
+export function durableClientStructureFailure(error: unknown): string {
+  const raw = error instanceof Error ? error.message : "";
+  if (parseStructureFailureCause(raw)) return raw.slice(0, MAX_STRUCTURE_ERROR_LENGTH);
+  if (/not authenticated/i.test(raw)) {
+    return formatClientStructureFailure("not_authenticated");
+  }
+  if (
+    error instanceof TypeError ||
+    /failed to fetch|networkerror|load failed|network request failed/i.test(raw)
+  ) {
+    return formatClientStructureFailure("service_unreachable", raw || "processing failed");
+  }
+  return (raw || "Structure extraction failed").slice(0, MAX_STRUCTURE_ERROR_LENGTH);
 }
 
 /** The cause a stored message carries, or null for a message written before this vocabulary. */
