@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
-import { useRouter, useSearchParams, usePathname } from "next/navigation";
-import { Search, X, FileText, FileStack, CircleSlash } from "lucide-react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { CircleSlash, FileStack, FileText, Search, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -27,39 +27,44 @@ import {
 } from "@/components/ui/alert-dialog";
 import { RecordCard } from "./record-card-view";
 import {
-  useMedicalRecords,
-  useSoftDeleteRecord,
-  useRestoreRecord,
   useHardDeleteRecord,
+  useMedicalRecords,
+  useRestoreRecord,
+  useSoftDeleteRecord,
   useUpdateMedicalRecord,
 } from "@/hooks";
-import type { MedicalRecordListItem, RecordType, RecordStatus } from "@/types";
+import type { MedicalRecordListItem, RecordType } from "@/types";
 import { RECORD_TYPES } from "@/types";
 import { cn } from "@/lib/utils";
-
-type StatusFilter = "active" | "draft" | "processing" | "removed";
+import {
+  countOrZero,
+  emptyBodyKey,
+  emptyIconKind,
+  emptyTitleKey,
+  hasActiveFilters,
+  recordTypeFilterParam,
+  searchFilterParam,
+  showCountBadge,
+  sideFilterPersonId,
+  tabButtonVariant,
+  tabFromSearchParams,
+  tabNeedsAccent,
+  type StatusFilter,
+} from "./records-list-helpers";
 
 interface RecordsListProps {
   personId: string;
   personName: string;
 }
 
-const TAB_VALUES: StatusFilter[] = ["active", "draft", "processing", "removed"];
-
-function tabFromSearchParams(searchParams: URLSearchParams): StatusFilter {
-  const tab = searchParams.get("tab");
-  if (tab && TAB_VALUES.includes(tab as StatusFilter)) return tab as StatusFilter;
-  if (searchParams.get("showDrafts") === "true") return "draft";
-  return "active";
-}
-
+/**
+ * Records list without in-app medical upload (Decision B / MCP-only ingest).
+ */
 export function RecordsList({ personId, personName }: RecordsListProps) {
   const t = useTranslations();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-
-  // Tab (status filter) is driven by URL so back/forward navigates tabs
   const statusFilter = tabFromSearchParams(searchParams);
 
   const setTabInUrl = (tab: StatusFilter) => {
@@ -71,139 +76,75 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
       params.set("tab", tab);
     }
     const query = params.toString();
-    router.push(query ? `${pathname}?${query}` : pathname);
+    router.push(query.length > 0 ? `${pathname}?${query}` : pathname);
   };
 
-  // Filter state
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<RecordType | "all">("all");
+  const [recordToRemove, setRecordToRemove] = useState<MedicalRecordListItem | null>(null);
 
-  // Debounce search query (300ms delay)
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearch(searchQuery);
-    }, 300);
+    const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300);
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  // Confirmation dialog state
-  const [recordToRemove, setRecordToRemove] = useState<MedicalRecordListItem | null>(null);
-  const [recordToDelete, setRecordToDelete] = useState<MedicalRecordListItem | null>(null);
-  const [recordToActivate, setRecordToActivate] = useState<MedicalRecordListItem | null>(null);
-
-  // Mutations
   const softDeleteMutation = useSoftDeleteRecord();
   const restoreMutation = useRestoreRecord();
   const hardDeleteMutation = useHardDeleteRecord();
   const updateMutation = useUpdateMedicalRecord();
 
-  // Build filters for the query (use debounced search)
   const filters = useMemo(
     () => ({
       person_id: personId,
-      record_type: typeFilter === "all" ? undefined : typeFilter,
-      status: statusFilter as RecordStatus,
-      search: debouncedSearch.trim() || undefined,
+      record_type: recordTypeFilterParam(typeFilter),
+      status: statusFilter as never,
+      search: searchFilterParam(debouncedSearch),
     }),
     [personId, typeFilter, statusFilter, debouncedSearch],
   );
 
-  const { data: records, isLoading, error } = useMedicalRecords(filters);
-
-  // Also fetch drafts count for badge (when viewing active)
   const draftsFilters = useMemo(
     () => ({
-      person_id: personId,
-      status: "draft" as RecordStatus,
+      person_id: sideFilterPersonId(statusFilter, "draft", personId),
+      status: "draft" as never,
     }),
-    [personId],
+    [personId, statusFilter],
   );
-  const { data: drafts } = useMedicalRecords(
-    statusFilter !== "draft" ? draftsFilters : { person_id: "" },
-  );
-
-  // Also fetch processing count for badge
   const processingFilters = useMemo(
     () => ({
-      person_id: personId,
-      status: "processing" as RecordStatus,
+      person_id: sideFilterPersonId(statusFilter, "processing", personId),
+      status: "processing" as never,
     }),
-    [personId],
-  );
-  const { data: processingRecords } = useMedicalRecords(
-    statusFilter !== "processing" ? processingFilters : { person_id: "" },
+    [personId, statusFilter],
   );
 
-  const draftsCount = drafts?.length || 0;
-  // Only count DB records with "processing" status - don't double count with store jobs
-  // since jobs in "processing" stage correspond to DB records with status "processing"
-  const processingCount = processingRecords?.length || 0;
-
-  const handleView = (record: MedicalRecordListItem) => {
-    router.push(`/health/records/${record.id}`);
-  };
-
-  const handleRemove = (record: MedicalRecordListItem) => {
-    setRecordToRemove(record);
-  };
-
-  const handleRestore = (record: MedicalRecordListItem) => {
-    restoreMutation.mutate(record.id);
-  };
-
-  const handleDelete = (record: MedicalRecordListItem) => {
-    setRecordToDelete(record);
-  };
-
-  const handleActivate = (record: MedicalRecordListItem) => {
-    setRecordToActivate(record);
-  };
+  const { data: records, isLoading, error } = useMedicalRecords(filters);
+  const { data: drafts } = useMedicalRecords(draftsFilters);
+  const { data: processingRecords } = useMedicalRecords(processingFilters);
+  const draftsCount = countOrZero(drafts);
+  const processingCount = countOrZero(processingRecords);
+  const filtersActive = hasActiveFilters(searchQuery, typeFilter, statusFilter);
 
   const confirmRemove = () => {
-    if (recordToRemove) {
-      softDeleteMutation.mutate(recordToRemove.id);
-      setRecordToRemove(null);
+    if (recordToRemove === null) {
+      return;
     }
+    softDeleteMutation.mutate(recordToRemove.id);
+    setRecordToRemove(null);
   };
 
-  const confirmDelete = () => {
-    if (recordToDelete) {
-      hardDeleteMutation.mutate(recordToDelete.id);
-      setRecordToDelete(null);
-    }
-  };
-
-  const confirmActivate = () => {
-    if (recordToActivate) {
-      updateMutation.mutate({
-        id: recordToActivate.id,
-        updates: { status: "active" },
-      });
-      setRecordToActivate(null);
-    }
-  };
-
-  const clearFilters = () => {
-    setSearchQuery("");
-    setTypeFilter("all");
-    router.replace(pathname);
-  };
-
-  const hasActiveFilters = searchQuery || typeFilter !== "all" || statusFilter !== "active";
+  const iconKind = emptyIconKind(statusFilter);
 
   return (
     <div className="space-y-4 min-w-0 overflow-x-hidden">
-      <div className="flex items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold tracking-tight truncate min-w-0">
-          {t("health.title")} — {personName}
-        </h1>
-      </div>
+      <h1 className="text-2xl font-bold tracking-tight truncate min-w-0">
+        {t("health.title")} — {personName}
+      </h1>
 
-      {/* Status filter tabs */}
       <div className="flex items-center gap-2 border-b pb-3 overflow-x-auto">
         <Button
-          variant={statusFilter === "active" ? "secondary" : "ghost"}
+          variant={tabButtonVariant(statusFilter === "active")}
           size="sm"
           onClick={() => setTabInUrl("active")}
           className="shrink-0"
@@ -211,41 +152,41 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
           {t("records.statusFilter.active")}
         </Button>
         <Button
-          variant={statusFilter === "draft" ? "secondary" : "ghost"}
+          variant={tabButtonVariant(statusFilter === "draft")}
           size="sm"
           onClick={() => setTabInUrl("draft")}
           className={cn(
             "shrink-0 gap-1",
-            draftsCount > 0 && statusFilter !== "draft" && "text-primary",
+            tabNeedsAccent(draftsCount, statusFilter === "draft") && "text-primary",
           )}
         >
           <FileStack className="h-4 w-4" />
           {t("records.statusFilter.drafts")}
-          {draftsCount > 0 && (
+          {showCountBadge(draftsCount) ? (
             <Badge variant="secondary" className="h-5 px-1.5 text-xs">
               {draftsCount}
             </Badge>
-          )}
+          ) : null}
         </Button>
         <Button
-          variant={statusFilter === "processing" ? "secondary" : "ghost"}
+          variant={tabButtonVariant(statusFilter === "processing")}
           size="sm"
           onClick={() => setTabInUrl("processing")}
           className={cn(
             "shrink-0 gap-1",
-            processingCount > 0 && statusFilter !== "processing" && "text-primary",
+            tabNeedsAccent(processingCount, statusFilter === "processing") && "text-primary",
           )}
         >
           <CircleSlash className="h-4 w-4" />
           {t("records.statusFilter.notProcessed")}
-          {processingCount > 0 && (
+          {showCountBadge(processingCount) ? (
             <Badge variant="secondary" className="h-5 px-1.5 text-xs">
               {processingCount}
             </Badge>
-          )}
+          ) : null}
         </Button>
         <Button
-          variant={statusFilter === "removed" ? "secondary" : "ghost"}
+          variant={tabButtonVariant(statusFilter === "removed")}
           size="sm"
           onClick={() => setTabInUrl("removed")}
           className="shrink-0"
@@ -254,7 +195,6 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
         </Button>
       </div>
 
-      {/* Search and type filters */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -264,19 +204,18 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-9"
           />
-          {searchQuery && (
+          {searchQuery.length > 0 ? (
             <Button
               type="button"
               variant="ghost"
               size="icon"
               onClick={() => setSearchQuery("")}
-              className="tap-target absolute right-3 top-1/2 -translate-y-1/2 h-7 w-7 text-muted-foreground hover:text-foreground"
+              className="tap-target absolute right-3 top-1/2 -translate-y-1/2 h-7 w-7"
             >
               <X className="h-4 w-4" />
             </Button>
-          )}
+          ) : null}
         </div>
-
         <Select
           value={typeFilter}
           onValueChange={(value) => setTypeFilter(value as RecordType | "all")}
@@ -295,129 +234,90 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
         </Select>
       </div>
 
-      {/* Active filters display */}
-      {hasActiveFilters && (
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm text-muted-foreground">{t("common.filter")}:</span>
-          {searchQuery && (
-            <Badge variant="secondary" className="gap-1">
-              {searchQuery}
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                onClick={() => setSearchQuery("")}
-                className="h-5 w-5 p-0"
-              >
-                <X className="h-3 w-3" />
-              </Button>
-            </Badge>
-          )}
-          {typeFilter !== "all" && (
-            <Badge variant="secondary" className="gap-1">
-              {t(`records.types.${typeFilter}`)}
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                onClick={() => setTypeFilter("all")}
-                className="h-5 w-5 p-0"
-              >
-                <X className="h-3 w-3" />
-              </Button>
-            </Badge>
-          )}
-          {statusFilter !== "active" && (
-            <Badge variant="secondary" className="gap-1">
-              {t(`records.statusFilter.${statusFilter}`)}
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                onClick={() => setTabInUrl("active")}
-                className="h-5 w-5 p-0"
-              >
-                <X className="h-3 w-3" />
-              </Button>
-            </Badge>
-          )}
-          <Button variant="ghost" size="sm" onClick={clearFilters}>
-            {t("common.clear")}
-          </Button>
-        </div>
-      )}
+      {filtersActive ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            setSearchQuery("");
+            setTypeFilter("all");
+            router.replace(pathname);
+          }}
+        >
+          {t("common.clear")}
+        </Button>
+      ) : null}
 
-      {/* Loading state */}
-      {isLoading && (
+      {isLoading ? (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 min-w-0">
-          {[...Array(6)].map((_, i) => (
+          {Array.from({ length: 6 }, (_, i) => (
             <Skeleton key={i} className="h-32 min-w-0" />
           ))}
         </div>
-      )}
+      ) : null}
 
-      {/* Error state */}
-      {error && (
+      {error ? (
         <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-center">
           <p className="text-destructive">{t("common.error")}</p>
           <p className="text-sm text-muted-foreground">{error.message}</p>
         </div>
-      )}
+      ) : null}
 
-      {/* Records grid */}
-      {!isLoading && !error && records && records.length > 0 && (
+      {!isLoading && error === null && records !== undefined && records.length > 0 ? (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 min-w-0">
           {records.map((record) => (
             <div key={record.id} className="min-w-0">
               <RecordCard
-                key={record.id}
                 record={record}
-                onView={handleView}
-                onRemove={handleRemove}
-                onRestore={statusFilter === "removed" ? handleRestore : undefined}
-                onDelete={statusFilter === "removed" ? handleDelete : undefined}
-                onActivate={statusFilter === "draft" ? handleActivate : undefined}
+                onView={(item) => router.push(`/health/records/${item.id}`)}
+                onRemove={setRecordToRemove}
+                onRestore={
+                  statusFilter === "removed" ? (item) => restoreMutation.mutate(item.id) : undefined
+                }
+                onDelete={
+                  statusFilter === "removed"
+                    ? (item) => hardDeleteMutation.mutate(item.id)
+                    : undefined
+                }
+                onActivate={
+                  statusFilter === "draft"
+                    ? (item) =>
+                        updateMutation.mutate({ id: item.id, updates: { status: "active" } })
+                    : undefined
+                }
               />
             </div>
           ))}
         </div>
-      )}
+      ) : null}
 
-      {/* Empty state */}
-      {!isLoading && !error && records && records.length === 0 && (
+      {!isLoading && error === null && records !== undefined && records.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-lg border border-dashed p-12 text-center">
-          {statusFilter === "draft" ? (
+          {iconKind === "draft" ? (
             <FileStack className="h-12 w-12 text-muted-foreground/50" />
-          ) : statusFilter === "processing" ? (
+          ) : null}
+          {iconKind === "notProcessed" ? (
             <CircleSlash className="h-12 w-12 text-muted-foreground/50" />
-          ) : (
+          ) : null}
+          {iconKind === "default" ? (
             <FileText className="h-12 w-12 text-muted-foreground/50" />
-          )}
+          ) : null}
           <h3 className="mt-4 text-lg font-semibold">
-            {hasActiveFilters
-              ? statusFilter === "draft"
-                ? t("records.noDrafts")
-                : statusFilter === "processing"
-                  ? t("records.noNotProcessed")
-                  : t("common.noResults")
-              : t("health.noRecords")}
+            {t(emptyTitleKey(statusFilter, filtersActive))}
           </h3>
           <p className="mt-2 text-sm text-muted-foreground">
-            {hasActiveFilters
-              ? statusFilter === "draft"
-                ? t("records.noDraftsDescription")
-                : statusFilter === "processing"
-                  ? t("records.noNotProcessedDescription")
-                  : t("common.noResults")
-              : t("health.noRecordsViaAssistant")}
+            {t(emptyBodyKey(statusFilter, filtersActive))}
           </p>
         </div>
-      )}
+      ) : null}
 
-      {/* Remove confirmation dialog */}
       <AlertDialog
-        open={!!recordToRemove}
-        onOpenChange={(open) => !open && setRecordToRemove(null)}
+        open={recordToRemove !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRecordToRemove(null);
+          }
+        }}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -431,47 +331,6 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {t("common.remove")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Delete permanently confirmation dialog */}
-      <AlertDialog
-        open={!!recordToDelete}
-        onOpenChange={(open) => !open && setRecordToDelete(null)}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("records.confirm.deleteTitle")}</AlertDialogTitle>
-            <AlertDialogDescription>{t("records.confirm.deleteMessage")}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={confirmDelete}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {t("common.delete")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Activate draft confirmation dialog */}
-      <AlertDialog
-        open={!!recordToActivate}
-        onOpenChange={(open) => !open && setRecordToActivate(null)}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("records.confirm.activateTitle")}</AlertDialogTitle>
-            <AlertDialogDescription>{t("records.confirm.activateMessage")}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmActivate}>
-              {t("records.actions.activate")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

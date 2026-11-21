@@ -34,7 +34,7 @@ export function RecordDetail({ recordId }: RecordDetailGateProps) {
     );
   }
 
-  if (error || !record) {
+  if (error !== null && error !== undefined) {
     return (
       <div className="space-y-6">
         <Button variant="ghost" onClick={() => router.back()}>
@@ -44,8 +44,23 @@ export function RecordDetail({ recordId }: RecordDetailGateProps) {
         <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-8 text-center">
           <p className="text-destructive">{t("common.error")}</p>
           <p className="mt-2 text-sm text-muted-foreground">
-            {error?.message || t("records.detail.notFound")}
+            {error.message.length > 0 ? error.message : t("records.detail.notFound")}
           </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (record === null || record === undefined) {
+    return (
+      <div className="space-y-6">
+        <Button variant="ghost" onClick={() => router.back()}>
+          <ArrowLeft className="mr-2 h-4 w-4" />
+          {t("common.back")}
+        </Button>
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-8 text-center">
+          <p className="text-destructive">{t("common.error")}</p>
+          <p className="mt-2 text-sm text-muted-foreground">{t("records.detail.notFound")}</p>
         </div>
       </div>
     );

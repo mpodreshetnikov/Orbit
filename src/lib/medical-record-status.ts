@@ -4,7 +4,10 @@ import type { RecordStatus } from "@/types";
  * Statuses left behind by the removed UI OCR pipeline. Records stay in the DB;
  * the UI must not show an eternal "processing" spinner for them.
  */
-export const STUCK_PENDING_OCR_STATUSES: readonly RecordStatus[] = ["ocr_processing", "processing"];
+export const STUCK_PENDING_OCR_STATUSES: readonly RecordStatus[] = Object.freeze([
+  "ocr_processing",
+  "processing",
+]) as readonly RecordStatus[];
 
 /** In-flight or failed UI-pipeline statuses shown under the "not processed" filter. */
 export const UNPROCESSED_RECORD_STATUSES: readonly RecordStatus[] = [

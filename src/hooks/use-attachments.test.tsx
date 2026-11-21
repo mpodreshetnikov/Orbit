@@ -60,6 +60,7 @@ describe("use-attachments", () => {
     expect(successHook.result.current.data).toBe("https://signed.test/file-1");
     expect(from).toHaveBeenCalledWith("medical-attachments");
     expect(createSignedUrl).toHaveBeenCalledWith("path/a", 3600);
+    expect(createSignedUrl.mock.calls[0][1]).toBe(60 * 60);
 
     createClientMock.mockReturnValue({
       storage: {
