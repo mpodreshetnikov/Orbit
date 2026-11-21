@@ -80,6 +80,24 @@
       "routingPrefixPlaceholder": "Например, Мой пёс",
       "routingPrefixHint": "Показывается как (Префикс) в заголовке уведомления. Оставьте пустым, чтобы использовать имя."
     },
+    "mcp": {
+      "title": "Подключённые ассистенты",
+      "description": "AI-ассистенты, которым вы дали доступ к данным Orbit о здоровье и деньгах. Отзыв сразу прекращает доступ и его нельзя отменить.",
+      "empty": "Сейчас ни у одного ассистента нет доступа.",
+      "unnamedClient": "Безымянный ассистент",
+      "lastUsed": "Последний раз {when}",
+      "neverUsed": "Ещё не использовался",
+      "connectedAt": "Подключён {when}",
+      "revoke": "Отозвать доступ",
+      "revoking": "Отзыв…",
+      "revokeConfirmTitle": "Отозвать доступ у «{name}»?",
+      "revokeConfirmDescription": "Этот ассистент сразу потеряет доступ к данным Orbit о здоровье и деньгах. Это действие нельзя отменить.",
+      "revokeConfirmAction": "Отозвать доступ",
+      "revokeError": "Не удалось отозвать доступ: {error}",
+      "revokeErrorFallback": "неизвестная ошибка",
+      "loadError": "Не удалось загрузить ассистентов: {error}",
+      "loadErrorFallback": "неизвестная ошибка"
+    },
     "notificationsDebug": {
       "title": "Отладка уведомлений",
       "description": "Вручную запустить Edge Function notifications-cron для тестирования.",

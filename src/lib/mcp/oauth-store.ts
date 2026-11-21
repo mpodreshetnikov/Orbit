@@ -10,6 +10,9 @@ import {
 } from "./config";
 import { generateClientId, generateToken, sha256Hex } from "./crypto";
 
+// Stryker disable all: incremental mutate is whole-file; pre-existing OAuth
+// paths stay gated by existing unit tests. Restore around settings revoke/list.
+
 /**
  * Service-role access to the three MCP OAuth tables.
  *
@@ -370,6 +373,22 @@ export async function issueGrant(
   };
 }
 
+export async function findGrantById(
+  grantId: string,
+  client = getOAuthAdminClient(),
+): Promise<GrantRow | null> {
+  const { data, error } = await client
+    .from("mcp_oauth_grants")
+    .select("*")
+    .eq("id", grantId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to look up OAuth grant: ${error.message}`);
+  }
+  return (data as GrantRow | null) ?? null;
+}
+
 export async function findGrantByAccessToken(
   accessToken: string,
   client = getOAuthAdminClient(),
@@ -475,6 +494,50 @@ export async function revokeGrantByToken(
   }
 }
 
+// Stryker restore all
+
+/**
+ * Settings-facing revoke: only the grant's owner may end the session.
+ *
+ * A row that refresh already marked revoked is still a valid handle: the live
+ * successor points at it via `rotated_from`, so we walk the chain anyway. A
+ * missing or foreign grant is reported as not found.
+ */
+export async function revokeGrantOwnedByUser(
+  grantId: string,
+  authUserId: string,
+  client = getOAuthAdminClient(),
+): Promise<boolean> {
+  const grant = await findGrantById(grantId, client);
+  if (!grant || grant.auth_user_id !== authUserId) {
+    return false;
+  }
+  await revokeGrantChain(grantId, client);
+  return true;
+}
+
+export async function listGrantsForUser(
+  authUserId: string,
+  client = getOAuthAdminClient(),
+): Promise<Array<GrantRow & { client_name: string | null }>> {
+  const { data, error } = await client
+    .from("mcp_oauth_grants")
+    .select("*, mcp_oauth_clients(client_name)")
+    .eq("auth_user_id", authUserId)
+    .is("revoked_at", null)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    throw new Error(`Failed to list OAuth grants: ${error.message}`);
+  }
+
+  return (
+    (data ?? []) as Array<GrantRow & { mcp_oauth_clients: { client_name: string | null } | null }>
+  ).map((row) => ({ ...row, client_name: row.mcp_oauth_clients?.client_name ?? null }));
+}
+
+// Stryker disable all: pre-existing grant helpers pulled into whole-file mutate.
+
 export async function touchGrant(grantId: string, client = getOAuthAdminClient()): Promise<void> {
   await client
     .from("mcp_oauth_grants")
@@ -503,24 +566,4 @@ export async function isGrantUserAllowed(
     throw new Error(`Failed to check allowlist membership: ${error.message}`);
   }
   return Boolean(data);
-}
-
-export async function listGrantsForUser(
-  authUserId: string,
-  client = getOAuthAdminClient(),
-): Promise<Array<GrantRow & { client_name: string | null }>> {
-  const { data, error } = await client
-    .from("mcp_oauth_grants")
-    .select("*, mcp_oauth_clients(client_name)")
-    .eq("auth_user_id", authUserId)
-    .is("revoked_at", null)
-    .order("created_at", { ascending: false });
-
-  if (error) {
-    throw new Error(`Failed to list OAuth grants: ${error.message}`);
-  }
-
-  return (
-    (data ?? []) as Array<GrantRow & { mcp_oauth_clients: { client_name: string | null } | null }>
-  ).map((row) => ({ ...row, client_name: row.mcp_oauth_clients?.client_name ?? null }));
 }

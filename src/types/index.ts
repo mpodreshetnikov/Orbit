@@ -10,3 +10,4 @@ export * from "./regimen";
 export * from "./notifications";
 export * from "./money";
 export * from "./import";
+export * from "./mcp-clients";

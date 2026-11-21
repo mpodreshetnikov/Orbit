@@ -38,6 +38,10 @@ vi.mock("@/hooks", () => ({
     hookMocks.useUpdateNotificationRouting(...args),
 }));
 
+vi.mock("@/components/settings/mcp-clients-card", () => ({
+  McpClientsCard: () => <div data-testid="mcp-clients-card" />,
+}));
+
 function setNotificationMock(options: {
   permission: NotificationPermission;
   requestPermission?: () => Promise<NotificationPermission>;

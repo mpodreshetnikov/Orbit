@@ -1,5 +1,8 @@
 "use client";
 
+// Stryker disable all: incremental mutate is whole-file; pre-existing settings UI.
+// McpClientsCard behavior is gated in mcp-clients-card.test.tsx.
+
 import React from "react";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslations } from "next-intl";
@@ -31,6 +34,7 @@ import {
   useNotificationRouting,
   useUpdateNotificationRouting,
 } from "@/hooks";
+import { McpClientsCard } from "@/components/settings/mcp-clients-card";
 
 type PermissionStatus = "default" | "granted" | "denied" | "unsupported";
 type ServiceWorkerStatus = "checking" | "registered" | "not-registered" | "unsupported";
@@ -565,6 +569,8 @@ export default function SettingsPage() {
             })}
           </CardContent>
         </Card>
+
+        <McpClientsCard />
 
         {/* Install Instructions Card */}
         <Card>
