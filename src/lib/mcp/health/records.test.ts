@@ -111,6 +111,18 @@ describe("getMedicalRecord", () => {
     expect(stub.argsFor("medical_records", "eq")).toEqual([["id", "r-1"]]);
   });
 
+  it("notes person_id on the MCP audit scope when a row loads", async () => {
+    const { currentMcpPersonId, runWithMcpToolAuditScope } = await import("../audit");
+    const stub = createSupabaseStub({
+      medical_records: [{ data: { id: "r-1", person_id: "person-owned" } }],
+    });
+
+    await runWithMcpToolAuditScope(async () => {
+      await getMedicalRecord(stub.client, "r-1");
+      expect(currentMcpPersonId()).toBe("person-owned");
+    });
+  });
+
   it("returns null for an unknown record", async () => {
     const stub = createSupabaseStub({ medical_records: [{ data: null }] });
     await expect(getMedicalRecord(stub.client, "nope")).resolves.toBeNull();

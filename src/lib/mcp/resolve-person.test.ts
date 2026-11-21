@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
+import { currentMcpPersonId, runWithMcpToolAuditScope } from "./audit";
 import { resolvePerson } from "./resolve-person";
 
 const PEOPLE = [
@@ -27,6 +28,24 @@ describe("resolvePerson", () => {
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
     expect(result.person.name).toBe("Rex");
+  });
+
+  it("notes the resolved person on the MCP audit scope", async () => {
+    const { client } = supabaseWith(PEOPLE);
+    await runWithMcpToolAuditScope(async () => {
+      const result = await resolvePerson(client, { person_name: "rex" });
+      expect(result.status).toBe("ok");
+      expect(currentMcpPersonId()).toBe("p-3");
+    });
+  });
+
+  it("does not note a person when resolution fails", async () => {
+    const { client } = supabaseWith(PEOPLE);
+    await runWithMcpToolAuditScope(async () => {
+      const result = await resolvePerson(client, { person_id: "nope" });
+      expect(result.status).toBe("not_found");
+      expect(currentMcpPersonId()).toBeUndefined();
+    });
   });
 
   it("reports an unknown person_id with the list of real ones", async () => {

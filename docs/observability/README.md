@@ -56,6 +56,7 @@ See:
 - [Grafana Cloud Setup](./grafana-cloud.md)
 - [Log Schema](./log-schema.md)
 - [MCP Setup](./mcp.md)
+- [MCP Connector Usage Audit](./mcp-usage-audit.md) — what the connector did for a person in a window
 
 ## Troubleshooting Checklist
 

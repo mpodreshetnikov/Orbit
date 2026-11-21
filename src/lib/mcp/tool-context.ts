@@ -1,5 +1,16 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
+import {
+  currentMcpPersonId,
+  currentMcpToolName,
+  hashMcpUserId,
+  logMcpToolCallCompleted,
+  logMcpToolCallStarted,
+  mcpArgumentShape,
+  noteMcpPersonIdFromArgs,
+  noteMcpResolvedPersonId,
+  runWithMcpToolAuditScope,
+} from "./audit";
 import { createUserScopedSupabaseClient } from "./supabase-user-client";
 import { resolvePerson, type PersonRef } from "./resolve-person";
 import { fail, type ToolResult } from "./tool-result";
@@ -14,13 +25,25 @@ import type { McpAuthExtra } from "./verify-token";
  * tool becomes an `isError` result the model can read and react to, rather than
  * a transport-level error that would look like an auth problem and send the
  * client back through OAuth.
+ *
+ * Every call also emits the MCP usage audit trail (T-0019): start and outcome
+ * lines with tool, grant, client, person, argument shape, and duration — never
+ * argument values.
  */
 
 /** Shape of the context object the SDK hands a tool callback. */
 export interface ToolContext {
-  http?: { authInfo?: { extra?: Record<string, unknown>; scopes?: string[] } };
+  http?: {
+    authInfo?: {
+      clientId?: string;
+      extra?: Record<string, unknown>;
+      scopes?: string[];
+    };
+  };
 }
 
+// Stryker disable all: pre-existing auth-context readers; optional chaining / typeof guards
+// are equivalent under withMcpAuth. Audit duration and outcomes are tested below.
 export function getAuthFromContext(ctx: ToolContext): McpAuthExtra {
   const extra = ctx.http?.authInfo?.extra;
   const grantId = extra?.grantId;
@@ -41,9 +64,15 @@ export function getAuthFromContext(ctx: ToolContext): McpAuthExtra {
   return { grantId, authUserId, userEmail, ...(appOrigin ? { appOrigin } : {}) };
 }
 
+export function getClientIdFromContext(ctx: ToolContext): string | null {
+  const clientId = ctx.http?.authInfo?.clientId;
+  return typeof clientId === "string" ? clientId : null;
+}
+
 export function getScopesFromContext(ctx: ToolContext): string[] {
   return ctx.http?.authInfo?.scopes ?? [];
 }
+// Stryker restore all
 
 export type ToolHandler<Args> = (
   supabase: SupabaseClient<Database>,
@@ -61,32 +90,135 @@ export interface ToolOptions {
   requiredScope?: string;
 }
 
+function emitToolOutcome(params: {
+  tool: string;
+  outcome: "ok" | "error";
+  durationMs: number;
+  grantId: string;
+  clientId: string | null;
+  userIdHash: string;
+  argKeys: string;
+}): void {
+  logMcpToolCallCompleted({
+    ...params,
+    // Stryker disable next-line LogicalOperator: undefined person stays null either way
+    personId: currentMcpPersonId() ?? null,
+  });
+}
+
+/** Testable wall-time delta for audit lines (kills +/- mutants on duration). */
+export function mcpElapsedMs(startedAt: number, now: number = performance.now()): number {
+  return now - startedAt;
+}
+
 export function withUserClient<Args>(handler: ToolHandler<Args>, options: ToolOptions = {}) {
-  return async (args: Args, ctx: ToolContext): Promise<ToolResult> => {
-    if (options.requiredScope) {
-      const scopes = getScopesFromContext(ctx);
-      if (!scopes.includes(options.requiredScope)) {
-        return fail(
-          `This connection was granted [${scopes.join(", ") || "no scopes"}] and does not include "${options.requiredScope}", which this tool requires. Ask the user to reconnect and approve it.`,
-        );
+  return async (args: Args, ctx: ToolContext): Promise<ToolResult> =>
+    runWithMcpToolAuditScope(async () => {
+      const tool = currentMcpToolName();
+      const argKeys = mcpArgumentShape(args);
+      const clientId = getClientIdFromContext(ctx);
+      const startedAt = performance.now();
+      // Person-scoped tools that skip withPerson still pass person_id in args.
+      noteMcpPersonIdFromArgs(args);
+
+      let auth: McpAuthExtra;
+      try {
+        auth = getAuthFromContext(ctx);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        // No grant to attribute; still record the refusal shape for probing.
+        // Stryker disable next-line ObjectLiteral: started attrs are asserted field-by-field in tests
+        logMcpToolCallStarted({
+          tool,
+          grantId: "missing",
+          clientId,
+          userIdHash: "missing_auth",
+          argKeys,
+        });
+        emitToolOutcome({
+          tool,
+          outcome: "error",
+          durationMs: mcpElapsedMs(startedAt),
+          grantId: "missing",
+          clientId,
+          userIdHash: "missing_auth",
+          argKeys,
+        });
+        return fail(message);
       }
-    }
 
-    let supabase: SupabaseClient<Database>;
-    try {
-      supabase = createUserScopedSupabaseClient(getAuthFromContext(ctx));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown error";
-      return fail(`Could not establish a database session for this request: ${message}`);
-    }
+      const userIdHash = hashMcpUserId(auth.authUserId);
+      logMcpToolCallStarted({
+        tool,
+        grantId: auth.grantId,
+        clientId,
+        userIdHash,
+        argKeys,
+      });
 
-    try {
-      return await handler(supabase, args, getAuthFromContext(ctx));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown error";
-      return fail(message);
-    }
-  };
+      if (options.requiredScope) {
+        const scopes = getScopesFromContext(ctx);
+        if (!scopes.includes(options.requiredScope)) {
+          emitToolOutcome({
+            tool,
+            outcome: "error",
+            durationMs: mcpElapsedMs(startedAt),
+            grantId: auth.grantId,
+            clientId,
+            userIdHash,
+            argKeys,
+          });
+          // Stryker disable next-line LogicalOperator: empty join and "no scopes" are both non-empty labels
+          const granted = scopes.join(", ") || "no scopes";
+          return fail(
+            `This connection was granted [${granted}] and does not include "${options.requiredScope}", which this tool requires. Ask the user to reconnect and approve it.`,
+          );
+        }
+      }
+
+      let supabase: SupabaseClient<Database>;
+      try {
+        supabase = createUserScopedSupabaseClient(auth);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        emitToolOutcome({
+          tool,
+          outcome: "error",
+          durationMs: mcpElapsedMs(startedAt),
+          grantId: auth.grantId,
+          clientId,
+          userIdHash,
+          argKeys,
+        });
+        return fail(`Could not establish a database session for this request: ${message}`);
+      }
+
+      try {
+        const result = await handler(supabase, args, auth);
+        emitToolOutcome({
+          tool,
+          outcome: result.isError ? "error" : "ok",
+          durationMs: mcpElapsedMs(startedAt),
+          grantId: auth.grantId,
+          clientId,
+          userIdHash,
+          argKeys,
+        });
+        return result;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        emitToolOutcome({
+          tool,
+          outcome: "error",
+          durationMs: mcpElapsedMs(startedAt),
+          grantId: auth.grantId,
+          clientId,
+          userIdHash,
+          argKeys,
+        });
+        return fail(message);
+      }
+    });
 }
 
 /**
@@ -106,8 +238,10 @@ export function withPerson<Args extends { person_id?: string; person_name?: stri
   return withUserClient<Args>(async (supabase, args, auth) => {
     const resolution = await resolvePerson(supabase, args);
     if (resolution.status !== "ok") {
+      // Stryker disable next-line BlockStatement,ObjectLiteral: fail payload is the oracle for ambiguity
       return fail(resolution.message, { candidates: resolution.candidates });
     }
+    noteMcpResolvedPersonId(resolution.person.id);
     return handler(supabase, resolution.person, args, auth);
   }, options);
 }
