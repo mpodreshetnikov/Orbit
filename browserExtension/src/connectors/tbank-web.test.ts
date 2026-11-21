@@ -3301,9 +3301,9 @@ describe("tbank-web connector.parse mutation coverage (T-261116-rul)", () => {
     });
     (globalThis as { chrome: Record<string, unknown> }).chrome = {
       tabs: {
-        query: vi.fn().mockResolvedValue([
-          { id: 77, url: "https://www.tbank.ru/mybank/", status: "complete" },
-        ]),
+        query: vi
+          .fn()
+          .mockResolvedValue([{ id: 77, url: "https://www.tbank.ru/mybank/", status: "complete" }]),
         get,
         update,
         onUpdated: { addListener: vi.fn(), removeListener: vi.fn() },
