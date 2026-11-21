@@ -1,4 +1,5 @@
 import { createMcpHandler, withMcpAuth } from "mcp-handler";
+import { installMcpToolNamePropagation } from "@/lib/mcp/audit";
 import { PROTECTED_RESOURCE_METADATA_PATH, isMcpServerEnabled } from "@/lib/mcp/config";
 import { registerCheckupDraftApp } from "@/lib/mcp/apps/checkup-draft";
 import { registerCheckupProposalApp } from "@/lib/mcp/apps/checkup-proposal";
@@ -39,6 +40,9 @@ const MCP_INSTRUCTIONS = [
 
 const handler = createMcpHandler(
   (server) => {
+    // Bind every registerTool name into ALS so withUserClient can audit without
+    // threading the name through every registration site.
+    installMcpToolNamePropagation(server);
     registerHealthTools(server);
     registerAppProbe(server);
     registerRecordDraftApp(server);

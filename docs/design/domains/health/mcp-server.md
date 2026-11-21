@@ -420,3 +420,10 @@ metadata.
 For local development a client that can reach `http://127.0.0.1:3000` (Claude Code, MCP Inspector)
 works directly. For a browser-based client, put a tunnel in front of the dev server and set
 `MCP_PUBLIC_ORIGIN` to the tunnel origin.
+
+## Usage audit
+
+Every bearer accept/reject and every tool call emits a structured log line (tool, outcome, grant,
+client, person, argument keys, duration) queryable in Grafana. How to answer "what did the connector
+do to this person's data between X and Y" is documented in
+[`docs/observability/mcp-usage-audit.md`](../../../observability/mcp-usage-audit.md).

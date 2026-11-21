@@ -1,5 +1,15 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
+import {
+  currentMcpPersonId,
+  currentMcpToolName,
+  hashMcpUserId,
+  logMcpToolCallCompleted,
+  logMcpToolCallStarted,
+  mcpArgumentShape,
+  noteMcpResolvedPersonId,
+  runWithMcpToolAuditScope,
+} from "./audit";
 import { createUserScopedSupabaseClient } from "./supabase-user-client";
 import { resolvePerson, type PersonRef } from "./resolve-person";
 import { fail, type ToolResult } from "./tool-result";
@@ -14,11 +24,21 @@ import type { McpAuthExtra } from "./verify-token";
  * tool becomes an `isError` result the model can read and react to, rather than
  * a transport-level error that would look like an auth problem and send the
  * client back through OAuth.
+ *
+ * Every call also emits the MCP usage audit trail (T-0019): start and outcome
+ * lines with tool, grant, client, person, argument shape, and duration — never
+ * argument values.
  */
 
 /** Shape of the context object the SDK hands a tool callback. */
 export interface ToolContext {
-  http?: { authInfo?: { extra?: Record<string, unknown>; scopes?: string[] } };
+  http?: {
+    authInfo?: {
+      clientId?: string;
+      extra?: Record<string, unknown>;
+      scopes?: string[];
+    };
+  };
 }
 
 export function getAuthFromContext(ctx: ToolContext): McpAuthExtra {
@@ -41,6 +61,11 @@ export function getAuthFromContext(ctx: ToolContext): McpAuthExtra {
   return { grantId, authUserId, userEmail, ...(appOrigin ? { appOrigin } : {}) };
 }
 
+export function getClientIdFromContext(ctx: ToolContext): string | null {
+  const clientId = ctx.http?.authInfo?.clientId;
+  return typeof clientId === "string" ? clientId : null;
+}
+
 export function getScopesFromContext(ctx: ToolContext): string[] {
   return ctx.http?.authInfo?.scopes ?? [];
 }
@@ -61,32 +86,124 @@ export interface ToolOptions {
   requiredScope?: string;
 }
 
+function emitToolOutcome(params: {
+  tool: string;
+  outcome: "ok" | "error";
+  durationMs: number;
+  grantId: string;
+  clientId: string | null;
+  userIdHash: string;
+  argKeys: string;
+}): void {
+  logMcpToolCallCompleted({
+    ...params,
+    personId: currentMcpPersonId() ?? null,
+  });
+}
+
 export function withUserClient<Args>(handler: ToolHandler<Args>, options: ToolOptions = {}) {
-  return async (args: Args, ctx: ToolContext): Promise<ToolResult> => {
-    if (options.requiredScope) {
-      const scopes = getScopesFromContext(ctx);
-      if (!scopes.includes(options.requiredScope)) {
-        return fail(
-          `This connection was granted [${scopes.join(", ") || "no scopes"}] and does not include "${options.requiredScope}", which this tool requires. Ask the user to reconnect and approve it.`,
-        );
+  return async (args: Args, ctx: ToolContext): Promise<ToolResult> =>
+    runWithMcpToolAuditScope(async () => {
+      const tool = currentMcpToolName();
+      const argKeys = mcpArgumentShape(args);
+      const clientId = getClientIdFromContext(ctx);
+      const startedAt = performance.now();
+
+      let auth: McpAuthExtra;
+      try {
+        auth = getAuthFromContext(ctx);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        // No grant to attribute; still record the refusal shape for probing.
+        logMcpToolCallStarted({
+          tool,
+          grantId: "missing",
+          clientId,
+          userIdHash: "missing_auth",
+          argKeys,
+        });
+        emitToolOutcome({
+          tool,
+          outcome: "error",
+          durationMs: performance.now() - startedAt,
+          grantId: "missing",
+          clientId,
+          userIdHash: "missing_auth",
+          argKeys,
+        });
+        return fail(message);
       }
-    }
 
-    let supabase: SupabaseClient<Database>;
-    try {
-      supabase = createUserScopedSupabaseClient(getAuthFromContext(ctx));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown error";
-      return fail(`Could not establish a database session for this request: ${message}`);
-    }
+      const userIdHash = hashMcpUserId(auth.authUserId);
+      logMcpToolCallStarted({
+        tool,
+        grantId: auth.grantId,
+        clientId,
+        userIdHash,
+        argKeys,
+      });
 
-    try {
-      return await handler(supabase, args, getAuthFromContext(ctx));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown error";
-      return fail(message);
-    }
-  };
+      if (options.requiredScope) {
+        const scopes = getScopesFromContext(ctx);
+        if (!scopes.includes(options.requiredScope)) {
+          emitToolOutcome({
+            tool,
+            outcome: "error",
+            durationMs: performance.now() - startedAt,
+            grantId: auth.grantId,
+            clientId,
+            userIdHash,
+            argKeys,
+          });
+          return fail(
+            `This connection was granted [${scopes.join(", ") || "no scopes"}] and does not include "${options.requiredScope}", which this tool requires. Ask the user to reconnect and approve it.`,
+          );
+        }
+      }
+
+      let supabase: SupabaseClient<Database>;
+      try {
+        supabase = createUserScopedSupabaseClient(auth);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        emitToolOutcome({
+          tool,
+          outcome: "error",
+          durationMs: performance.now() - startedAt,
+          grantId: auth.grantId,
+          clientId,
+          userIdHash,
+          argKeys,
+        });
+        return fail(`Could not establish a database session for this request: ${message}`);
+      }
+
+      try {
+        const result = await handler(supabase, args, auth);
+        emitToolOutcome({
+          tool,
+          outcome: result.isError ? "error" : "ok",
+          durationMs: performance.now() - startedAt,
+          grantId: auth.grantId,
+          clientId,
+          userIdHash,
+          argKeys,
+        });
+        return result;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        emitToolOutcome({
+          tool,
+          outcome: "error",
+          durationMs: performance.now() - startedAt,
+          grantId: auth.grantId,
+          clientId,
+          userIdHash,
+          argKeys,
+        });
+        return fail(message);
+      }
+    });
 }
 
 /**
@@ -108,6 +225,7 @@ export function withPerson<Args extends { person_id?: string; person_name?: stri
     if (resolution.status !== "ok") {
       return fail(resolution.message, { candidates: resolution.candidates });
     }
+    noteMcpResolvedPersonId(resolution.person.id);
     return handler(supabase, resolution.person, args, auth);
   }, options);
 }

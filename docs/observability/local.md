@@ -80,6 +80,17 @@ Run one web flow that calls edge functions and/or Supabase RPC (for example OCR,
 
 If one surface is missing, validate outbound headers include `traceparent` and `x-request-id`.
 
+## MCP Connector Audit Check
+
+After an authenticated MCP tool call (or a deliberate bad bearer):
+
+```logql
+{service_name="orbit"} | json | component=~"mcp-auth|mcp-tool"
+```
+
+Person-scoped history for a window uses `person_id` on `mcp_tool_call_completed` — full queries in
+[`mcp-usage-audit.md`](./mcp-usage-audit.md).
+
 ## Troubleshooting
 
 - Port collision (`3300`, `3200`, `4317`, `4318`): stop conflicting services or remap ports in `docker-compose.observability.yml`.
