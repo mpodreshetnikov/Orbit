@@ -13,6 +13,9 @@ HTML asserts) are a standing failure mode.
 
 - Prefer one behavioural assertion with an independent expected value (requirement, schema, or
   shared fixture) over many structural ones.
+- Assert the **defeating** case, not only the case the author already had in mind (e.g. an option
+  followed by another option, not an option at end-of-line). Detail and example:
+  `.agents/skills/test-driven-development/SKILL.md`.
 - Mock at I/O boundaries only (Supabase, fetch, LLM). Never mock the module under test; never use
   mock call order alone as proof of a business rule.
 - Do not use as the primary oracle: `toBeTruthy` / `toBeDefined` / lone `toContain` on markup or

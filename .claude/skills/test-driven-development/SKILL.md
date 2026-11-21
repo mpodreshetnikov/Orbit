@@ -202,6 +202,21 @@ Next failing test for next feature.
 | **Minimal** | One thing. "and" in name? Split it. | `test('validates email and domain and whitespace')` |
 | **Clear** | Name describes behavior | `test('test1')` |
 | **Shows intent** | Demonstrates desired API | Obscures what code should do |
+| **Defeating case** | Input that breaks the author's mental model | The case the author already had in mind |
+
+### Assert the case that defeats it
+
+An assertion that exercises the case the author already imagined proves the author's memory, not the
+code. Prefer the input that breaks the mental model.
+
+For an argument parser, that is an option **followed by another option** (`--model-extract --case
+002`), not an option at the end of the line with no value. The end-of-line case is what came to mind
+when the flags were added; the followed-by-option case is what swallowed `--case` as a model id and
+would have billed a full live corpus run. Same shape elsewhere: adjacent tokens, empty-but-present
+fields, the second call in a sequence — whatever the happy path does not look like.
+
+If the only test you can write is the example from the ticket, write the defeating neighbour too.
+Canonical high-signal policy (oracles, smell lint, mutation): `docs/design/common/testing-quality.md`.
 
 ## Why Order Matters
 
