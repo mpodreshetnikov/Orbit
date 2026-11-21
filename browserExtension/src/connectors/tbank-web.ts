@@ -1,7 +1,6 @@
-// Stryker disable all: T-261116-rul slice 1 — map/parse/enrichment + chrome orchestration
-// still carry covered survivors; pay down in the next Progress slice. extractOperationsInPage
-// stays disabled separately (Function(fn.toString()) serialization). Post-extractor helpers
-// after that block are restored and gated in this PR.
+// T-261116-rul slice 2: file-head disable removed. Only extractOperationsInPage stays under
+// disable-all (Function(fn.toString()) serialization). chrome.tabs helpers keep a narrow
+// justified band below; map/parse/enrichment + connector orchestration are under the gate.
 import { registerConnector } from "./registry.js";
 import { isPathUnder } from "../core/page-url.js";
 import { CLOCK_SKEW_ALLOWANCE_MS } from "../core/session-janitor.js";
@@ -1117,7 +1116,6 @@ async function runPageExtraction(
   }
 }
 
-// Stryker restore all
 /**
  * The page's own resource timeline holds whatever the page loaded, third-party requests
  * included. Matching a candidate on its path alone would accept `https://elsewhere.example` +
@@ -2672,8 +2670,10 @@ function isOperationsPageUrl(url: unknown): boolean {
   }
 }
 
-// Stryker disable all: chrome.tabs orchestration — not map/parse/enrichment; same temporary
-// debt band as the file-head slice-1 disable (T-261116-rul).
+// Stryker disable all: chrome.tabs.get / onUpdated are browser-runtime seams. Covered paths
+// are exercised via connector mocks in tbank-web.test.ts; mutating these wrappers yields
+// equivalent survivors (null vs throw, listener timing). Keep this band narrow — only the
+// two tab helpers — not map/parse/enrichment (T-261116-rul slice 2 / ORB-169).
 async function getTabById(tabId: number): Promise<chrome.tabs.Tab | null> {
   if (typeof chrome.tabs.get !== "function") {
     return null;
