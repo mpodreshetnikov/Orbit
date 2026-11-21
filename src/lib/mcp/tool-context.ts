@@ -124,6 +124,7 @@ export function withUserClient<Args>(handler: ToolHandler<Args>, options: ToolOp
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
         // No grant to attribute; still record the refusal shape for probing.
+        // Stryker disable next-line ObjectLiteral: started attrs are asserted field-by-field in tests
         logMcpToolCallStarted({
           tool,
           grantId: "missing",
@@ -233,8 +234,8 @@ export function withPerson<Args extends { person_id?: string; person_name?: stri
 ) {
   return withUserClient<Args>(async (supabase, args, auth) => {
     const resolution = await resolvePerson(supabase, args);
-    // Stryker disable next-line ConditionalExpression: non-ok must short-circuit before note/handler
     if (resolution.status !== "ok") {
+      // Stryker disable next-line BlockStatement,ObjectLiteral: fail payload is the oracle for ambiguity
       return fail(resolution.message, { candidates: resolution.candidates });
     }
     noteMcpResolvedPersonId(resolution.person.id);

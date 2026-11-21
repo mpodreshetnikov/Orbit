@@ -232,15 +232,21 @@ describe("withPerson audit person id", () => {
     vi.mocked(resolvePerson).mockResolvedValue({
       status: "ambiguous",
       message: "which one?",
-      candidates: [],
+      candidates: [{ id: "a", name: "A", kind: "human" }],
     });
 
-    const tool = withPerson(async () => ok("never"));
+    const handler = vi.fn().mockResolvedValue(ok("never"));
+    const tool = withPerson(handler);
     const result = await runWithMcpToolName("get_person", () =>
       tool({ person_name: "x" }, context(["health:read"])),
     );
 
     expect(result.isError).toBe(true);
+    expect(handler).not.toHaveBeenCalled();
+    expect(result.content[0]).toMatchObject({ text: "which one?" });
+    expect(result.structuredContent).toEqual({
+      candidates: [{ id: "a", name: "A", kind: "human" }],
+    });
     const completed = vi.mocked(logMcpToolCallCompleted).mock.calls[0]?.[0];
     expect(completed?.outcome).toBe("error");
     expect(completed?.personId).toBeNull();

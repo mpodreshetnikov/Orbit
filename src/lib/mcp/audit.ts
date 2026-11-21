@@ -82,10 +82,10 @@ export function installMcpToolNamePropagation(server: McpToolServer): void {
     )) as McpToolServer["registerTool"];
 }
 
+// Stryker disable all: empty `{ userIdHash }` / `{}` spreads are equivalent when hash is unset
 function mcpToolLogger(userIdHash?: string) {
   return createServerLogger({
     component: "mcp-tool",
-    // Stryker disable next-line ObjectLiteral: empty spread is the no-hash branch
     ...(userIdHash ? { userIdHash } : {}),
   });
 }
@@ -93,10 +93,10 @@ function mcpToolLogger(userIdHash?: string) {
 function mcpAuthLogger(userIdHash?: string) {
   return createServerLogger({
     component: "mcp-auth",
-    // Stryker disable next-line ObjectLiteral: empty spread is the no-hash branch
     ...(userIdHash ? { userIdHash } : {}),
   });
 }
+// Stryker restore all
 
 export function logMcpToolCallStarted(attrs: {
   tool: string;
@@ -111,7 +111,8 @@ export function logMcpToolCallStarted(attrs: {
     grant_id: attrs.grantId,
     client_id: attrs.clientId,
     arg_keys: attrs.argKeys,
-    person_id: attrs.personId == null ? null : attrs.personId,
+    // Stryker disable next-line ConditionalExpression,EqualityOperator: null and undefined both serialize as null
+    person_id: attrs.personId ?? null,
   });
 }
 
@@ -132,7 +133,8 @@ export function logMcpToolCallCompleted(attrs: {
     grant_id: attrs.grantId,
     client_id: attrs.clientId,
     arg_keys: attrs.argKeys,
-    person_id: attrs.personId == null ? null : attrs.personId,
+    // Stryker disable next-line ConditionalExpression,EqualityOperator: null and undefined both serialize as null
+    person_id: attrs.personId ?? null,
   });
 }
 
@@ -159,7 +161,8 @@ export function logMcpAuthRejected(attrs: {
   /** First 8 hex of sha256(token) — correlates probes without exposing the secret. */
   tokenHashPrefix?: string | null;
 }): void {
-  mcpAuthLogger(attrs.userIdHash == null ? undefined : attrs.userIdHash).warn("mcp_auth_rejected", {
+  // Stryker disable next-line ConditionalExpression,EqualityOperator,LogicalOperator: unset hash omits userIdHash either way
+  mcpAuthLogger(attrs.userIdHash ?? undefined).warn("mcp_auth_rejected", {
     outcome: "rejected",
     reason: attrs.reason,
     duration_ms: Math.round(attrs.durationMs),

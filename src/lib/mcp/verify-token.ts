@@ -60,6 +60,7 @@ function mcpAuthElapsedMs(startedAt: number, now: number = performance.now()): n
 
 /** Split OAuth scope string into tokens; collapses runs of whitespace. */
 export function splitMcpScopes(scope: string): string[] {
+  // Stryker disable next-line Regex: `\s` vs `\s+` is equivalent after filter(Boolean)
   return scope.split(/\s+/).filter(Boolean);
 }
 
