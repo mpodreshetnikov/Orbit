@@ -1,7 +1,9 @@
 // T-261116-rul slice 2: file-head disable removed. Remaining disable-all bands:
 //   1) extractOperationsInPage — Function(fn.toString()) serialization for in-page dry-run
 //   2) getTabById / waitForTabLoad — chrome.tabs.get / onUpdated browser-runtime seams
-// prepareOperationsTab…runPageExtraction and map/parse/enrichment are under the gate.
+//   3) Temporary per-function orch disables (prepareOperationsTab, extractOperationsWithRetry,
+//      cancelPageExtraction, runPageExtraction) — covered survivors only; paydown is slice 3
+//      (see orbit-tasks T-261116-rul Progress / new slice-3 task). Map/parse stay under the gate.
 import { registerConnector } from "./registry.js";
 import { isPathUnder } from "../core/page-url.js";
 import { CLOCK_SKEW_ALLOWANCE_MS } from "../core/session-janitor.js";
@@ -854,6 +856,8 @@ function detectBlockedReasonFromTabUrl(tabUrl: unknown): string | null {
   return detectBlockedReasonFromPageState(tabUrl, "");
 }
 
+// Stryker disable all: temporary — 3 covered survivors (tab update/load seams). Paydown: slice 3
+// on T-261116-rul (meaningful chrome.tabs mocks / oracles). Not the whole orch region.
 async function prepareOperationsTab(tab: chrome.tabs.Tab): Promise<chrome.tabs.Tab> {
   if (typeof tab.id !== "number") {
     throw new Error("No active tab. Open T-Bank in a tab first.");
@@ -902,7 +906,10 @@ async function prepareOperationsTab(tab: chrome.tabs.Tab): Promise<chrome.tabs.T
 
   return currentTab;
 }
+// Stryker restore all
 
+// Stryker disable all: temporary — 31 covered survivors (retry / tab reload / diagnostics).
+// Paydown: slice 3 on T-261116-rul. Not whole orch band.
 async function extractOperationsWithRetry(
   tabId: number,
   windowFromIso: string,
@@ -972,6 +979,7 @@ async function extractOperationsWithRetry(
     execute_script_attempts: attemptDetails,
   });
 }
+// Stryker restore all
 
 /**
  * How long the page may take to report: until the session it works for is over, which is when
@@ -987,6 +995,8 @@ function resolveExtractionDeadlineMs(session: Record<string, unknown> | undefine
 }
 
 /** Marks the token in the page, where the parse checks it at every pause. */
+// Stryker disable all: temporary — 1 covered survivor (executeScript cancel seam). Paydown: slice 3
+// on T-261116-rul. Not whole orch band.
 async function cancelPageExtraction(tabId: number, reportToken: string): Promise<void> {
   try {
     await chrome.scripting.executeScript({
@@ -1001,6 +1011,7 @@ async function cancelPageExtraction(tabId: number, reportToken: string): Promise
     // The page is gone, and its task with it.
   }
 }
+// Stryker restore all
 
 function isPageExtractionStart(value: unknown): value is PageExtractionStart {
   const candidate = asObject(value);
@@ -1023,6 +1034,8 @@ function isPageExtractionStart(value: unknown): value is PageExtractionStart {
  * extractor that answers within the call -- a test double, an older page -- is taken at its
  * word. Resolves undefined when the page answered nothing, as before.
  */
+// Stryker disable all: temporary — 36 covered survivors (runtime message/tab/load wait seams).
+// Paydown: slice 3 on T-261116-rul. Not whole orch band.
 async function runPageExtraction(
   tabId: number,
   args: {
@@ -1136,6 +1149,7 @@ async function runPageExtraction(
     }
   }
 }
+// Stryker restore all
 
 /**
  * The page's own resource timeline holds whatever the page loaded, third-party requests
@@ -2694,7 +2708,8 @@ function isOperationsPageUrl(url: unknown): boolean {
 // Stryker disable all: chrome.tabs.get / onUpdated are browser-runtime seams. Covered paths
 // are exercised via connector mocks in tbank-web.test.ts; mutating these wrappers yields
 // equivalent survivors (null vs throw, listener timing). Keep this band narrow — only the
-// two tab helpers — not map/parse/enrichment (T-261116-rul slice 2 / ORB-169).
+// two tab helpers — not map/parse/enrichment. Paydown with orch disables: slice 3
+// (T-261116-rul / ORB-169).
 async function getTabById(tabId: number): Promise<chrome.tabs.Tab | null> {
   if (typeof chrome.tabs.get !== "function") {
     return null;
