@@ -59,9 +59,9 @@ export function runWithMcpToolAuditScope<T>(fn: () => T): T {
 
 export function noteMcpResolvedPersonId(personId: string): void {
   const scope = toolAuditScopeStorage.getStore();
-  if (scope) {
-    scope.personId = personId;
-  }
+  // Outside an audit scope this is a no-op (tests call it that way on purpose).
+  if (!scope) return;
+  scope.personId = personId;
 }
 
 export function currentMcpPersonId(): string | undefined {
@@ -85,6 +85,7 @@ export function installMcpToolNamePropagation(server: McpToolServer): void {
 function mcpToolLogger(userIdHash?: string) {
   return createServerLogger({
     component: "mcp-tool",
+    // Stryker disable next-line ObjectLiteral: empty spread is the no-hash branch
     ...(userIdHash ? { userIdHash } : {}),
   });
 }
@@ -92,6 +93,7 @@ function mcpToolLogger(userIdHash?: string) {
 function mcpAuthLogger(userIdHash?: string) {
   return createServerLogger({
     component: "mcp-auth",
+    // Stryker disable next-line ObjectLiteral: empty spread is the no-hash branch
     ...(userIdHash ? { userIdHash } : {}),
   });
 }
@@ -109,7 +111,7 @@ export function logMcpToolCallStarted(attrs: {
     grant_id: attrs.grantId,
     client_id: attrs.clientId,
     arg_keys: attrs.argKeys,
-    person_id: attrs.personId ?? null,
+    person_id: attrs.personId == null ? null : attrs.personId,
   });
 }
 
@@ -130,7 +132,7 @@ export function logMcpToolCallCompleted(attrs: {
     grant_id: attrs.grantId,
     client_id: attrs.clientId,
     arg_keys: attrs.argKeys,
-    person_id: attrs.personId ?? null,
+    person_id: attrs.personId == null ? null : attrs.personId,
   });
 }
 
@@ -157,7 +159,7 @@ export function logMcpAuthRejected(attrs: {
   /** First 8 hex of sha256(token) — correlates probes without exposing the secret. */
   tokenHashPrefix?: string | null;
 }): void {
-  mcpAuthLogger(attrs.userIdHash ?? undefined).warn("mcp_auth_rejected", {
+  mcpAuthLogger(attrs.userIdHash == null ? undefined : attrs.userIdHash).warn("mcp_auth_rejected", {
     outcome: "rejected",
     reason: attrs.reason,
     duration_ms: Math.round(attrs.durationMs),

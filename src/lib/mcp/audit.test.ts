@@ -80,6 +80,11 @@ describe("tool name and person audit scope", () => {
     expect(currentMcpPersonId()).toBeUndefined();
   });
 
+  it("ignores noteMcpResolvedPersonId outside an audit scope", () => {
+    expect(() => noteMcpResolvedPersonId("person-outside")).not.toThrow();
+    expect(currentMcpPersonId()).toBeUndefined();
+  });
+
   it("installMcpToolNamePropagation runs handlers under the tool name", () => {
     const originalRegister = vi.fn(
       (_name: string, _config: unknown, handler: (args: unknown, extra: unknown) => unknown) => {
@@ -159,6 +164,20 @@ describe("audit log emitters", () => {
       arg_keys: "kind",
       person_id: null,
     });
+
+    infoMock.mockClear();
+    logMcpToolCallCompleted({
+      tool: "get_person",
+      outcome: "ok",
+      durationMs: 2,
+      grantId: "grant-1",
+      clientId: "mcp_abc",
+      userIdHash: "abcd1234efgh5678",
+      argKeys: "person_id",
+      personId: "person-resolved",
+    });
+    const withPerson = infoMock.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(withPerson.person_id).toBe("person-resolved");
   });
 
   it("emits auth accept and reject without raw tokens", () => {

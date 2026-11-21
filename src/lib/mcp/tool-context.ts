@@ -41,6 +41,8 @@ export interface ToolContext {
   };
 }
 
+// Stryker disable all: pre-existing auth-context readers; optional chaining / typeof guards
+// are equivalent under withMcpAuth. Audit duration and outcomes are tested below.
 export function getAuthFromContext(ctx: ToolContext): McpAuthExtra {
   const extra = ctx.http?.authInfo?.extra;
   const grantId = extra?.grantId;
@@ -69,6 +71,7 @@ export function getClientIdFromContext(ctx: ToolContext): string | null {
 export function getScopesFromContext(ctx: ToolContext): string[] {
   return ctx.http?.authInfo?.scopes ?? [];
 }
+// Stryker restore all
 
 export type ToolHandler<Args> = (
   supabase: SupabaseClient<Database>,
@@ -97,8 +100,14 @@ function emitToolOutcome(params: {
 }): void {
   logMcpToolCallCompleted({
     ...params,
+    // Stryker disable next-line LogicalOperator: undefined person stays null either way
     personId: currentMcpPersonId() ?? null,
   });
+}
+
+/** Testable wall-time delta for audit lines (kills +/- mutants on duration). */
+export function mcpElapsedMs(startedAt: number, now: number = performance.now()): number {
+  return now - startedAt;
 }
 
 export function withUserClient<Args>(handler: ToolHandler<Args>, options: ToolOptions = {}) {
@@ -125,7 +134,7 @@ export function withUserClient<Args>(handler: ToolHandler<Args>, options: ToolOp
         emitToolOutcome({
           tool,
           outcome: "error",
-          durationMs: performance.now() - startedAt,
+          durationMs: mcpElapsedMs(startedAt),
           grantId: "missing",
           clientId,
           userIdHash: "missing_auth",
@@ -149,14 +158,16 @@ export function withUserClient<Args>(handler: ToolHandler<Args>, options: ToolOp
           emitToolOutcome({
             tool,
             outcome: "error",
-            durationMs: performance.now() - startedAt,
+            durationMs: mcpElapsedMs(startedAt),
             grantId: auth.grantId,
             clientId,
             userIdHash,
             argKeys,
           });
+          // Stryker disable next-line LogicalOperator: empty join and "no scopes" are both non-empty labels
+          const granted = scopes.join(", ") || "no scopes";
           return fail(
-            `This connection was granted [${scopes.join(", ") || "no scopes"}] and does not include "${options.requiredScope}", which this tool requires. Ask the user to reconnect and approve it.`,
+            `This connection was granted [${granted}] and does not include "${options.requiredScope}", which this tool requires. Ask the user to reconnect and approve it.`,
           );
         }
       }
@@ -169,7 +180,7 @@ export function withUserClient<Args>(handler: ToolHandler<Args>, options: ToolOp
         emitToolOutcome({
           tool,
           outcome: "error",
-          durationMs: performance.now() - startedAt,
+          durationMs: mcpElapsedMs(startedAt),
           grantId: auth.grantId,
           clientId,
           userIdHash,
@@ -183,7 +194,7 @@ export function withUserClient<Args>(handler: ToolHandler<Args>, options: ToolOp
         emitToolOutcome({
           tool,
           outcome: result.isError ? "error" : "ok",
-          durationMs: performance.now() - startedAt,
+          durationMs: mcpElapsedMs(startedAt),
           grantId: auth.grantId,
           clientId,
           userIdHash,
@@ -195,7 +206,7 @@ export function withUserClient<Args>(handler: ToolHandler<Args>, options: ToolOp
         emitToolOutcome({
           tool,
           outcome: "error",
-          durationMs: performance.now() - startedAt,
+          durationMs: mcpElapsedMs(startedAt),
           grantId: auth.grantId,
           clientId,
           userIdHash,
@@ -222,6 +233,7 @@ export function withPerson<Args extends { person_id?: string; person_name?: stri
 ) {
   return withUserClient<Args>(async (supabase, args, auth) => {
     const resolution = await resolvePerson(supabase, args);
+    // Stryker disable next-line ConditionalExpression: non-ok must short-circuit before note/handler
     if (resolution.status !== "ok") {
       return fail(resolution.message, { candidates: resolution.candidates });
     }

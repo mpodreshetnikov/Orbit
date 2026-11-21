@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { verifyMcpBearerToken } from "./verify-token";
+import { splitMcpScopes, verifyMcpBearerToken } from "./verify-token";
 import type { GrantRow } from "./oauth-store";
 
 const {
@@ -126,21 +126,60 @@ describe("verifyMcpBearerToken audit", () => {
   });
 
   it("accepts a usable allowlisted grant and touches last_used_at", async () => {
-    findGrantByAccessTokenMock.mockResolvedValue(grant());
+    const expiresAt = new Date(Date.now() + 3_600_000);
+    findGrantByAccessTokenMock.mockResolvedValue(
+      grant({
+        scope: "health:read  \thealth:write",
+        access_token_expires_at: expiresAt.toISOString(),
+      }),
+    );
     isGrantUserAllowedMock.mockResolvedValue(true);
 
     const auth = await verifyMcpBearerToken(request, "tok");
 
     expect(auth?.clientId).toBe("mcp_client_1");
     expect(auth?.extra.grantId).toBe("grant-1");
+    expect(auth?.scopes).toEqual(["health:read", "health:write"]);
+    expect(auth?.expiresAt).toBe(Math.floor(expiresAt.getTime() / 1000));
+    expect(auth?.expiresAt).toBeGreaterThan(1_000_000_000);
+    expect(auth?.expiresAt).toBeLessThan(10_000_000_000);
     expect(touchGrantMock).toHaveBeenCalledWith("grant-1");
-    expect(logMcpAuthAcceptedMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        grantId: "grant-1",
-        clientId: "mcp_client_1",
-        userIdHash: expect.stringMatching(/^[a-f0-9]{16}$/),
-      }),
-    );
+    const accepted = logMcpAuthAcceptedMock.mock.calls[0]?.[0] as {
+      grantId: string;
+      durationMs: number;
+      userIdHash: string;
+    };
+    expect(accepted.grantId).toBe("grant-1");
+    expect(accepted.userIdHash).toMatch(/^[a-f0-9]{16}$/);
+    expect(accepted.durationMs).toBeGreaterThanOrEqual(0);
+    expect(accepted.durationMs).toBeLessThan(5_000);
     expect(logMcpAuthRejectedMock).not.toHaveBeenCalled();
+  });
+
+  it("treats a token that expires at exactly now as expired", async () => {
+    const now = new Date("2026-01-15T12:00:00.000Z");
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    try {
+      findGrantByAccessTokenMock.mockResolvedValue(
+        grant({ access_token_expires_at: now.toISOString() }),
+      );
+
+      await expect(verifyMcpBearerToken(request, "tok")).resolves.toBeUndefined();
+
+      expect(logMcpAuthRejectedMock).toHaveBeenCalledWith(
+        expect.objectContaining({ reason: "expired", grantId: "grant-1" }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("splitMcpScopes", () => {
+  it("collapses whitespace and drops empty segments", () => {
+    expect(splitMcpScopes("health:read  \thealth:write")).toEqual(["health:read", "health:write"]);
+    expect(splitMcpScopes("")).toEqual([]);
+    expect(splitMcpScopes("  ")).toEqual([]);
   });
 });

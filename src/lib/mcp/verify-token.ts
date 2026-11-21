@@ -44,10 +44,23 @@ function tokenHashPrefix(bearerToken: string): string {
   return sha256Hex(bearerToken).slice(0, 8);
 }
 
-function rejectReasonForGrant(grant: GrantRow): "revoked" | "expired" | null {
+function rejectReasonForGrant(
+  grant: GrantRow,
+  now: Date = new Date(),
+): "revoked" | "expired" | null {
   if (grant.revoked_at) return "revoked";
-  if (new Date(grant.access_token_expires_at) <= new Date()) return "expired";
+  // Inclusive: a token that expires at exactly `now` is already unusable.
+  if (new Date(grant.access_token_expires_at) <= now) return "expired";
   return null;
+}
+
+function mcpAuthElapsedMs(startedAt: number, now: number = performance.now()): number {
+  return now - startedAt;
+}
+
+/** Split OAuth scope string into tokens; collapses runs of whitespace. */
+export function splitMcpScopes(scope: string): string[] {
+  return scope.split(/\s+/).filter(Boolean);
 }
 
 export async function verifyMcpBearerToken(
@@ -59,7 +72,7 @@ export async function verifyMcpBearerToken(
   if (!bearerToken) {
     logMcpAuthRejected({
       reason: "missing_token",
-      durationMs: performance.now() - startedAt,
+      durationMs: mcpAuthElapsedMs(startedAt),
     });
     return undefined;
   }
@@ -68,7 +81,7 @@ export async function verifyMcpBearerToken(
   if (!grant) {
     logMcpAuthRejected({
       reason: "unknown",
-      durationMs: performance.now() - startedAt,
+      durationMs: mcpAuthElapsedMs(startedAt),
       tokenHashPrefix: tokenHashPrefix(bearerToken),
     });
     return undefined;
@@ -78,7 +91,7 @@ export async function verifyMcpBearerToken(
   if (unusable) {
     logMcpAuthRejected({
       reason: unusable,
-      durationMs: performance.now() - startedAt,
+      durationMs: mcpAuthElapsedMs(startedAt),
       grantId: grant.id,
       clientId: grant.client_id,
       userIdHash: hashMcpUserId(grant.auth_user_id),
@@ -93,7 +106,7 @@ export async function verifyMcpBearerToken(
   if (!(await isGrantUserAllowed(grant))) {
     logMcpAuthRejected({
       reason: "not_allowlisted",
-      durationMs: performance.now() - startedAt,
+      durationMs: mcpAuthElapsedMs(startedAt),
       grantId: grant.id,
       clientId: grant.client_id,
       userIdHash: hashMcpUserId(grant.auth_user_id),
@@ -109,14 +122,15 @@ export async function verifyMcpBearerToken(
     grantId: grant.id,
     clientId: grant.client_id,
     userIdHash: hashMcpUserId(grant.auth_user_id),
-    durationMs: performance.now() - startedAt,
+    durationMs: mcpAuthElapsedMs(startedAt),
   });
 
+  const expiresAtMs = new Date(grant.access_token_expires_at).getTime();
   return {
     token: bearerToken,
     clientId: grant.client_id,
-    scopes: grant.scope.split(/\s+/).filter(Boolean),
-    expiresAt: Math.floor(new Date(grant.access_token_expires_at).getTime() / 1000),
+    scopes: splitMcpScopes(grant.scope),
+    expiresAt: Math.floor(expiresAtMs / 1000),
     resource: new URL(getResourceIdentifier(request)),
     extra: {
       grantId: grant.id,

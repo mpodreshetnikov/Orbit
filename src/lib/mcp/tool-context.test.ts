@@ -1,7 +1,8 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { withUserClient, withPerson, type ToolContext } from "./tool-context";
+import { withUserClient, withPerson, mcpElapsedMs, type ToolContext } from "./tool-context";
 import { ok } from "./tool-result";
 import { runWithMcpToolName, logMcpToolCallStarted, logMcpToolCallCompleted } from "./audit";
+import { createUserScopedSupabaseClient } from "./supabase-user-client";
 
 vi.mock("./supabase-user-client", () => ({
   createUserScopedSupabaseClient: vi.fn(() => ({}) as never),
@@ -100,11 +101,32 @@ describe("withUserClient scope enforcement", () => {
     expect(result.isError).toBe(true);
     expect(handler).not.toHaveBeenCalled();
     expect(result.content[0]).toMatchObject({
+      text: expect.stringContaining("health:read"),
+    });
+    expect(result.content[0]).toMatchObject({
       text: expect.stringContaining("health:write"),
     });
-    expect(logMcpToolCallCompleted).toHaveBeenCalledWith(
-      expect.objectContaining({ outcome: "error", tool: "add_measurement" }),
+    const completed = vi.mocked(logMcpToolCallCompleted).mock.calls[0]?.[0];
+    expect(completed?.outcome).toBe("error");
+    expect(completed?.tool).toBe("add_measurement");
+  });
+
+  it("reports a session mint failure as a tool error", async () => {
+    vi.mocked(createUserScopedSupabaseClient).mockImplementationOnce(() => {
+      throw new Error("jwt secret missing");
+    });
+    const tool = withUserClient(async () => ok("never"));
+
+    const result = await runWithMcpToolName("list_persons", () =>
+      tool({}, context(["health:read"])),
     );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]).toMatchObject({
+      text: expect.stringContaining("jwt secret missing"),
+    });
+    const completed = vi.mocked(logMcpToolCallCompleted).mock.calls[0]?.[0];
+    expect(completed?.outcome).toBe("error");
   });
 
   it("refuses a write tool when no scopes are present at all", async () => {
@@ -170,6 +192,13 @@ describe("withUserClient scope enforcement", () => {
     const started = vi.mocked(logMcpToolCallStarted).mock.calls[0]?.[0];
     expect(started?.argKeys).toBe("person_id,query");
     expect(JSON.stringify(started)).not.toContain("glucose");
+  });
+});
+
+describe("mcpElapsedMs", () => {
+  it("subtracts start from now", () => {
+    expect(mcpElapsedMs(100, 115)).toBe(15);
+    expect(mcpElapsedMs(50, 50)).toBe(0);
   });
 });
 
