@@ -44,7 +44,7 @@ export function RecordDetail({ recordId }: RecordDetailGateProps) {
         <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-8 text-center">
           <p className="text-destructive">{t("common.error")}</p>
           <p className="mt-2 text-sm text-muted-foreground">
-            {error?.message || "Record not found"}
+            {error?.message || t("records.detail.notFound")}
           </p>
         </div>
       </div>

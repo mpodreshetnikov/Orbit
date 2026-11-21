@@ -1056,7 +1056,8 @@
       "noOcrText": "No text extracted",
       "summary": "Summary",
       "findings": "Findings",
-      "openAttachment": "Open attachment"
+      "openAttachment": "Open attachment",
+      "notFound": "Record not found"
     },
     "confirm": {
       "removeTitle": "Remove Record",

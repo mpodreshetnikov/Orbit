@@ -1056,7 +1056,8 @@
       "noOcrText": "Текст не распознан",
       "summary": "Кратко",
       "findings": "Находки",
-      "openAttachment": "Открыть вложение"
+      "openAttachment": "Открыть вложение",
+      "notFound": "Запись не найдена"
     },
     "confirm": {
       "removeTitle": "Удалить запись",
