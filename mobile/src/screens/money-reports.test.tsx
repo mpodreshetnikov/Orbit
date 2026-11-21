@@ -155,8 +155,6 @@ afterEach(() => {
 const reportArgs = () =>
   calls.rpc.filter(({ name }) => name === "money_get_spending_report").map(({ args }) => args);
 
-const amount = (text: string) => new RegExp(`^${text.replace(/ /g, "\\s")}\\s₽$`);
-
 describe("the money report", () => {
   it("is reached from the money tab: totals with their changes, the forecast, the map, the list, the days and the shops", async () => {
     await renderScreens(routes, "/money");

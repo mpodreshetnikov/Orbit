@@ -386,7 +386,6 @@ export default function MoneyReportsScreen() {
                   {listed.map((category, index) => (
                     <CategoryRow
                       key={category.id}
-                      report={data}
                       category={category}
                       subcategories={
                         category.has_children ? childCategories(all, category.id, mode) : []
@@ -714,7 +713,6 @@ function Sparkline({ category, mode }: { category: SpendingCategory; mode: Spend
  * subcategories and the button that narrows the whole report to it.
  */
 function CategoryRow({
-  report,
   category,
   subcategories,
   total,
@@ -724,7 +722,6 @@ function CategoryRow({
   onToggle,
   onFilter,
 }: {
-  report: SpendingReport;
   category: SpendingCategory;
   subcategories: SpendingCategory[];
   total: number;
