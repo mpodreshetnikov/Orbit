@@ -7,7 +7,7 @@ describe("popup helpers", () => {
   });
 
   it("formats session json", () => {
-    expect(formatSession({ id: 1 })).toContain('"id": 1');
+    expect(formatSession({ id: 1 })).toBe('{\n  "id": 1\n}');
   });
 
   it("parses datetime-local input", () => {
@@ -44,8 +44,9 @@ describe("describeUpdateStatus", () => {
   });
 
   it("tells how to install a missing updater", () => {
-    expect(describeUpdateStatus({ ...base, phase: "host_missing" }).text).toContain(
-      "updater/install.sh",
+    expect(describeUpdateStatus({ ...base, phase: "host_missing" }).text).toBe(
+      "Installed: 0.1.23\nThe updater is not installed. In the extension folder run " +
+        "updater/install.sh (macOS) or updater/install-windows.cmd (Windows), then try again.",
     );
   });
 

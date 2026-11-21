@@ -544,6 +544,6 @@ describe("import-runner", () => {
         },
         callEdge,
       ),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe(undefined);
   });
 });

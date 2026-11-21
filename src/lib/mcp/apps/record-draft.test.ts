@@ -692,7 +692,7 @@ describe("RECORD_DRAFT_HTML", () => {
   });
 
   it("asks before declining", () => {
-    expect(RECORD_DRAFT_HTML).toContain("Да, отклонить");
+    expect(RECORD_DRAFT_HTML.includes("Да, отклонить")).toBe(true);
   });
 
   it("hands only a failed approve to Claude, which cannot decline", () => {

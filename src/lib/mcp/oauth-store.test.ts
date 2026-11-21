@@ -559,7 +559,7 @@ describe("revocation", () => {
 
   it("stops cleanly when a grant has no descendants", async () => {
     const { client } = makeClient({ [GRANTS]: [{ data: null }, { data: null }] });
-    await expect(revokeGrantChain("grant-1", client)).resolves.toBeUndefined();
+    await expect(revokeGrantChain("grant-1", client)).resolves.toBe(undefined);
   });
 
   it("revokes by either token form", async () => {
