@@ -1876,3 +1876,285 @@ describe("tbank-web connector", () => {
     }
   });
 });
+
+describe("tbank-web pure helpers (T-261116-rul mutation)", () => {
+  it("accepts tbank.ru and tbank-online.com hosts and rejects others", () => {
+    expect(__test__.isTbankUrl("https://www.tbank.ru/mybank/operations/")).toBe(true);
+    expect(__test__.isTbankUrl("https://tbank.ru/mybank/operations/")).toBe(true);
+    expect(__test__.isTbankUrl("https://www.tbank-online.com/mybank/operations/")).toBe(true);
+    expect(__test__.isTbankUrl("https://evil.example/tbank.ru/")).toBe(false);
+    expect(__test__.isTbankUrl("http://www.tbank.ru/mybank/operations/")).toBe(false);
+    // Must keep the start anchor: a foreign host that merely embeds the bank URL must fail.
+    expect(__test__.isTbankUrl("https://evil.example/?next=https://www.tbank.ru/x")).toBe(false);
+    expect(__test__.isTbankUrl(null)).toBe(false);
+    expect(__test__.isTbankUrl(12)).toBe(false);
+    // String objects are not typeof "string"; dropping that check would accept them via ToString.
+    expect(
+      __test__.isTbankUrl(
+        new String("https://www.tbank.ru/mybank/operations/") as unknown as string,
+      ),
+    ).toBe(false);
+  });
+
+  it("picks the mirror operations page when the tab is already on tbank-online.com", () => {
+    expect(__test__.operationsPageUrlFor("https://www.tbank-online.com/mybank/")).toBe(
+      "https://www.tbank-online.com/mybank/operations/",
+    );
+    expect(__test__.operationsPageUrlFor("https://tbank-online.com/mybank/")).toBe(
+      "https://www.tbank-online.com/mybank/operations/",
+    );
+    expect(__test__.operationsPageUrlFor("https://www.tbank.ru/mybank/")).toBe(
+      "https://www.tbank.ru/mybank/operations/",
+    );
+    expect(
+      __test__.operationsPageUrlFor("https://evil.example/?https://www.tbank-online.com/"),
+    ).toBe("https://www.tbank.ru/mybank/operations/");
+    expect(__test__.operationsPageUrlFor(null)).toBe("https://www.tbank.ru/mybank/operations/");
+    expect(
+      __test__.operationsPageUrlFor(
+        new String("https://www.tbank-online.com/mybank/") as unknown as string,
+      ),
+    ).toBe("https://www.tbank.ru/mybank/operations/");
+  });
+
+  it("treats versioned and query-bearing operations paths as the operations page", () => {
+    expect(__test__.isOperationsPageUrl("https://www.tbank.ru/mybank/operations/v8/?x=1")).toBe(
+      true,
+    );
+    expect(__test__.isOperationsPageUrl("https://www.tbank.ru/mybank/cards/")).toBe(false);
+    expect(__test__.isOperationsPageUrl("not-a-url")).toBe(false);
+  });
+
+  it("normalizes text, objects, numbers and ISO timestamps", () => {
+    expect(__test__.normalizeText("  a\u00a0b\n\tc  ")).toBe("a b c");
+    expect(__test__.normalizeText("   ")).toBeNull();
+    expect(__test__.normalizeText(1)).toBeNull();
+    expect(__test__.asObject({ a: 1 })).toEqual({ a: 1 });
+    expect(__test__.asObject(null)).toBeNull();
+    expect(__test__.asObject("x")).toBeNull();
+    expect(__test__.firstNonEmpty("", "  ", "ok", "later")).toBe("ok");
+    expect(__test__.firstNonEmpty("", null, undefined)).toBeNull();
+    expect(__test__.toFiniteNumber(3)).toBe(3);
+    expect(__test__.toFiniteNumber(Number.POSITIVE_INFINITY)).toBeNull();
+    expect(__test__.toFiniteNumber("4.5")).toBe(4.5);
+    expect(__test__.toFiniteNumber("  ")).toBeNull();
+    expect(__test__.toFiniteNumber("nope")).toBeNull();
+    expect(__test__.toFiniteNumber(Number.NaN)).toBeNull();
+    expect(__test__.toFiniteNumber(true as unknown as number)).toBeNull();
+    // Dropping Number.isFinite would return Infinity; dropping typeof-number would return strings.
+    expect(__test__.toFiniteNumber(Number.NEGATIVE_INFINITY)).toBeNull();
+    expect(__test__.toFiniteMs("2026-01-02T00:00:00.000Z")).toBe(
+      Date.parse("2026-01-02T00:00:00.000Z"),
+    );
+    expect(__test__.toFiniteMs(123)).toBe(123);
+    expect(__test__.toFiniteMs("  ")).toBeNull();
+    expect(__test__.toFiniteMs("nope")).toBeNull();
+    expect(__test__.toFiniteMs(new String("123") as unknown as string)).toBeNull();
+    expect(__test__.toIsoString("2026-01-02T00:00:00.000Z")).toBe("2026-01-02T00:00:00.000Z");
+    expect(__test__.toIsoString("")).toBeNull();
+    expect(__test__.toIsoString("   ")).toBeNull();
+    expect(__test__.toIsoString("not-a-date")).toBeNull();
+    expect(__test__.toIsoString(12)).toBeNull();
+    expect(
+      __test__.toIsoString(new String("2026-01-02T00:00:00.000Z") as unknown as string),
+    ).toBeNull();
+    expect(__test__.normalizeMcc("MCC 5411 store")).toBe("5411");
+    expect(__test__.normalizeMcc("none")).toBeNull();
+  });
+
+  it("extracts card last4 only from masked or full-length digit strings", () => {
+    expect(__test__.extractCardLast4("****1234")).toBe("1234");
+    expect(__test__.extractCardLast4("1234")).toBe("1234");
+    expect(__test__.extractCardLast4("4111111111111111")).toBe("1111");
+    expect(__test__.extractCardLast4("411111111111")).toBe("1111");
+    expect(__test__.extractCardLast4("4111111111111111111")).toBe("1111");
+    // 11 digits: not masked, not 4, not 12–19 — must stay null.
+    expect(__test__.extractCardLast4("41111111111")).toBeNull();
+    // 20 digits: over the PAN range — must stay null (kills `<=19` → true).
+    expect(__test__.extractCardLast4("41111111111111111111")).toBeNull();
+    expect(__test__.extractCardLast4("12")).toBeNull();
+    expect(__test__.extractCardLast4(null)).toBeNull();
+    expect(__test__.extractCardLast4("123456")).toBeNull();
+    expect(__test__.extractCardLast4("123")).toBeNull();
+  });
+
+  it("detects transfers from group, subgroup and merchant title", () => {
+    expect(__test__.detectTransfer({ group: "Transfer out" }, "Shop")).toBe(true);
+    expect(__test__.detectTransfer({ subgroup: { name: "Перевод" } }, "Shop")).toBe(true);
+    expect(__test__.detectTransfer({}, "Card to card")).toBe(true);
+    expect(__test__.detectTransfer({ group: "Shopping" }, "Coffee")).toBe(false);
+  });
+
+  it("marks account-native operations for internal transfers and interest markers", () => {
+    expect(__test__.isAccountNativeOperation({}, "Coffee", true)).toBe(true);
+    expect(
+      __test__.isAccountNativeOperation({ description: "Between own accounts" }, "x", false),
+    ).toBe(true);
+    expect(__test__.isAccountNativeOperation({ description: "Deposit interest" }, "x", false)).toBe(
+      true,
+    );
+    expect(__test__.isAccountNativeOperation({ description: "Grocery" }, "Coffee", false)).toBe(
+      false,
+    );
+  });
+
+  it("normalizes currency tokens including numeric ISO codes", () => {
+    expect(__test__.normalizeCurrencyToken("rub")).toBe("RUB");
+    expect(__test__.normalizeCurrencyToken("643")).toBe("RUB");
+    expect(__test__.normalizeCurrencyToken("840")).toBe("USD");
+    expect(__test__.normalizeCurrencyToken("978")).toBe("EUR");
+    expect(__test__.normalizeCurrencyToken("999")).toBeNull();
+    // Digits must be the whole token — a leading digit with trailing junk is not numeric ISO.
+    expect(__test__.normalizeCurrencyToken("643RUB")).toBe("RUB");
+    expect(__test__.normalizeCurrencyToken("x643")).toBeNull();
+    // Keep the start anchor: trailing digits must not divert a letter token into the ISO map.
+    expect(__test__.normalizeCurrencyToken("USD840")).toBe("USD");
+    expect(__test__.normalizeCurrencyToken("")).toBeNull();
+    expect(__test__.normalizeCurrencyToken(null)).toBeNull();
+  });
+
+  it("prefers account currency then amount currency then RUB", () => {
+    expect(
+      __test__.extractCurrency({
+        accountAmount: { currency: { strCode: "usd" } },
+        amount: { currency: { strCode: "eur" } },
+      }),
+    ).toBe("USD");
+    expect(__test__.extractCurrency({ amount: { currency: { strCode: "eur" } } })).toBe("EUR");
+    expect(__test__.extractCurrency({})).toBe("RUB");
+  });
+
+  it("reads cashback amount from summary, cashbackAmount, cashback, then loyaltyBonus", () => {
+    expect(__test__.extractCashbackAmount({ loyaltyBonusSummary: { amount: 12 } })).toBe(12);
+    expect(__test__.extractCashbackAmount({ cashbackAmount: { value: 3.5 } })).toBe(3.5);
+    expect(__test__.extractCashbackAmount({ cashback: 7 })).toBe(7);
+    expect(
+      __test__.extractCashbackAmount({
+        loyaltyBonus: [{ amount: { value: 9 } }, { amount: { value: 1 } }, "skip-me"],
+      }),
+    ).toBe(10);
+    expect(__test__.extractCashbackAmount({ loyaltyBonus: "not-an-array" })).toBeNull();
+    expect(
+      __test__.extractCashbackAmount({ loyaltyBonus: [{ amount: { value: null } }] }),
+    ).toBeNull();
+    expect(__test__.extractCashbackAmount({})).toBeNull();
+  });
+
+  it("returns cashback currency only when an amount exists", () => {
+    expect(
+      __test__.extractCashbackCurrency({ cashbackAmount: { currency: { strCode: "usd" } } }, 1),
+    ).toBe("USD");
+    expect(
+      __test__.extractCashbackCurrency({ cashbackAmount: { currency: { strCode: "usd" } } }, null),
+    ).toBeNull();
+    expect(__test__.extractCashbackCurrency({}, 1)).toBe("RUB");
+  });
+
+  it("maps hold-like statuses to pending and everything else to posted", () => {
+    expect(__test__.normalizeStatus("HOLD")).toBe("pending");
+    expect(__test__.normalizeStatus("Authorization")).toBe("posted");
+    expect(__test__.normalizeStatus("pending payment")).toBe("pending");
+    expect(__test__.normalizeStatus("processing")).toBe("pending");
+    expect(__test__.normalizeStatus("wait")).toBe("pending");
+    expect(__test__.normalizeStatus("new")).toBe("pending");
+    expect(__test__.normalizeStatus("")).toBe("posted");
+    expect(__test__.normalizeStatus("   ")).toBe("posted");
+    expect(__test__.normalizeStatus(null)).toBe("posted");
+    expect(__test__.normalizeStatus("OK")).toBe("posted");
+  });
+
+  it("builds receipt line items and a fallback when items are empty", () => {
+    const items = __test__.buildLineItemsFromReceipt(
+      { receipt: { items: [{ name: "Milk", sum: 100, price: 2, quantity: 1 }] } },
+      -100,
+      "Fallback",
+    );
+    expect(items[0]).toMatchObject({ title: "Milk", amount: -100, quantity: 1 });
+    const positive = __test__.buildLineItemsFromReceipt(
+      { receipt: { items: [{ title: "Tea", price: 10, quantity: 2 }] } },
+      20,
+      "Fallback",
+    );
+    expect(positive[0]).toMatchObject({ title: "Tea", amount: 20, quantity: 2 });
+    const zeroAmount = __test__.buildLineItemsFromReceipt(
+      { receipt: { items: [{ name: "Zero", sum: 0 }] } },
+      0,
+      "Fallback",
+    );
+    expect(zeroAmount[0]).toMatchObject({ title: "Zero", amount: 0 });
+    const fallback = __test__.buildLineItemsFromReceipt(
+      { receipt: { items: [] } },
+      -50,
+      "Fallback",
+    );
+    expect(fallback[0]).toMatchObject({
+      title: "Fallback",
+      amount: -50,
+      raw_payload: { source: "fallback" },
+    });
+    const notArray = __test__.buildLineItemsFromReceipt(
+      { receipt: { items: "nope" } },
+      1,
+      "Fallback",
+    );
+    expect(notArray[0]?.raw_payload).toMatchObject({ source: "fallback" });
+  });
+
+  it("hashes inputs stably and pins the FNV-1a digests", () => {
+    expect(__test__.hashString("abc")).toBe("1a47e90b");
+    expect(__test__.hashString("abd")).toBe("1f47f0ea");
+    expect(__test__.hashString("")).toBe("811c9dc5");
+    expect(__test__.hashString("abc")).not.toBe(__test__.hashString("abd"));
+  });
+
+  it("changes the dedupe hash when any contributing field changes", () => {
+    const base = {
+      external_id: "e1",
+      operation_id: "o1",
+      authorization_id: "a1",
+      posted_at: "2026-01-01T00:00:00.000Z",
+      amount: -10,
+      merchant_name: "Shop",
+      account_hint: "1234",
+    };
+    const baseHash = __test__.buildDedupeHash(base);
+    expect(baseHash.startsWith("tbw_")).toBe(true);
+    expect(__test__.buildDedupeHash({ ...base, external_id: "e2" })).not.toBe(baseHash);
+    expect(__test__.buildDedupeHash({ ...base, operation_id: "o2" })).not.toBe(baseHash);
+    expect(__test__.buildDedupeHash({ ...base, authorization_id: "a2" })).not.toBe(baseHash);
+    expect(__test__.buildDedupeHash({ ...base, posted_at: "2026-01-02T00:00:00.000Z" })).not.toBe(
+      baseHash,
+    );
+    expect(__test__.buildDedupeHash({ ...base, amount: -11 })).not.toBe(baseHash);
+    expect(__test__.buildDedupeHash({ ...base, merchant_name: "Other" })).not.toBe(baseHash);
+    expect(__test__.buildDedupeHash({ ...base, account_hint: "9999" })).not.toBe(baseHash);
+    expect(__test__.buildDedupeHash({ ...base, external_id: "" })).not.toBe(baseHash);
+    expect(__test__.buildDedupeHash({ ...base, merchant_name: "" })).not.toBe(baseHash);
+  });
+
+  it("reads operation time and signed amount from record fields", () => {
+    expect(
+      __test__.extractOperationTimeMs({
+        operationTime: { milliseconds: Date.parse("2026-01-01T00:00:00.000Z") },
+      }),
+    ).toBe(Date.parse("2026-01-01T00:00:00.000Z"));
+    expect(
+      __test__.extractOperationTimeMs({
+        debitingTime: { milliseconds: Date.parse("2026-02-01T00:00:00.000Z") },
+      }),
+    ).toBe(Date.parse("2026-02-01T00:00:00.000Z"));
+    expect(__test__.extractOperationTimeMs({ operationDateTime: "2026-03-01T00:00:00.000Z" })).toBe(
+      Date.parse("2026-03-01T00:00:00.000Z"),
+    );
+    expect(__test__.extractOperationAmount({ accountAmount: { value: 12.5 } })).toBe(12.5);
+    expect(__test__.extractOperationAmount({ amount: { value: 3 } })).toBe(3);
+    expect(__test__.extractOperationAmount({})).toBeNull();
+    expect(__test__.resolveSignedAmount({ type: "Debit" }, 5)).toBe(-5);
+    expect(__test__.resolveSignedAmount({ type: "expense" }, 5)).toBe(-5);
+    expect(__test__.resolveSignedAmount({ type: "Credit" }, 5)).toBe(5);
+    expect(__test__.resolveSignedAmount({ type: "income" }, -5)).toBe(5);
+    // Credit branch must not run for plain types — would abs() a negative amount.
+    expect(__test__.resolveSignedAmount({ type: "other" }, -5)).toBe(-5);
+    expect(__test__.resolveSignedAmount({}, 5)).toBe(5);
+  });
+});

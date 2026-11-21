@@ -1,6 +1,7 @@
-// Stryker disable all: first edit of this connector since the mutation gate landed; covered
-// survivors are pre-existing on map/parse/enrichment paths. Module-level endpoint discovery
-// (findLatestResourceUrlByPath) is restored around that helper so the origin guard stays gated.
+// Stryker disable all: T-261116-rul slice 1 — map/parse/enrichment + chrome orchestration
+// still carry covered survivors; pay down in the next Progress slice. extractOperationsInPage
+// stays disabled separately (Function(fn.toString()) serialization). Post-extractor helpers
+// after that block are restored and gated in this PR.
 import { registerConnector } from "./registry.js";
 import { isPathUnder } from "../core/page-url.js";
 import { CLOCK_SKEW_ALLOWANCE_MS } from "../core/session-janitor.js";
@@ -765,17 +766,6 @@ registerConnector(connector);
 
 export default connector;
 
-export const __test__ = {
-  isOperationsPageUrl,
-  buildOperationRanges,
-  detectBlockedReasonFromApiEnvelope,
-  detectBlockedReasonFromPageState,
-  estimateFullModeReceiptEnrichmentMs,
-  extractOperationsInPage,
-  findLatestResourceUrlByPath,
-  mapOperationRecordToRow,
-};
-
 function detectBlockedReasonFromApiEnvelope(value: unknown): string | null {
   const envelope = asObject(value);
   if (!envelope) return null;
@@ -1157,9 +1147,9 @@ function findLatestResourceUrlByPath(
   }
   return null;
 }
-// Stryker disable all: remainder of this module — see file-head note. Also keeps
-// extractOperationsInPage free of instrumentation: it is serialized via Function(fn.toString()).
 
+// Stryker disable all: serialized via Function(fn.toString()) for in-page dry-run; instrumentation
+// breaks that self-contained extractor. Map/parse/enrichment above and helpers below stay gated.
 function extractOperationsInPage(input: {
   windowFromIso?: string;
   windowToIso?: string | null;
@@ -2656,6 +2646,7 @@ function extractOperationsInPage(input: {
     return (hash >>> 0).toString(16).padStart(8, "0");
   }
 }
+// Stryker restore all
 
 function isTbankUrl(url: unknown): url is string {
   return (
@@ -2681,6 +2672,8 @@ function isOperationsPageUrl(url: unknown): boolean {
   }
 }
 
+// Stryker disable all: chrome.tabs orchestration — not map/parse/enrichment; same temporary
+// debt band as the file-head slice-1 disable (T-261116-rul).
 async function getTabById(tabId: number): Promise<chrome.tabs.Tab | null> {
   if (typeof chrome.tabs.get !== "function") {
     return null;
@@ -2717,8 +2710,10 @@ async function waitForTabLoad(tabId: number, timeoutMs = 30000): Promise<chrome.
     chrome.tabs.onUpdated.addListener(onUpdated);
   });
 }
+// Stryker restore all
 
 function toIsoString(value: unknown): string | null {
+  // Stryker disable next-line MethodExpression: !value vs !value.trim() both reject whitespace-only
   if (typeof value !== "string" || !value.trim()) return null;
   const parsed = new Date(value);
   return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null;
@@ -2745,6 +2740,7 @@ function firstNonEmpty(...values: Array<string | null | undefined>): string | nu
 }
 
 function toFiniteNumber(value: unknown): number | null {
+  // Stryker disable next-line ConditionalExpression: Number.isFinite does not coerce; typeof check alone is equivalent here
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string" && value.trim()) {
     const parsed = Number(value);
@@ -2756,6 +2752,7 @@ function toFiniteNumber(value: unknown): number | null {
 function toFiniteMs(value: unknown): number | null {
   const numberValue = toFiniteNumber(value);
   if (numberValue !== null) return numberValue;
+  // Stryker disable next-line MethodExpression: whitespace-only strings still fail Date parse below
   if (typeof value === "string" && value.trim()) {
     const ms = new Date(value).getTime();
     return Number.isFinite(ms) ? ms : null;
@@ -2844,6 +2841,7 @@ function isAccountNativeOperation(
 function extractCardLast4(value: string | null): string | null {
   if (!value) return null;
   const digits = value.replace(/\D/g, "");
+  // Stryker disable next-line ConditionalExpression: short digit strings still fall through to null
   if (digits.length < 4) return null;
 
   const hasMaskMarkers = /[\*\u2022xX]/.test(value);
@@ -2933,6 +2931,7 @@ function extractCashbackAmount(operation: JsonMap): number | null {
   const fromCashback = toFiniteNumber(operation.cashback);
   if (fromCashback !== null) return fromCashback;
 
+  // Stryker disable next-line ArrayDeclaration: non-array fallback [] vs junk array both yield null
   const loyaltyBonus = Array.isArray(operation.loyaltyBonus) ? operation.loyaltyBonus : [];
   let summed = 0;
   let foundAny = false;
@@ -2964,6 +2963,7 @@ function extractCashbackCurrency(operation: JsonMap, cashbackAmount: number | nu
 
 function normalizeStatus(statusInput: unknown): string {
   const text = normalizeText(statusInput)?.toLowerCase() || "";
+  // Stryker disable next-line ConditionalExpression: skipping the empty return still lands on "posted"
   if (!text) return "posted";
   if (
     text.includes("pending") ||
@@ -2985,6 +2985,7 @@ function buildLineItemsFromReceipt(
   const shoppingReceipt = asObject(shoppingReceiptInput);
   const receipt =
     asObject(asObject(shoppingReceipt?.payload)?.receipt) || asObject(shoppingReceipt?.receipt);
+  // Stryker disable next-line ArrayDeclaration: non-array fallback [] vs junk array both hit fallback
   const rawItems = Array.isArray(receipt?.items) ? receipt.items : [];
   const sign = signedTransactionAmount >= 0 ? 1 : -1;
 
@@ -3048,3 +3049,39 @@ function buildDedupeHash(row: JsonMap): string {
     ].join("|"),
   )}`;
 }
+
+// Exported after the helpers so Vitest/Stryker related coverage binds the instrumented
+// post-extractor implementations (T-261116-rul), not a disable-band snapshot.
+export const __test__ = {
+  isOperationsPageUrl,
+  isTbankUrl,
+  operationsPageUrlFor,
+  buildOperationRanges,
+  detectBlockedReasonFromApiEnvelope,
+  detectBlockedReasonFromPageState,
+  estimateFullModeReceiptEnrichmentMs,
+  extractOperationsInPage,
+  findLatestResourceUrlByPath,
+  mapOperationRecordToRow,
+  toIsoString,
+  asObject,
+  normalizeText,
+  firstNonEmpty,
+  toFiniteNumber,
+  toFiniteMs,
+  normalizeMcc,
+  extractCardLast4,
+  extractOperationTimeMs,
+  extractOperationAmount,
+  resolveSignedAmount,
+  detectTransfer,
+  normalizeCurrencyToken,
+  extractCurrency,
+  extractCashbackAmount,
+  extractCashbackCurrency,
+  normalizeStatus,
+  buildLineItemsFromReceipt,
+  hashString,
+  buildDedupeHash,
+  isAccountNativeOperation,
+};
