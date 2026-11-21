@@ -1,12 +1,10 @@
 {
-  "generated_at": "2026-11-21T07:19:08.121Z",
-  "total": 239,
+  "generated_at": "2026-11-21T08:16:59.599Z",
+  "total": 228,
   "counts": {
     "browserExtension/src/core/content-bridge.test.ts::mock-call-only": 10,
     "browserExtension/src/core/import-runner.test.ts::mock-call-only": 2,
-    "browserExtension/src/core/keepalive.test.ts::mock-call-only": 2,
     "browserExtension/src/core/self-update.test.ts::mock-call-only": 3,
-    "src/app/api/notifications/route.test.ts::mock-call-only": 2,
     "src/app/health/conditions/[id]/page.test.tsx::mock-call-only": 4,
     "src/app/health/medications/[id]/page.test.tsx::mock-call-only": 1,
     "src/app/health/medications/new/page.test.tsx::mock-call-only": 2,
@@ -36,15 +34,12 @@
     "src/components/medications/medication-dashboard.test.tsx::mock-call-only": 2,
     "src/components/medications/medication-form.test.tsx::mock-call-only": 15,
     "src/components/medications/refill-dialog.test.tsx::mock-call-only": 1,
-    "src/components/money/rule-editor.test.tsx::mock-call-only": 1,
-    "src/components/money/self-transfer-aliases.test.tsx::mock-call-only": 2,
     "src/components/money/transaction-form.test.tsx::mock-call-only": 5,
     "src/components/records/add-record-form.test.tsx::mock-call-only": 2,
     "src/components/records/add-record-wizard.test.tsx::mock-call-only": 1,
     "src/components/records/camera-capture.test.tsx::mock-call-only": 1,
     "src/components/records/ocr-review-step.test.tsx::mock-call-only": 1,
     "src/components/records/structure-review-step.test.tsx::mock-call-only": 3,
-    "src/components/tree-view.test.tsx::mock-call-only": 2,
     "src/hooks/use-attachments.test.tsx::mock-call-only": 1,
     "src/hooks/use-background-ocr.test.tsx::mock-call-only": 1,
     "src/hooks/use-body-site-catalog.test.tsx::mock-call-only": 3,
@@ -78,7 +73,6 @@
     "src/lib/mcp/tools/medications.test.ts::mock-call-only": 4,
     "src/lib/mcp/tools/records.test.ts::mock-call-only": 2,
     "src/lib/medications/regenerate-dose-events.test.ts::mock-call-only": 3,
-    "src/lib/supabase-server.test.ts::mock-call-only": 2,
-    "src/lib/sw-messages.test.ts::mock-call-only": 2
+    "src/lib/supabase-server.test.ts::mock-call-only": 2
   }
 }

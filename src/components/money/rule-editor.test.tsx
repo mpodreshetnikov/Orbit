@@ -478,6 +478,8 @@ describe("MoneyRuleEditor", () => {
       personId: "person-1",
       ruleIds: ["rule-1"],
     });
+    // Auto-preview resolved against the real example line, not the missing id.
+    expect(screen.getByText("Direct rule assigned Food")).toBeInTheDocument();
   });
 
   it("keeps save enabled while preview is pending", () => {

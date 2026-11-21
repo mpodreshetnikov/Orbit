@@ -12,22 +12,27 @@ describe("keepalive", () => {
 
       vi.advanceTimersByTime(5000);
       expect(ping).not.toHaveBeenCalled();
+      expect(registry.size()).toBe(0);
 
       registry.begin("s1");
       registry.begin("s2");
+      expect(registry.size()).toBe(2);
       vi.advanceTimersByTime(3000);
       expect(ping).toHaveBeenCalledTimes(3);
 
       // One run ending is not the end of the waiting.
       registry.end("s1");
+      expect(registry.size()).toBe(1);
       vi.advanceTimersByTime(1000);
       expect(ping).toHaveBeenCalledTimes(4);
 
       registry.end("s2");
+      expect(registry.size()).toBe(0);
       vi.advanceTimersByTime(5000);
       expect(ping).toHaveBeenCalledTimes(4);
 
       registry.begin("s3");
+      expect(registry.size()).toBe(1);
       stop();
       vi.advanceTimersByTime(5000);
       expect(ping).toHaveBeenCalledTimes(4);
@@ -45,6 +50,7 @@ describe("keepalive", () => {
       });
       keepWorkerAliveDuringRuns(registry, { ping, intervalMs: 1000 });
       registry.begin("s1");
+      expect(registry.has("s1")).toBe(true);
       vi.advanceTimersByTime(2000);
       expect(ping).toHaveBeenCalledTimes(2);
     } finally {
