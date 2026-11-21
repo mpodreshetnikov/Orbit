@@ -167,7 +167,7 @@ describe("MoneyImportAttentionPage", () => {
     });
     render(<MoneyImportAttentionPage />);
 
-    expect(await screen.findByTestId("money-import-attention-tbank_web")).toBeTruthy();
+    expect(await screen.findByTestId("money-import-attention-tbank_web")).toBeInTheDocument();
   });
 
   it("reloads itself once when the bridge says the extension updated under it, then says so", async () => {
@@ -251,7 +251,7 @@ describe("MoneyImportAttentionPage", () => {
     await waitFor(() =>
       expect(
         screen.getByText('money.importAttentionRequestFailed:{"error":"No import grant"}'),
-      ).toBeTruthy(),
+      ).toBeInTheDocument(),
     );
   });
 
@@ -564,7 +564,7 @@ describe("MoneyImportAttentionPage", () => {
     fireEvent.click(screen.getByText("common.save"));
 
     await waitFor(() =>
-      expect(screen.getByText("money.importAttentionThresholdInvalid")).toBeTruthy(),
+      expect(screen.getByText("money.importAttentionThresholdInvalid")).toBeInTheDocument(),
     );
   });
 });
