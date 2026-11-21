@@ -108,6 +108,7 @@ describe("analyze-tbank-debug-artifact", () => {
     artifact.parse_output.debug.discovered_endpoints = {};
     const diagnostics = analyzeArtifactBundle(asArtifact(artifact), ".tmp/test-artifact");
     expect(diagnostics.categories).toContain("API_DISCOVERY_MISSED");
+    expect(diagnostics.passed).toBe(false);
   });
 
   it("marks API status failures", () => {
@@ -117,6 +118,7 @@ describe("analyze-tbank-debug-artifact", () => {
     };
     const diagnostics = analyzeArtifactBundle(asArtifact(artifact), ".tmp/test-artifact");
     expect(diagnostics.categories).toContain("API_4XX_5XX");
+    expect(diagnostics.passed).toBe(false);
   });
 
   it("marks DOM selector drift for empty DOM fallback", () => {
@@ -127,6 +129,7 @@ describe("analyze-tbank-debug-artifact", () => {
     artifact.parse_output.debug.discovered_endpoints = {};
     const diagnostics = analyzeArtifactBundle(asArtifact(artifact), ".tmp/test-artifact");
     expect(diagnostics.categories).toContain("DOM_SELECTOR_DRIFT");
+    expect(diagnostics.passed).toBe(false);
   });
 
   it("marks mapping drops", () => {
@@ -138,6 +141,7 @@ describe("analyze-tbank-debug-artifact", () => {
     };
     const diagnostics = analyzeArtifactBundle(asArtifact(artifact), ".tmp/test-artifact");
     expect(diagnostics.categories).toContain("MAPPING_DROP");
+    expect(diagnostics.passed).toBe(false);
   });
 
   it("marks receipt enrichment rate limiting", () => {

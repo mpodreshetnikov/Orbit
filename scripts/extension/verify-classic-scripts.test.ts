@@ -82,7 +82,13 @@ describe("verifyClassicScripts", () => {
       "source-page-widget.inpage.js": '"use strict";\n(() => {})();',
     });
     const problems = await verifyClassicScripts(dir);
-    expect(problems.map((p) => p.file)).toContain("content-script.js");
+    expect(problems).toEqual([
+      {
+        file: "content-script.js",
+        line: 0,
+        statement: "the manifest names this file and it is missing",
+      },
+    ]);
   });
 
   it("takes the list from the manifest, so a newly added content script is covered", async () => {
