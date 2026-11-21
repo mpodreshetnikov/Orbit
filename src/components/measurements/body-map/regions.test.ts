@@ -45,9 +45,8 @@ describe("region taxonomy", () => {
   });
 
   it("maps every code to a region that exists", () => {
-    for (const regionId of Object.values(CODE_TO_REGION)) {
-      expect(BODY_REGION_IDS).toContain(regionId);
-    }
+    const unknown = Object.values(CODE_TO_REGION).filter((id) => !BODY_REGION_IDS.includes(id));
+    expect(unknown).toEqual([]);
   });
 
   it("has a region for every declared body region and no duplicates", () => {
@@ -60,9 +59,9 @@ describe("region taxonomy", () => {
   });
 
   it("does not place whole-body codes on the body", () => {
-    for (const code of WHOLE_BODY_CODES) {
-      expect(CODE_TO_REGION[code]).toBeUndefined();
-    }
+    expect(WHOLE_BODY_CODES.map((code) => CODE_TO_REGION[code])).toEqual(
+      WHOLE_BODY_CODES.map(() => undefined),
+    );
   });
 });
 
@@ -115,9 +114,8 @@ describe.each(MODELS)("artwork: %s", (model) => {
   });
 
   it("carries no artwork for regions we do not render", () => {
-    for (const regionId of Object.keys(artwork.regionPaths)) {
-      expect(BODY_REGION_IDS).toContain(regionId);
-    }
+    const unknown = Object.keys(artwork.regionPaths).filter((id) => !BODY_REGION_IDS.includes(id));
+    expect(unknown).toEqual([]);
   });
 
   // Upstream's left/right are viewer-relative. On a front view the viewer's
@@ -166,9 +164,7 @@ describe("band regions", () => {
   });
 
   it("are all real regions", () => {
-    for (const regionId of BAND_REGIONS) {
-      expect(BODY_REGION_IDS).toContain(regionId);
-    }
+    expect([...BAND_REGIONS].filter((id) => !BODY_REGION_IDS.includes(id))).toEqual([]);
   });
 });
 

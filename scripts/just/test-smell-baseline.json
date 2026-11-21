@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-11-21T04:28:25.362Z",
-  "total": 265,
+  "generated_at": "2026-11-21T05:23:41.904Z",
+  "total": 261,
   "counts": {
     "browserExtension/src/core/content-bridge.test.ts::mock-call-only": 10,
     "browserExtension/src/core/import-runner.test.ts::mock-call-only": 2,
@@ -39,8 +39,6 @@
     "src/components/measurements/add-measurement-dialog.test.tsx::mock-call-only": 2,
     "src/components/measurements/body-map/body-map-callouts.test.tsx::mock-call-only": 2,
     "src/components/measurements/body-map/body-map.test.tsx::mock-call-only": 2,
-    "src/components/measurements/body-map/regions.test.ts::lone-presence": 1,
-    "src/components/measurements/body-map/regions.test.ts::lone-tocontain": 3,
     "src/components/measurements/edit-measurement-dialog.test.tsx::mock-call-only": 2,
     "src/components/measurements/measurement-visibility-dialog.test.tsx::mock-call-only": 2,
     "src/components/medications/edit-intake-dialog.test.tsx::mock-call-only": 3,
