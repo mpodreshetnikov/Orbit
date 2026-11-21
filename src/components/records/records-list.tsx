@@ -389,7 +389,7 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
           {statusFilter === "draft" ? (
             <FileStack className="h-12 w-12 text-muted-foreground/50" />
           ) : statusFilter === "processing" ? (
-            <Loader2 className="h-12 w-12 text-muted-foreground/50" />
+            <CircleSlash className="h-12 w-12 text-muted-foreground/50" />
           ) : (
             <FileText className="h-12 w-12 text-muted-foreground/50" />
           )}

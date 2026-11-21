@@ -106,7 +106,6 @@ import {
   usePersonFindingHistory,
   usePersonConditionRecordHistory,
   usePersonObservationHistory,
-  usePersons,
   useRuleOnProposedClosure,
 } from "@/hooks";
 import { FindingRow, FindingEditDialog, type FindingComparison } from "@/components/findings";
@@ -296,7 +295,6 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
     record?.person_id ?? null,
   );
   const { data: personObservationHistory } = usePersonObservationHistory(record?.person_id ?? null);
-  const { data: persons } = usePersons();
 
   const [showRemoveDialog, setShowRemoveDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);

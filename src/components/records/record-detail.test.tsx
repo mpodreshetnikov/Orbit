@@ -888,6 +888,8 @@ describe("RecordDetail", () => {
     render(<RecordDetail recordId="record-1" />);
     const user = userEvent.setup();
 
+    expect(screen.getByText("records.status.notProcessedHint")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "records.actions.remove" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "records.actions.remove" }));
     await user.click(screen.getByRole("button", { name: "common.remove" }));
     expect(softDeleteMutation.mutate).toHaveBeenCalledWith("record-1", expect.any(Object));
