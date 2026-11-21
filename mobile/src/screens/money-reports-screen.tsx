@@ -258,10 +258,9 @@ export default function MoneyReportsScreen() {
           </ScrollView>
         ) : null}
 
-        <Button
+        <Pressable
           testID="spending-view-transactions"
-          label={t("money.spendingViewTransactions")}
-          variant="outline"
+          accessibilityRole="link"
           onPress={() =>
             router.push(
               `/money?${transactionsFeedQuery({
@@ -274,7 +273,11 @@ export default function MoneyReportsScreen() {
               })}` as Href,
             )
           }
-        />
+        >
+          <Text size="sm" tone="mutedForeground" style={{ textDecorationLine: "underline" }}>
+            {t("money.spendingViewTransactionsShort")}
+          </Text>
+        </Pressable>
 
         {categoryId || merchantName ? (
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}>
@@ -314,11 +317,10 @@ export default function MoneyReportsScreen() {
               </Card>
             )}
             <Totals report={data} />
-            <Forecast report={data} />
 
             <View style={{ gap: space.sm }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: space.md }}>
-                <Text weight="semibold" style={{ flex: 1 }}>
+                <Text weight="semibold" style={{ flex: 1 }} numberOfLines={1}>
                   {t("money.spendingCategories")}
                 </Text>
                 <View style={{ width: 180 }}>
@@ -336,6 +338,9 @@ export default function MoneyReportsScreen() {
                   />
                 </View>
               </View>
+              <Text size="xs" tone="mutedForeground" numberOfLines={1}>
+                {t("money.spendingCompareLegend", { year: String(data.period.last_year) })}
+              </Text>
               {mapParent ? (
                 <Pressable
                   accessibilityRole="button"
@@ -454,154 +459,147 @@ function FilterChip({ label, onClear }: { label: string; onClear: () => void }) 
   );
 }
 
-/** "▲ 8% к пред.": a change, coloured by whether it is good news, or «новое» / a dash without a base. */
+/** Compact change badge (▲ 8% / новое); basis lives in a once-per-section legend. */
 function Change({
   value,
   base,
   mode,
-  label,
 }: {
   value: number;
   base: number;
   mode: SpendingReportMode | "net";
-  label: string;
 }) {
   const scheme = useColorScheme();
+  const palette = usePalette();
   const change = percentChange(value, base);
   const newLabel = t("money.spendingChangeNew");
   const text = formatChange(change, { value, base, newLabel });
   const tone = changeTone(change, mode);
-  const suffix = label && text ? ` ${label}` : "";
   return (
-    <Text
-      size="xs"
-      tone="mutedForeground"
-      style={tone === "neutral" ? undefined : { color: toneColor(tone, scheme) }}
+    <View
+      style={{
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: radius.sm,
+        backgroundColor:
+          tone === "neutral"
+            ? palette.muted
+            : tone === "good"
+              ? "rgba(20, 184, 166, 0.12)"
+              : "rgba(249, 115, 22, 0.12)",
+      }}
     >
-      {`${text ?? "—"}${suffix}`}
-    </Text>
-  );
-}
-
-/** Spending, income and net side by side, each against the period before and last year. */
-function Totals({ report }: { report: SpendingReport }) {
-  const scheme = useColorScheme();
-  const { totals } = report;
-  const year = String(report.period.last_year);
-  const cards = [
-    [
-      "expense",
-      "money.spendingExpense",
-      totals.expense,
-      totals.previous_expense,
-      totals.last_year_expense,
-    ],
-    [
-      "income",
-      "money.spendingIncome",
-      totals.income,
-      totals.previous_income,
-      totals.last_year_income,
-    ],
-    ["net", "money.spendingNet", totals.net, totals.previous_net, totals.last_year_net],
-  ] as const;
-  return (
-    <View style={{ flexDirection: "row", gap: space.sm }}>
-      {cards.map(([key, title, value, previous, lastYear]) => (
-        <Card key={key} style={{ flex: 1, padding: space.md, gap: 2 }}>
-          <Text size="xs" tone="mutedForeground">
-            {t(title)}
-          </Text>
-          <Text
-            weight="bold"
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            testID={`spending-total-${key}`}
-            style={key === "net" && value > 0 ? { color: toneColor("good", scheme) } : undefined}
-          >
-            {`${key === "net" && value > 0 ? "+" : ""}${money(value)}`}
-          </Text>
-          <Change
-            value={value}
-            base={previous}
-            mode={key}
-            label={t("money.spendingVsPreviousShort")}
-          />
-          <Change
-            value={value}
-            base={lastYear}
-            mode={key}
-            label={t("money.spendingVsLastYear", { year })}
-          />
-        </Card>
-      ))}
+      <Text
+        size="xs"
+        tone="mutedForeground"
+        numberOfLines={1}
+        style={tone === "neutral" ? undefined : { color: toneColor(tone, scheme) }}
+      >
+        {text ?? "—"}
+      </Text>
     </View>
   );
 }
 
-/** Where spending, income and net are heading by the period's end, while the period runs. */
-function Forecast({ report }: { report: SpendingReport }) {
-  const palette = usePalette();
+/** Spending, income and net side by side; forecast as one calm line under each figure. */
+function Totals({ report }: { report: SpendingReport }) {
   const scheme = useColorScheme();
-  const { forecast, totals, period } = report;
-  if (!forecast) return null;
-  const end = new Intl.DateTimeFormat(LOCALE, {
-    day: "numeric",
-    month: "long",
-    timeZone: "UTC",
-  }).format(new Date(`${period.end}T00:00:00Z`));
-  const done = forecast.expense > 0 ? Math.min(100, (totals.expense / forecast.expense) * 100) : 0;
+  const { totals, forecast, period } = report;
+  const year = String(period.last_year);
+  const end = forecast
+    ? new Intl.DateTimeFormat(LOCALE, {
+        day: "numeric",
+        month: "short",
+        timeZone: "UTC",
+      }).format(new Date(`${period.end}T00:00:00Z`))
+    : "";
+  const cards = [
+    {
+      key: "expense" as const,
+      title: "money.spendingExpense",
+      value: totals.expense,
+      previous: totals.previous_expense,
+      lastYear: totals.last_year_expense,
+      forecast: forecast?.expense,
+      testId: "spending-forecast",
+    },
+    {
+      key: "income" as const,
+      title: "money.spendingIncome",
+      value: totals.income,
+      previous: totals.previous_income,
+      lastYear: totals.last_year_income,
+      forecast: forecast?.income,
+      testId: "spending-forecast-income",
+    },
+    {
+      key: "net" as const,
+      title: "money.spendingNet",
+      value: totals.net,
+      previous: totals.previous_net,
+      lastYear: totals.last_year_net,
+      forecast: forecast?.net,
+      testId: "spending-forecast-net",
+    },
+  ];
   return (
-    <Card style={{ padding: space.lg, gap: space.xs }}>
-      <View style={{ flexDirection: "row", gap: space.sm }}>
-        <Text size="sm" tone="mutedForeground" style={{ flex: 1 }}>
-          {t("money.spendingForecast", { date: end })}
-        </Text>
-        <Text size="sm" weight="semibold" testID="spending-forecast">
-          {`≈ ${money(forecast.expense)}`}
-        </Text>
-      </View>
-      <View style={{ flexDirection: "row", gap: space.sm }}>
-        <Text size="sm" tone="mutedForeground" style={{ flex: 1 }}>
-          {t("money.spendingForecastIncome", { date: end })}
-        </Text>
-        <Text size="sm" weight="semibold" testID="spending-forecast-income">
-          {`≈ ${money(forecast.income)}`}
-        </Text>
-      </View>
-      <View style={{ flexDirection: "row", gap: space.sm }}>
-        <Text size="sm" tone="mutedForeground" style={{ flex: 1 }}>
-          {t("money.spendingForecastNet", { date: end })}
-        </Text>
-        <Text
-          size="sm"
-          weight="semibold"
-          testID="spending-forecast-net"
-          style={
-            forecast.net > 0
-              ? { color: toneColor("good", scheme) }
-              : forecast.net < 0
-                ? { color: toneColor("bad", scheme) }
-                : undefined
-          }
-        >
-          {`≈ ${forecast.net > 0 ? "+" : ""}${money(forecast.net)}`}
-        </Text>
-      </View>
-      <View style={{ height: 8, borderRadius: radius.sm, backgroundColor: palette.muted }}>
-        <View
-          style={{
-            width: `${done}%`,
-            height: 8,
-            borderRadius: radius.sm,
-            backgroundColor: COLORS.bar.expense,
-          }}
-        />
-      </View>
-      <Text size="xs" tone="mutedForeground">
-        {`${t("money.spendingForecastDaysLeft", { days: forecast.days_left })} · ${t("money.spendingForecastHint")}`}
+    <View style={{ gap: space.sm }}>
+      <Text size="xs" tone="mutedForeground" numberOfLines={1}>
+        {t("money.spendingCompareLegend", { year })}
       </Text>
-    </Card>
+      <View style={{ flexDirection: "row", gap: space.sm }}>
+        {cards.map((card) => (
+          <Card
+            key={card.key}
+            testID={`spending-total-${card.key}`}
+            style={{ flex: 1, padding: space.md, gap: 2, overflow: "hidden" }}
+          >
+            <Text size="xs" tone="mutedForeground" numberOfLines={1}>
+              {t(card.title)}
+            </Text>
+            <Text
+              weight="bold"
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              style={
+                card.key === "net" && card.value > 0
+                  ? { color: toneColor("good", scheme) }
+                  : undefined
+              }
+            >
+              {`${card.key === "net" && card.value > 0 ? "+" : ""}${money(card.value)}`}
+            </Text>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4 }}>
+              <Change value={card.value} base={card.previous} mode={card.key} />
+              <Change value={card.value} base={card.lastYear} mode={card.key} />
+            </View>
+          </Card>
+        ))}
+      </View>
+      {forecast ? (
+        <Text size="xs" tone="mutedForeground" numberOfLines={1}>
+          <Text size="xs" tone="mutedForeground" testID="spending-forecast">
+            {t("money.spendingForecastLine", { date: end, amount: money(forecast.expense) })}
+          </Text>
+          <Text size="xs" tone="mutedForeground" testID="spending-forecast-income">
+            {` · ≈${money(forecast.income)}`}
+          </Text>
+          <Text
+            size="xs"
+            testID="spending-forecast-net"
+            style={
+              forecast.net > 0
+                ? { color: toneColor("good", scheme) }
+                : forecast.net < 0
+                  ? { color: toneColor("bad", scheme) }
+                  : undefined
+            }
+          >
+            {` · ≈${forecast.net > 0 ? "+" : ""}${money(forecast.net)}`}
+          </Text>
+        </Text>
+      ) : null}
+    </View>
   );
 }
 
@@ -739,7 +737,6 @@ function CategoryRow({
   const palette = usePalette();
   const amount = amountOf(category, mode);
   const name = categoryName(category);
-  const year = String(report.period.last_year);
   return (
     <View
       testID={`spending-row-${category.id}`}
@@ -766,19 +763,9 @@ function CategoryRow({
               {name}
             </Text>
           </View>
-          <View style={{ flexDirection: "row", flexWrap: "wrap", columnGap: space.sm }}>
-            <Change
-              value={amount}
-              base={previousOf(category, mode)}
-              mode={mode}
-              label={t("money.spendingVsPreviousShort")}
-            />
-            <Change
-              value={amount}
-              base={lastYearOf(category, mode)}
-              mode={mode}
-              label={t("money.spendingVsLastYear", { year })}
-            />
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4 }}>
+            <Change value={amount} base={previousOf(category, mode)} mode={mode} />
+            <Change value={amount} base={lastYearOf(category, mode)} mode={mode} />
           </View>
           {category.months.length ? <Sparkline category={category} mode={mode} /> : null}
         </View>
@@ -910,7 +897,12 @@ function Merchants({
   const visible = showAll ? report.merchants : report.merchants.slice(0, LIST_TOP_N);
   return (
     <Card style={{ padding: space.lg, gap: space.md }} testID="spending-merchants">
-      <Text weight="semibold">{t("money.spendingMerchants")}</Text>
+      <Text weight="semibold" numberOfLines={1}>
+        {t("money.spendingMerchants")}
+      </Text>
+      <Text size="xs" tone="mutedForeground" numberOfLines={1}>
+        {t("money.spendingVsPreviousShort")}
+      </Text>
       {visible.map((merchant) => (
         <Pressable
           key={`${merchant.brand_id ?? ""}:${merchant.name}`}
@@ -953,16 +945,11 @@ function Merchants({
             <Text size="sm" weight="medium" numberOfLines={1}>
               {merchant.name}
             </Text>
-            <View style={{ flexDirection: "row", flexWrap: "wrap", columnGap: space.sm }}>
-              <Text size="xs" tone="mutedForeground">
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
+              <Text size="xs" tone="mutedForeground" numberOfLines={1}>
                 {t("money.spendingMerchantCount", { count: merchant.transaction_count })}
               </Text>
-              <Change
-                value={merchant.expense}
-                base={merchant.previous_expense}
-                mode="expense"
-                label={t("money.spendingVsPreviousShort")}
-              />
+              <Change value={merchant.expense} base={merchant.previous_expense} mode="expense" />
             </View>
           </View>
           <Text size="sm" weight="semibold">
