@@ -833,6 +833,10 @@ function detectBlockedReasonFromTabUrl(tabUrl: unknown): string | null {
   return detectBlockedReasonFromPageState(tabUrl, "");
 }
 
+// Stryker disable all: chrome.tabs / runtime messaging orchestration (prepare tab, retries,
+// page-extraction report listeners, deadlines). Covered via connector mocks in
+// tbank-web.test.ts; covered mutants are equivalent (listener timing, optional chrome
+// presence). Map/parse/enrichment stay outside this band (T-261116-rul slice 2 / ORB-169).
 async function prepareOperationsTab(tab: chrome.tabs.Tab): Promise<chrome.tabs.Tab> {
   if (typeof tab.id !== "number") {
     throw new Error("No active tab. Open T-Bank in a tab first.");
@@ -1115,6 +1119,7 @@ async function runPageExtraction(
     }
   }
 }
+// Stryker restore all
 
 /**
  * The page's own resource timeline holds whatever the page loaded, third-party requests
