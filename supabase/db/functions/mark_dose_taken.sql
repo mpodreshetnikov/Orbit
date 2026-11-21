@@ -65,12 +65,11 @@ BEGIN
     RETURN;
   END IF;
 
-  INSERT INTO public.med_inventory_transactions (regimen_id, event_id, type, amount, unit, note)
-  VALUES (v_event.regimen_id, p_dose_event_id, 'decrement', v_amount, v_unit, NULLIF(trim(p_note), ''));
-
   -- Field-level jsonb_set on the live column (not a whole-object write of a
   -- previously read snapshot) so an unrelated concurrent edit to another
   -- inventory field is not discarded once this session holds the row lock.
+  -- Ledger rows record movements only (T-260901-pou): write a decrement when
+  -- this UPDATE actually reduces stock, never as a receipt of the intake ask.
   UPDATE public.med_regimens
   SET inventory = jsonb_set(
         inventory,
@@ -88,6 +87,11 @@ BEGIN
     AND inventory IS NOT NULL
     AND (inventory->>'enabled')::boolean IS TRUE
     AND (inventory->>'auto_decrement_on_taken')::boolean IS TRUE;
+
+  IF FOUND THEN
+    INSERT INTO public.med_inventory_transactions (regimen_id, event_id, type, amount, unit, note)
+    VALUES (v_event.regimen_id, p_dose_event_id, 'decrement', v_amount, v_unit, NULLIF(trim(p_note), ''));
+  END IF;
 END;
 $$;
 
@@ -96,4 +100,4 @@ REVOKE ALL ON FUNCTION public.mark_dose_taken(uuid, text, timestamptz) FROM PUBL
 GRANT EXECUTE ON FUNCTION public.mark_dose_taken(uuid, text, timestamptz) TO authenticated;
 
 COMMENT ON FUNCTION public.mark_dose_taken(uuid, text, timestamptz) IS
-  'Mark dose event as taken; allow from scheduled/sent/snoozed/skipped. Optional p_taken_at sets completion time; else actual_at, else now(). Decrements inventory if enabled. Serializes on the dose and regimen rows (T-0020).';
+  'Mark dose event as taken; allow from scheduled/sent/snoozed/skipped. Optional p_taken_at sets completion time; else actual_at, else now(). Decrements inventory when enabled and auto_decrement_on_taken, and records a ledger decrement only when stock moved (T-260901-pou). Serializes on the dose and regimen rows (T-0020).';
