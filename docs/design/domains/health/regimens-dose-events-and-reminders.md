@@ -74,6 +74,10 @@ Reasoning and the rejected alternatives: `ADR-260907-cvj` in the task registry.
 - Cron jobs invoke generation and notification pipelines.
 - Event generation is horizon-based and idempotent-oriented.
 - User actions (`taken`, `skipped`, `undo`) update both event state and inventory transactions.
+- `med_inventory_transactions` is a movement ledger, not an intake receipt: a `decrement` row exists
+  only when stock actually moved, and a later skip/undo/amount-edit restores from that event's
+  outstanding ledger net rather than from the regimen's current `auto_decrement_on_taken` flag
+  (`T-260901-pou`).
 
 ### Health-specific edge cases and failure recovery patterns
 

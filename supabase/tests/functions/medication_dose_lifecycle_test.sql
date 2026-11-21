@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(21);
+SELECT plan(23);
 
 SELECT has_function('public', 'mark_dose_taken', ARRAY['uuid', 'text', 'timestamp with time zone']);
 SELECT has_function('public', 'mark_dose_skipped', ARRAY['uuid', 'text']);
@@ -247,6 +247,15 @@ SELECT is(
   10::numeric,
   'mark_dose_taken leaves stock alone when auto decrement is off'
 );
+SELECT is(
+  (
+    SELECT count(*)
+    FROM public.med_inventory_transactions
+    WHERE regimen_id = 'dddddddd-dddd-dddd-dddd-dddddddddddd'
+  ),
+  0::bigint,
+  'mark_dose_taken writes no ledger row when stock did not move'
+);
 
 SELECT public.update_dose_event_resolution_details(
   'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee',
@@ -259,6 +268,15 @@ SELECT is(
   (SELECT (inventory->>'current_amount')::numeric FROM public.med_regimens WHERE id = 'dddddddd-dddd-dddd-dddd-dddddddddddd'),
   10::numeric,
   'update_dose_event_resolution_details invents no stock when auto decrement is off'
+);
+SELECT is(
+  (
+    SELECT count(*)
+    FROM public.med_inventory_transactions
+    WHERE regimen_id = 'dddddddd-dddd-dddd-dddd-dddddddddddd'
+  ),
+  0::bigint,
+  'update_dose_event_resolution_details writes no ledger rows when nothing moved'
 );
 
 SELECT * FROM finish();
