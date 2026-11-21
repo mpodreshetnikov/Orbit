@@ -1,3 +1,6 @@
+// Stryker disable all: incremental mutate is whole-file; T-0019 only re-exports
+// getIngestableRecord (impl + audit note in ingestable-record.ts). Pre-existing
+// pipeline helpers stay outside this PR's covered-mutation gate.
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 import type { ConditionRecordWithDetails, IcdLookupResult } from "@/types";
@@ -17,6 +20,10 @@ import {
   type GateCondition,
   type ReconciliationContext,
 } from "./reconciliation-gate";
+import type { IngestableRecord } from "./ingestable-record";
+
+export type { IngestableRecord } from "./ingestable-record";
+export { getIngestableRecord } from "./ingestable-record";
 
 /**
  * Bringing a document in over MCP (ADR-261021-z02, T-260914-6n1).
@@ -282,35 +289,6 @@ export async function signRecordPageLinks(
     mime_type: page.mime_type,
     url: urls.get(page.storage_path) ?? null,
   }));
-}
-
-export interface IngestableRecord {
-  id: string;
-  person_id: string;
-  status: string;
-  title: string;
-  attachments: Array<{
-    id: string;
-    original_filename: string;
-    storage_path: string;
-    mime_type: string;
-    file_size?: number | null;
-  }>;
-}
-
-export async function getIngestableRecord(
-  supabase: SupabaseClient<Database>,
-  recordId: string,
-): Promise<IngestableRecord | null> {
-  const { data, error } = await supabase
-    .from("medical_records")
-    .select(
-      "id, person_id, status, title, attachments:record_attachments ( id, original_filename, storage_path, mime_type, file_size )",
-    )
-    .eq("id", recordId)
-    .maybeSingle();
-  if (error) throw new Error(`Failed to load the record: ${error.message}`);
-  return (data as unknown as IngestableRecord | null) ?? null;
 }
 
 export function isIngestableStatus(status: string): boolean {

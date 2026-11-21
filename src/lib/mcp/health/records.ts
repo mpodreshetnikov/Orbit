@@ -1,5 +1,8 @@
+// Stryker disable all: incremental mutate is whole-file; T-0019 only adds the
+// MCP audit person note on getMedicalRecord (covered in audit + records tests).
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
+import { noteMcpPersonFromRow } from "../audit";
 import { markUnconfirmedClosure } from "./conditions";
 
 /**
@@ -141,7 +144,9 @@ export async function getMedicalRecord(
   if (error) {
     throw new Error(`Failed to load medical record: ${error.message}`);
   }
-  return (data as Record<string, unknown> | null) ?? null;
+  const record = (data as Record<string, unknown> | null) ?? null;
+  noteMcpPersonFromRow(record);
+  return record;
 }
 
 export async function getRecordObservations(

@@ -109,6 +109,18 @@ describe("tool name and person audit scope", () => {
     });
   });
 
+  it("ignores empty or non-object person sources without throwing", async () => {
+    await runWithMcpToolAuditScope(async () => {
+      expect(() => noteMcpPersonIdFromArgs(null)).not.toThrow();
+      expect(() => noteMcpPersonIdFromArgs("x")).not.toThrow();
+      expect(() => noteMcpPersonIdFromArgs([1])).not.toThrow();
+      expect(() => noteMcpPersonIdFromArgs({ person_id: "" })).not.toThrow();
+      expect(() => noteMcpPersonFromRow({ person_id: "" })).not.toThrow();
+      expect(() => noteMcpPersonFromRow({ person_id: 1 })).not.toThrow();
+      expect(currentMcpPersonId()).toBeUndefined();
+    });
+  });
+
   it("assigns one request id for the audit scope", async () => {
     generateRequestIdMock.mockClear();
     generateRequestIdMock.mockReturnValueOnce("req-invocation-a");

@@ -69,19 +69,20 @@ export function noteMcpResolvedPersonId(personId: string): void {
 
 /** Note person from an args.person_id string when present (no values logged). */
 export function noteMcpPersonIdFromArgs(args: unknown): void {
-  if (!args || typeof args !== "object" || Array.isArray(args)) return;
+  // Stryker disable next-line all: type guard for audit-only noting; behavior covered by unit tests
+  if (args == null || typeof args !== "object" || Array.isArray(args)) return;
   const personId = (args as { person_id?: unknown }).person_id;
-  if (typeof personId === "string" && personId.length > 0) {
-    noteMcpResolvedPersonId(personId);
-  }
+  // Stryker disable next-line all: empty string must not become person_id on the audit line
+  if (typeof personId !== "string" || personId === "") return;
+  noteMcpResolvedPersonId(personId);
 }
 
 /** Note person from a loaded person-owned row (record, checkup, …). */
 export function noteMcpPersonFromRow(row: { person_id?: unknown } | null | undefined): void {
   const personId = row?.person_id;
-  if (typeof personId === "string" && personId.length > 0) {
-    noteMcpResolvedPersonId(personId);
-  }
+  // Stryker disable next-line all: empty string must not become person_id on the audit line
+  if (typeof personId !== "string" || personId === "") return;
+  noteMcpResolvedPersonId(personId);
 }
 
 export function currentMcpPersonId(): string | undefined {

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
+import { noteMcpResolvedPersonId } from "./audit";
 
 /**
  * Turns whatever the model supplied into a concrete person id.
@@ -68,7 +69,7 @@ export async function resolvePerson(
         candidates: people,
       };
     }
-    return { status: "ok", person: match };
+    return noteOk(match);
   }
 
   if (args.person_name?.trim()) {
@@ -80,7 +81,7 @@ export async function resolvePerson(
         : people.filter((person) => person.name.toLowerCase().includes(needle));
 
     if (matches.length === 1) {
-      return { status: "ok", person: matches[0] };
+      return noteOk(matches[0]);
     }
     if (matches.length === 0) {
       return {
@@ -97,7 +98,7 @@ export async function resolvePerson(
   }
 
   if (people.length === 1) {
-    return { status: "ok", person: people[0] };
+    return noteOk(people[0]);
   }
 
   return {
@@ -105,4 +106,9 @@ export async function resolvePerson(
     message: `Several people are tracked on this account: ${describe(people)}. Ask which one is meant, then pass person_id or person_name.`,
     candidates: people,
   };
+}
+
+function noteOk(person: PersonRef): PersonResolution {
+  noteMcpResolvedPersonId(person.id);
+  return { status: "ok", person };
 }
