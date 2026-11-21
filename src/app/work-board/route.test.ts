@@ -55,6 +55,17 @@ describe("GET /work-board", () => {
     const { GET } = await import("./route");
     const response = await GET(new Request("http://0.0.0.0:3000/work-board"));
     expect(response.status).toBe(404);
+    expect(resolveWorkBoardAccessMock).toHaveBeenCalledWith({
+      email: "mpodreshetnikov@gmail.com",
+    });
+  });
+
+  it("passes null email when the session has no user", async () => {
+    getCurrentUserMock.mockResolvedValue(null);
+    resolveWorkBoardAccessMock.mockReturnValue("unauthenticated");
+    const { GET } = await import("./route");
+    await GET(new Request("http://0.0.0.0:3000/work-board"));
+    expect(resolveWorkBoardAccessMock).toHaveBeenCalledWith({ email: null });
   });
 
   it("redirects other emails to the public access-denied origin", async () => {
@@ -78,7 +89,7 @@ describe("GET /work-board", () => {
     );
   });
 
-  it("returns HTML for the allowed email", async () => {
+  it("returns HTML for the allowed email and wires render options", async () => {
     getCurrentUserMock.mockResolvedValue({ email: "mpodreshetnikov@gmail.com" });
     resolveWorkBoardAccessMock.mockReturnValue("allow");
     loadWorkBoardCardsMock.mockResolvedValue({
@@ -92,18 +103,66 @@ describe("GET /work-board", () => {
     const { GET } = await import("./route");
     const response = await GET(new Request("http://localhost/work-board"));
     expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toContain("text/html");
+    expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(await response.text()).toContain("board");
+    expect(clearWorkBoardCacheMock).not.toHaveBeenCalled();
+    expect(renderBoardHtmlMock).toHaveBeenCalledWith([{ id: "T-1" }], {
+      generatedAt: "2026-11-21 12:00 UTC (github, fresh)",
+      reviewers: ["mpodreshetnikov@gmail.com"],
+      lang: "ru",
+    });
   });
 
-  it("returns 503 when the RO token path fails", async () => {
+  it("clears cache on refresh=1 and labels cache hits", async () => {
     getCurrentUserMock.mockResolvedValue({ email: "mpodreshetnikov@gmail.com" });
     resolveWorkBoardAccessMock.mockReturnValue("allow");
-    loadWorkBoardCardsMock.mockRejectedValue(new Error("ORBIT_TASKS_GITHUB_TOKEN is missing"));
+    loadWorkBoardCardsMock.mockResolvedValue({
+      cards: [],
+      generatedAt: "2026-11-21 12:00 UTC",
+      source: "local-dir",
+      cacheHit: true,
+    });
+    renderBoardHtmlMock.mockReturnValue("<html>ok</html>");
+
+    const { GET } = await import("./route");
+    await GET(new Request("http://localhost/work-board?refresh=1"));
+    expect(clearWorkBoardCacheMock).toHaveBeenCalledTimes(1);
+    expect(renderBoardHtmlMock).toHaveBeenCalledWith([], {
+      generatedAt: "2026-11-21 12:00 UTC (local-dir, cache)",
+      reviewers: ["mpodreshetnikov@gmail.com"],
+      lang: "ru",
+    });
+
+    clearWorkBoardCacheMock.mockClear();
+    await GET(new Request("http://localhost/work-board?refresh=0"));
+    expect(clearWorkBoardCacheMock).not.toHaveBeenCalled();
+  });
+
+  it("returns 503 with escaped error HTML when the RO token path fails", async () => {
+    getCurrentUserMock.mockResolvedValue({ email: "mpodreshetnikov@gmail.com" });
+    resolveWorkBoardAccessMock.mockReturnValue("allow");
+    loadWorkBoardCardsMock.mockRejectedValue(new Error('missing <token> & "x"'));
 
     const { GET } = await import("./route");
     const response = await GET(new Request("http://localhost/work-board"));
     expect(response.status).toBe(503);
-    expect(await response.text()).toContain("ORBIT_TASKS_GITHUB_TOKEN");
+    expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    const body = await response.text();
+    expect(body).toContain("ORBIT_TASKS_GITHUB_TOKEN");
+    expect(body).toContain("missing &lt;token&gt; &amp; &quot;x&quot;");
+    expect(body).not.toContain("<token>");
+  });
+
+  it("stringifies non-Error failures in the 503 body", async () => {
+    getCurrentUserMock.mockResolvedValue({ email: "mpodreshetnikov@gmail.com" });
+    resolveWorkBoardAccessMock.mockReturnValue("allow");
+    loadWorkBoardCardsMock.mockRejectedValue("raw-fail");
+
+    const { GET } = await import("./route");
+    const response = await GET(new Request("http://localhost/work-board"));
+    expect(response.status).toBe(503);
+    expect(await response.text()).toContain("Failed to load work board");
   });
 });

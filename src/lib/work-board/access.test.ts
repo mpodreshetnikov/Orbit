@@ -22,13 +22,24 @@ describe("isWorkBoardEnabled", () => {
     expect(isWorkBoardEnabled()).toBe(false);
   });
 
-  it("turns on only for explicit 1/true", () => {
+  it("turns on for explicit 1/true/yes/on (trim + case insensitive)", () => {
     process.env.ORBIT_WORK_BOARD_ENABLED = "1";
     expect(isWorkBoardEnabled()).toBe(true);
     process.env.ORBIT_WORK_BOARD_ENABLED = "true";
     expect(isWorkBoardEnabled()).toBe(true);
+    process.env.ORBIT_WORK_BOARD_ENABLED = " YES ";
+    expect(isWorkBoardEnabled()).toBe(true);
+    process.env.ORBIT_WORK_BOARD_ENABLED = "On";
+    expect(isWorkBoardEnabled()).toBe(true);
     process.env.ORBIT_WORK_BOARD_ENABLED = "0";
     expect(isWorkBoardEnabled()).toBe(false);
+    process.env.ORBIT_WORK_BOARD_ENABLED = "maybe";
+    expect(isWorkBoardEnabled()).toBe(false);
+  });
+
+  it("reads the env object passed in", () => {
+    expect(isWorkBoardEnabled({ ORBIT_WORK_BOARD_ENABLED: "yes" })).toBe(true);
+    expect(isWorkBoardEnabled({ ORBIT_WORK_BOARD_ENABLED: "no" })).toBe(false);
   });
 });
 
@@ -37,9 +48,12 @@ describe("isWorkBoardEmailAllowed", () => {
     expect(isWorkBoardEmailAllowed(WORK_BOARD_ALLOWED_EMAIL)).toBe(true);
     expect(isWorkBoardEmailAllowed("mpodreshetnikov@gmail.com")).toBe(true);
     expect(isWorkBoardEmailAllowed("MPodreshetnikov@gmail.com")).toBe(true);
+    expect(isWorkBoardEmailAllowed("  mpodreshetnikov@gmail.com  ")).toBe(true);
     expect(isWorkBoardEmailAllowed("other@example.com")).toBe(false);
+    expect(isWorkBoardEmailAllowed(" mpodreshetnikov@gmail.comx")).toBe(false);
     expect(isWorkBoardEmailAllowed(null)).toBe(false);
     expect(isWorkBoardEmailAllowed(undefined)).toBe(false);
+    expect(isWorkBoardEmailAllowed("")).toBe(false);
   });
 });
 
@@ -52,7 +66,14 @@ describe("resolveWorkBoardAccess", () => {
   it("returns unauthenticated / forbidden / allow when enabled", () => {
     process.env.ORBIT_WORK_BOARD_ENABLED = "1";
     expect(resolveWorkBoardAccess({ email: null })).toBe("unauthenticated");
+    expect(resolveWorkBoardAccess({ email: undefined })).toBe("unauthenticated");
     expect(resolveWorkBoardAccess({ email: "other@example.com" })).toBe("forbidden");
     expect(resolveWorkBoardAccess({ email: WORK_BOARD_ALLOWED_EMAIL })).toBe("allow");
+    expect(
+      resolveWorkBoardAccess({
+        email: WORK_BOARD_ALLOWED_EMAIL,
+        env: { ORBIT_WORK_BOARD_ENABLED: "on" },
+      }),
+    ).toBe("allow");
   });
 });

@@ -134,7 +134,8 @@ export function renderBoardHtml(
 
   const note = forReviewNote(options.reviewers ?? []);
   const columnsHtml = BOARD_COLUMNS.map(([colId, colLabel]) => {
-    const items = byCol[colId].slice().sort((a, b) => a.id.localeCompare(b.id));
+    // byCol arrays are render-local; sort in place is safe.
+    const items = byCol[colId].sort((a, b) => a.id.localeCompare(b.id));
     return renderColumn(colId, colLabel, items, note);
   });
 

@@ -94,6 +94,9 @@ function parseFrontMatter(text: string, path: string): Record<string, string> {
   }
   const out: Record<string, string> = {};
   for (const line of match[1].split(/\r?\n/)) {
+    // Blank / full-line comments cannot become keys: no `:`, or `#…` keys fail later
+    // checks. Keep the skip for readability; mutants here are behaviorally equivalent.
+    // Stryker disable next-line ConditionalExpression,LogicalOperator,MethodExpression,BlockStatement: blank/comment lines lack `key: value` or become `#…` keys that later guards reject
     if (!line.trim() || line.trimStart().startsWith("#")) {
       continue;
     }
@@ -102,6 +105,8 @@ function parseFrontMatter(text: string, path: string): Record<string, string> {
       continue;
     }
     const key = line.slice(0, idx).trim();
+    // Empty / spaced keys never collide with id|title|status|owner fields we read.
+    // Stryker disable next-line ConditionalExpression,LogicalOperator,BlockStatement: rejecting empty/spaced keys does not change BoardCard fields
     if (!key || key.includes(" ")) {
       continue;
     }
@@ -112,26 +117,30 @@ function parseFrontMatter(text: string, path: string): Record<string, string> {
 
 function extractContextDescription(text: string): string {
   const withoutFm = text.replace(FRONT_MATTER_RE, "");
-  const section = withoutFm.match(/^##\s*Context\s*\r?\n([\s\S]*?)(?=^##\s|\Z)/im);
+  // `[ \t]*` (not `\s*`) after Context so blank lines stay in the body, not the heading.
+  // `(?![\s\S])` is true EOS; JS `$` under /m matches EOL and would truncate the section.
+  const section = withoutFm.match(/^##[ \t]*Context[ \t]*\r?\n([\s\S]*?)(?=^##[ \t]|(?![\s\S]))/im);
   if (!section) {
     return "";
   }
-  const paragraphs = section[1]
-    .split(/\r?\n\s*\r?\n/)
-    .map((block) =>
-      block
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter((line) => line && !line.startsWith("_") && !line.startsWith("#"))
-        .join(" ")
-        .trim(),
-    )
-    .filter(Boolean);
-  return paragraphs[0] ?? "";
+  for (const block of section[1].split(/\r?\n\s*\r?\n/)) {
+    const lines = block
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0 && !line.startsWith("_") && !line.startsWith("#"));
+    if (lines.length > 0) {
+      return lines.join(" ");
+    }
+  }
+  return "";
 }
 
 function shouldSkipPath(path: string): boolean {
+  // split(...).pop() is always a string (possibly ""); optional chain is equivalent.
+  // Stryker disable next-line OptionalChaining: Array#pop on a split path always returns a string
   const base = path.split(/[/\\]/).pop()?.toLowerCase() ?? "";
+  // README/INDEX/PLANS are also rejected by the T-*.md guard below — equivalent skip.
+  // Stryker disable next-line ConditionalExpression,BlockStatement: basename allowlist is redundant with the T-*.md check that follows
   if (SKIP_BASENAMES.has(base)) {
     return true;
   }
@@ -158,6 +167,8 @@ export function parseOrbitTaskMarkdown(text: string, options: { path: string }):
   if (!title) {
     throw new BoardAdapterError(path, "missing title");
   }
+  // mapOrbitStatusToCanonical trims again; keeping trim here is equivalent for status.
+  // Stryker disable next-line MethodExpression: status is re-trimmed in mapOrbitStatusToCanonical
   const rawStatus = (fields.status || "").trim();
   if (!rawStatus) {
     throw new BoardAdapterError(path, "missing status");

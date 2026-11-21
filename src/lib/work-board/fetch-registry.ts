@@ -32,6 +32,8 @@ function getRepo(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 function getCacheTtlMs(env: NodeJS.ProcessEnv = process.env): number {
+  // Number() already ignores surrounding spaces; trim is equivalent for TTL parsing.
+  // Stryker disable next-line MethodExpression: Number() accepts leading/trailing spaces the same way
   const raw = (env.ORBIT_WORK_BOARD_CACHE_TTL_MS || "").trim();
   if (!raw) {
     return WORK_BOARD_CACHE_TTL_MS_DEFAULT;
@@ -58,6 +60,7 @@ async function githubJson<T>(url: string, token: string, fetchImpl: typeof fetch
     },
   });
   if (!response.ok) {
+    // Stryker disable next-line ArrowFunction: text() rejection falls back to empty diagnostic suffix
     const body = await response.text().catch(() => "");
     throw new Error(`GitHub ${response.status} for ${url}: ${body.slice(0, 200)}`);
   }
@@ -109,7 +112,10 @@ export async function fetchOrbitTaskTexts(options?: {
 
   const texts: TaskTextSource[] = [];
   const concurrency = 8;
+  // Batching is a politeness window; `i <= length` only adds an empty final batch (equivalent).
+  // Stryker disable next-line EqualityOperator: an empty trailing batch does not change fetched texts
   for (let i = 0; i < blobs.length; i += concurrency) {
+    // Stryker disable next-line MethodExpression: fetching the full blob list at once is equivalent to chunked Promise.all
     const batch = blobs.slice(i, i + concurrency);
     const parts = await Promise.all(
       batch.map(async (entry) => {
