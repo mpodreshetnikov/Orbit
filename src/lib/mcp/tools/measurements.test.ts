@@ -215,7 +215,7 @@ describe("add_measurement", () => {
       unknown,
       { measuredAt?: string },
     ];
-    expect(params.measuredAt).toBeUndefined();
+    expect(params.measuredAt).toBe(undefined);
   });
 
   it("refuses input that is not a timestamp instead of storing a guess", async () => {
