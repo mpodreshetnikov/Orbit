@@ -61,7 +61,8 @@ describe("ThemeToggle", () => {
     });
 
     const user = userEvent.setup();
-    render(<ThemeToggle />);
+    const view = render(<ThemeToggle />);
+    await waitFor(() => expect(view.container.querySelector(".lucide-sun")).toBeTruthy());
     await user.click(screen.getByRole("button"));
 
     expect(setThemeMock).toHaveBeenCalledWith("dark");

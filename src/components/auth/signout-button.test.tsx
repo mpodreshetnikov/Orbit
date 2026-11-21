@@ -33,5 +33,6 @@ describe("SignOutButton", () => {
     await waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
     expect(routerMock.push).toHaveBeenCalledWith("/login");
     expect(routerMock.refresh).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "auth.signOut" })).toBeInTheDocument();
   });
 });

@@ -138,5 +138,6 @@ describe("UserMenu", () => {
     view.unmount();
 
     expect(supabase.mocks.unsubscribe).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "nav.profile" })).not.toBeInTheDocument();
   });
 });

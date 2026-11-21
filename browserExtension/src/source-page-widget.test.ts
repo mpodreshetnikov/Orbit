@@ -92,6 +92,7 @@ describe("source-page-widget", () => {
     expect(keepAlivePort.postMessage).toHaveBeenCalledWith({
       type: "MONEY_IMPORT_KEEPALIVE",
     });
+    expect(document.getElementById("orbit-money-import-widget-root")?.shadowRoot).not.toBeNull();
 
     vi.advanceTimersByTime(20000);
     expect(keepAlivePort.postMessage).toHaveBeenCalledTimes(2);

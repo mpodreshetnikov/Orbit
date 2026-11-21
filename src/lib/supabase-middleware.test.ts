@@ -167,8 +167,9 @@ describe("updateSession", () => {
     });
 
     const { updateSession } = await import("./supabase-middleware");
-    await updateSession(request);
+    const response = await updateSession(request);
 
+    expect(response).toEqual(expect.objectContaining({ kind: "redirect" }));
     expect(mockRefs.redirect).toHaveBeenCalledTimes(1);
   });
 
