@@ -64,14 +64,21 @@ than SwiftUI — see the Decision Log in `T-261018-l19`.
 ## Checks
 
 ```sh
-just mobile-check     # lint, typecheck and unit tests
+just mobile-check     # lint, typecheck and unit tests (fails below 90% lines+branches)
 just test-unit-mobile # the unit tests alone
 ```
 
 `just check` does **not** cover this directory: the typecheck needs `mobile/node_modules`, which the
 repository's own install does not create. CI runs `mobile-check` inside `Quality Gates`, which
 `main protection` requires, whenever anything here changes — including a change to
-`supabase/db/database.types.ts`, since `@db` resolves onto it.
+`supabase/db/database.types.ts`, since `@db` resolves onto it. That is the standing coverage gate
+for the shipped native platform (iOS): `jest.coverageThreshold` in `package.json` is 90% of lines
+and of branches of `src/`. Policy detail: `docs/QUALITY.md` ("User-Interface Changes Ship On Every
+Platform"). Do not add tests only to pad that floor.
+
+**Android** is not shipped (`app.config.ts` has no `android` block). The coverage gate for Android
+applies when Android is first shipped — follow-up `T-261121-zwz` in the task registry
+(`T-261114-x7e`).
 
 Only the pure modules are unit-tested — the instance configuration, the day boundary, and the
 mapping from database rows to what a screen shows. Those hold the decisions; the screens lay the
