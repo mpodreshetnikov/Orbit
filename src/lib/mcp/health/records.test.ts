@@ -56,7 +56,7 @@ describe("searchMedicalRecords", () => {
     await searchMedicalRecords(stub.client, { query: "   ", limit: 20, offset: 0 });
 
     const [, params] = stub.rpc.mock.calls[0] as [string, Record<string, unknown>];
-    expect(params.search_query).toBeUndefined();
+    expect(params.search_query).toBe(undefined);
   });
 
   it("passes the query, person and type through", async () => {
@@ -86,7 +86,7 @@ describe("searchMedicalRecords", () => {
     await searchMedicalRecords(stub.client, { personId: "", limit: 20, offset: 0 });
 
     const [, params] = stub.rpc.mock.calls[0] as [string, Record<string, unknown>];
-    expect(params.p_person_id).toBeUndefined();
+    expect(params.p_person_id).toBe(undefined);
   });
 
   it("returns an empty list rather than null", async () => {
