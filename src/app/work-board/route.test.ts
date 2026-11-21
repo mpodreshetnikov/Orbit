@@ -60,14 +60,6 @@ describe("GET /work-board", () => {
     });
   });
 
-  it("passes null email when the session has no user", async () => {
-    getCurrentUserMock.mockResolvedValue(null);
-    resolveWorkBoardAccessMock.mockReturnValue("unauthenticated");
-    const { GET } = await import("./route");
-    await GET(new Request("http://0.0.0.0:3000/work-board"));
-    expect(resolveWorkBoardAccessMock).toHaveBeenCalledWith({ email: null });
-  });
-
   it("redirects other emails to the public access-denied origin", async () => {
     getCurrentUserMock.mockResolvedValue({ email: "other@example.com" });
     resolveWorkBoardAccessMock.mockReturnValue("forbidden");
@@ -83,6 +75,7 @@ describe("GET /work-board", () => {
     resolveWorkBoardAccessMock.mockReturnValue("unauthenticated");
     const { GET } = await import("./route");
     const response = await GET(new Request("http://0.0.0.0:3000/work-board"));
+    expect(resolveWorkBoardAccessMock).toHaveBeenCalledWith({ email: null });
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe(
       "https://privateorbit.space/login?redirect=%2Fwork-board",
@@ -126,7 +119,9 @@ describe("GET /work-board", () => {
     renderBoardHtmlMock.mockReturnValue("<html>ok</html>");
 
     const { GET } = await import("./route");
-    await GET(new Request("http://localhost/work-board?refresh=1"));
+    const refreshed = await GET(new Request("http://localhost/work-board?refresh=1"));
+    expect(refreshed.status).toBe(200);
+    expect(await refreshed.text()).toBe("<html>ok</html>");
     expect(clearWorkBoardCacheMock).toHaveBeenCalledTimes(1);
     expect(renderBoardHtmlMock).toHaveBeenCalledWith([], {
       generatedAt: "2026-11-21 12:00 UTC (local-dir, cache)",
@@ -135,7 +130,8 @@ describe("GET /work-board", () => {
     });
 
     clearWorkBoardCacheMock.mockClear();
-    await GET(new Request("http://localhost/work-board?refresh=0"));
+    const plain = await GET(new Request("http://localhost/work-board?refresh=0"));
+    expect(plain.status).toBe(200);
     expect(clearWorkBoardCacheMock).not.toHaveBeenCalled();
   });
 

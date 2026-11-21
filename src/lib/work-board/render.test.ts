@@ -180,7 +180,10 @@ Review description.
         blocked_reason: "should-not-render",
       }),
     ]);
-    expect(html).not.toContain("should-not-render");
+    const openSection = html.match(/data-column="open"[\s\S]*?<\/section>/)?.[0] ?? "";
+    expect(openSection).toMatch(/class="card-status"/);
+    expect(openSection).not.toMatch(/class="card-blocked"/);
+    expect(openSection.includes("should-not-render")).toBe(false);
   });
 
   it("sorts cards inside a column by id", () => {
