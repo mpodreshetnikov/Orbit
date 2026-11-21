@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-11-21T05:23:41.904Z",
-  "total": 261,
+  "generated_at": "2026-11-21T06:19:03.255Z",
+  "total": 255,
   "counts": {
     "browserExtension/src/core/content-bridge.test.ts::mock-call-only": 10,
     "browserExtension/src/core/import-runner.test.ts::mock-call-only": 2,
@@ -14,7 +14,6 @@
     "src/app/health/medications/page.test.tsx::mock-call-only": 1,
     "src/app/money/accounts/page.test.tsx::mock-call-only": 3,
     "src/app/money/categories/page.test.tsx::mock-call-only": 5,
-    "src/app/money/import/attention/page.test.tsx::lone-presence": 3,
     "src/app/money/import/attention/page.test.tsx::mock-call-only": 1,
     "src/app/money/page.test.tsx::mock-call-only": 1,
     "src/app/money/reports/page.test.tsx::mock-call-only": 1,
@@ -89,7 +88,6 @@
     "src/lib/mcp/tools/documents.test.ts::mock-call-only": 1,
     "src/lib/mcp/tools/medications.test.ts::lone-tocontain": 14,
     "src/lib/mcp/tools/medications.test.ts::mock-call-only": 4,
-    "src/lib/mcp/tools/money.test.ts::lone-tocontain": 3,
     "src/lib/mcp/tools/records.test.ts::mock-call-only": 2,
     "src/lib/medications/regenerate-dose-events.test.ts::mock-call-only": 3,
     "src/lib/observability/edge-function-fetch.test.ts::mock-call-only": 1,

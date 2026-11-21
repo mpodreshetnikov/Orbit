@@ -482,7 +482,17 @@ describe("list_money_transactions", () => {
       ctx,
     );
 
-    expect(result.content[0].text).toContain("offset 50 is past the end");
+    expect(result.content[0].text).toBe(
+      "12 transactions for Max (dates in Europe/Moscow), but offset 50 is past the end. " +
+        "Pass an offset below 12 — offset: 0 starts again from the first. The last row is at offset 11.",
+    );
+    expect(result.structuredContent).toMatchObject({
+      total: 12,
+      offset: 50,
+      has_more: false,
+      next_offset: null,
+      transactions: [],
+    });
   });
 
   it("offers the next offset while more rows remain", async () => {
@@ -619,7 +629,9 @@ describe("list_money_accounts and list_money_categories", () => {
 
     const result = await (await handlers()).get("list_money_accounts")!({}, ctx);
 
-    expect(result.content[0].text).toContain("Tinkoff Black (debit, RUB, tbank) id a-1");
+    expect(result.content[0].text).toBe(
+      "1 accounts for Max:\n- Tinkoff Black (debit, RUB, tbank) id a-1",
+    );
   });
 
   it("names each category's canonical key and hides archived ones by default", async () => {
@@ -724,7 +736,9 @@ describe("edges of the money tools", () => {
 
     const result = await (await handlers()).get("list_money_transactions")!(DEFAULTS, ctx);
 
-    expect(result.content[0].text).toContain("+500.00 RUB from unknown [uncategorized]");
+    expect(result.content[0].text).toMatch(
+      /^- 2026-10-28 \+500\.00 RUB from unknown \[uncategorized\] — T-Bank, Tinkoff Black$/m,
+    );
   });
 
   it("marks inactive accounts and can include archived categories", async () => {
