@@ -1,6 +1,7 @@
-// T-261116-rul slice 2: file-head disable removed. Only extractOperationsInPage stays under
-// disable-all (Function(fn.toString()) serialization). chrome.tabs helpers keep a narrow
-// justified band below; map/parse/enrichment + connector orchestration are under the gate.
+// T-261116-rul slice 2: file-head disable removed. Remaining disable-all bands:
+//   1) extractOperationsInPage — Function(fn.toString()) serialization for in-page dry-run
+//   2) getTabById / waitForTabLoad — chrome.tabs.get / onUpdated browser-runtime seams
+// prepareOperationsTab…runPageExtraction and map/parse/enrichment are under the gate.
 import { registerConnector } from "./registry.js";
 import { isPathUnder } from "../core/page-url.js";
 import { CLOCK_SKEW_ALLOWANCE_MS } from "../core/session-janitor.js";
@@ -162,9 +163,10 @@ export function estimateFullModeReceiptEnrichmentMs(receiptRequestCount: number)
     }
 
     while (
-      // Stryker disable next-line ConditionalExpression,EqualityOperator: empty-queue guard; NaN age compare is equivalent for return value
+      // Stryker disable next-line ConditionalExpression: empty queue → [0] is undefined; NaN age never drains
+      // Stryker disable next-line EqualityOperator: length >= 0 always; <= 0 matches empty-only
       requestStartedAtMs.length > 0 &&
-      // Stryker disable next-line ConditionalExpression,EqualityOperator,ArithmeticOperator: natural expiry matches cooldown path for return value
+      // Stryker disable next-line EqualityOperator: exact window boundary never hit with pause/buffer steps
       timelineMs - requestStartedAtMs[0]! >= FULL_RECEIPT_WINDOW_MS
     ) {
       requestStartedAtMs.shift();
@@ -177,9 +179,13 @@ export function estimateFullModeReceiptEnrichmentMs(receiptRequestCount: number)
       timelineMs = oldestStartedAtMs + FULL_RECEIPT_WINDOW_MS + FULL_RECEIPT_WINDOW_BUFFER_MS;
 
       while (
-        // Stryker disable next-line ConditionalExpression,EqualityOperator,LogicalOperator: post-cooldown drain; leftover vs cleared queue yields same timeline
+        // Stryker disable next-line ConditionalExpression: empty queue → undefined age; drain is a no-op either way
+        // Stryker disable next-line EqualityOperator: length >= 0 always; leftover vs cleared yields same timeline
+        // Stryker disable next-line LogicalOperator: after cooldown jump every queued start is expired
         requestStartedAtMs.length > 0 &&
-        // Stryker disable next-line ConditionalExpression,EqualityOperator,ArithmeticOperator: post-cooldown age check; equivalent for returned ms
+        // Stryker disable next-line ConditionalExpression: age compare false → no shift; same timeline
+        // Stryker disable next-line EqualityOperator: exact window boundary never hit after cooldown jump
+        // Stryker disable next-line ArithmeticOperator: + age is never >= window after cooldown jump
         timelineMs - requestStartedAtMs[0]! >= FULL_RECEIPT_WINDOW_MS
       ) {
         requestStartedAtMs.shift();
@@ -205,7 +211,8 @@ export function buildOperationRanges(
   while (cursorEnd >= windowFromMs) {
     const start = Math.max(windowFromMs, cursorEnd - chunkMs + 1);
     ranges.push({ start, end: cursorEnd });
-    // Stryker disable next-line ConditionalExpression,EqualityOperator: start===windowFrom still exits via cursorEnd=start-1
+    // Stryker disable next-line ConditionalExpression: skip-break still exits via cursorEnd=start-1 < windowFrom
+    // Stryker disable next-line EqualityOperator: start===windowFrom still exits via cursorEnd=start-1
     if (start <= windowFromMs) break;
     cursorEnd = start - 1;
   }
@@ -502,7 +509,6 @@ function isBankNativeBrandLabel(value: unknown): boolean {
   // Stryker disable next-line ConditionalExpression: empty text fails the regex below the same way
   if (!text) return false;
 
-  // Stryker disable next-line Regex: optional (овский)? group; both forms appear in the alternation already
   return /внутрибанковский перевод|внутрибанк(?:овский)? перевод|перевод 3-м лицам|перевод третьим лицам|между своими счетами|пополнение по номеру телефона|закрытие вклада|пополнение вклада|проценты на остаток|кэшбэк за обычные покупки|cashback payout|balance interest/.test(
     text,
   );
@@ -691,17 +697,10 @@ const connector: Connector = {
     }
 
     await emitProgress("parse_preparing_tab", 5);
-
-    // Stryker disable next-line ConditionalExpression,BlockStatement: prepareOperationsTab repeats the same T-Bank URL guard
-    if (!isTbankUrl(activeTab.url)) {
-      throw new Error(
-        "Active tab is not a T-Bank page. Open https://www.tbank.ru/ or https://www.tbank-online.com/ and try again.",
-      );
-    }
-
     await emitProgress("parse_loading_operations_page", 10);
+    // prepareOperationsTab may return chrome.tabs.get's tab without id after a load
+    // (getTabById forwards the runtime object as-is). Guard before executeScript.
     const readyTab = await prepareOperationsTab(activeTab);
-    // Stryker disable next-line ConditionalExpression: prepareOperationsTab preserves a numeric id from activeTab
     if (typeof readyTab.id !== "number") {
       throw new Error("No active tab. Open T-Bank in a tab first.");
     }
@@ -855,10 +854,6 @@ function detectBlockedReasonFromTabUrl(tabUrl: unknown): string | null {
   return detectBlockedReasonFromPageState(tabUrl, "");
 }
 
-// Stryker disable all: chrome.tabs / runtime messaging orchestration (prepare tab, retries,
-// page-extraction report listeners, deadlines). Covered via connector mocks in
-// tbank-web.test.ts; covered mutants are equivalent (listener timing, optional chrome
-// presence). Map/parse/enrichment stay outside this band (T-261116-rul slice 2 / ORB-169).
 async function prepareOperationsTab(tab: chrome.tabs.Tab): Promise<chrome.tabs.Tab> {
   if (typeof tab.id !== "number") {
     throw new Error("No active tab. Open T-Bank in a tab first.");
@@ -1141,7 +1136,6 @@ async function runPageExtraction(
     }
   }
 }
-// Stryker restore all
 
 /**
  * The page's own resource timeline holds whatever the page loaded, third-party requests
@@ -3089,6 +3083,11 @@ export const __test__ = {
   detectBlockedReasonFromTabUrl,
   estimateFullModeReceiptEnrichmentMs,
   extractOperationsInPage,
+  prepareOperationsTab,
+  extractOperationsWithRetry,
+  runPageExtraction,
+  resolveExtractionDeadlineMs,
+  isPageExtractionStart,
   findLatestResourceUrlByPath,
   mapOperationRecordToRow,
   mapOperationRecordToRowWithReason,
