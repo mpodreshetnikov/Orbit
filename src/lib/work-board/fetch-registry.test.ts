@@ -54,7 +54,7 @@ describe("getWorkBoardGithubToken", () => {
     expect(getWorkBoardGithubToken()).toBeNull();
     process.env.ORBIT_TASKS_GITHUB_TOKEN = " ghp_test ";
     expect(getWorkBoardGithubToken()).toBe("ghp_test");
-    expect(getWorkBoardGithubToken({ ORBIT_TASKS_GITHUB_TOKEN: "x" })).toBe("x");
+    expect(getWorkBoardGithubToken({ ...process.env, ORBIT_TASKS_GITHUB_TOKEN: "x" })).toBe("x");
   });
 });
 
@@ -295,7 +295,7 @@ describe("loadWorkBoardCards", () => {
     writeFileSync(join(dir, "T-999901-pad.md"), taskBody("T-999901-pad", "Pad"));
     const result = await loadWorkBoardCards({
       nowMs: Date.UTC(2026, 0, 5, 3, 4), // month is 0-based → January
-      env: { ORBIT_WORK_BOARD_TASKS_DIR: dir },
+      env: { ...process.env, ORBIT_WORK_BOARD_TASKS_DIR: dir },
     });
     expect(result.source).toBe("local-dir");
     expect(result.generatedAt).toBe("2026-01-05 03:04 UTC");

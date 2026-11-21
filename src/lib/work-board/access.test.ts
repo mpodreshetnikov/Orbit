@@ -38,8 +38,8 @@ describe("isWorkBoardEnabled", () => {
   });
 
   it("reads the env object passed in", () => {
-    expect(isWorkBoardEnabled({ ORBIT_WORK_BOARD_ENABLED: "yes" })).toBe(true);
-    expect(isWorkBoardEnabled({ ORBIT_WORK_BOARD_ENABLED: "no" })).toBe(false);
+    expect(isWorkBoardEnabled({ ...process.env, ORBIT_WORK_BOARD_ENABLED: "yes" })).toBe(true);
+    expect(isWorkBoardEnabled({ ...process.env, ORBIT_WORK_BOARD_ENABLED: "no" })).toBe(false);
   });
 });
 
@@ -72,7 +72,7 @@ describe("resolveWorkBoardAccess", () => {
     expect(
       resolveWorkBoardAccess({
         email: WORK_BOARD_ALLOWED_EMAIL,
-        env: { ORBIT_WORK_BOARD_ENABLED: "on" },
+        env: { ...process.env, ORBIT_WORK_BOARD_ENABLED: "on" },
       }),
     ).toBe("allow");
   });
