@@ -42,6 +42,9 @@ describe("TreeView", () => {
     expect(onSelectChange).toHaveBeenCalledWith(
       expect.objectContaining({ id: "child-1", name: "Child" }),
     );
+    // Expanding a collapsed parent may re-select it before the leaf click lands.
+    expect(onSelectChange.mock.calls.at(-1)?.[0]?.id).toBe("child-1");
+    expect(screen.getByText("Child")).toBeInTheDocument();
   });
 
   it("calls onDocumentDrag when dragging onto a different item", () => {
@@ -62,6 +65,9 @@ describe("TreeView", () => {
       expect.objectContaining({ id: "child-1" }),
       expect.objectContaining({ id: "parent-1" }),
     );
+    expect(onDocumentDrag.mock.calls.map((call) => [call[0]?.id, call[1]?.id])).toEqual([
+      ["child-1", "parent-1"],
+    ]);
   });
 
   it("renders via custom renderItem callback", () => {

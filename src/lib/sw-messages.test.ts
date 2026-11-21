@@ -22,8 +22,8 @@ describe("notifySwMedicationIntakeResolved", () => {
       value: { controller: null, postMessage },
     });
 
-    notifySwMedicationIntakeResolved([]);
-    notifySwMedicationIntakeResolved(["dose-1"]);
+    expect(notifySwMedicationIntakeResolved([])).toBe(undefined);
+    expect(notifySwMedicationIntakeResolved(["dose-1"])).toBe(undefined);
 
     expect(postMessage).not.toHaveBeenCalled();
   });
@@ -39,7 +39,7 @@ describe("notifySwMedicationIntakeResolved", () => {
       value: { controller: { postMessage } },
     });
 
-    notifySwMedicationIntakeResolved(["dose-1", "dose-2"]);
+    expect(notifySwMedicationIntakeResolved(["dose-1", "dose-2"])).toBe(undefined);
 
     expect(postMessage).toHaveBeenCalledWith({
       type: "medicationIntakeResolved",

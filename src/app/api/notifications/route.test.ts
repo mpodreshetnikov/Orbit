@@ -161,7 +161,7 @@ describe("GET /api/notifications", () => {
     });
 
     const { GET } = await import("./route");
-    await GET(
+    const response = await GET(
       new Request(
         "http://localhost/api/notifications?from=2026-01-01T00:00:00.000Z&to=2026-01-02T00:00:00.000Z",
         {
@@ -170,6 +170,8 @@ describe("GET /api/notifications", () => {
       ),
     );
 
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ notifications: [] });
     expect(gte).toHaveBeenCalledWith("scheduled_at", "2026-01-01T00:00:00.000Z");
     expect(lte).toHaveBeenCalledWith("scheduled_at", "2026-01-02T00:00:00.000Z");
   });
@@ -185,13 +187,17 @@ describe("GET /api/notifications", () => {
       });
 
       const { GET } = await import("./route");
-      await GET(new Request("http://localhost/api/notifications", { method: "GET" }));
+      const response = await GET(
+        new Request("http://localhost/api/notifications", { method: "GET" }),
+      );
 
       const expectedStart = new Date(now);
       expectedStart.setHours(0, 0, 0, 0);
       const expectedEnd = new Date(now);
       expectedEnd.setDate(expectedEnd.getDate() + 1);
 
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({ notifications: [] });
       expect(gte).toHaveBeenCalledWith("scheduled_at", expectedStart.toISOString());
       expect(lte).toHaveBeenCalledWith("scheduled_at", expectedEnd.toISOString());
     } finally {

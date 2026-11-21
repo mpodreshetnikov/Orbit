@@ -56,11 +56,14 @@ describe("SelfTransferAliases", () => {
     fireEvent.click(screen.getByRole("button", { name: /common.add/ }));
     expect(toastMock.error).toHaveBeenCalledWith("money.reportAliasValidation");
     expect(hookMocks.createAlias).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("money.reportSelfAliases")).toHaveValue("");
 
     hookMocks.createAlias.mockRejectedValue(new Error("duplicate"));
     fireEvent.change(screen.getByLabelText("money.reportSelfAliases"), { target: { value: "X" } });
     fireEvent.click(screen.getByRole("button", { name: /common.add/ }));
     await waitFor(() => expect(toastMock.error).toHaveBeenCalledWith("duplicate"));
+    // Failed save leaves the draft so the owner can fix and retry.
+    expect(screen.getByLabelText("money.reportSelfAliases")).toHaveValue("X");
   });
 
   it("deletes an alias, and says so when that fails", async () => {
@@ -68,12 +71,15 @@ describe("SelfTransferAliases", () => {
     fireEvent.click(screen.getByRole("button", { name: "common.delete Макс П" }));
     await waitFor(() => expect(hookMocks.deleteAlias).toHaveBeenCalledWith("alias-1"));
     expect(toastMock.success).toHaveBeenCalledWith("money.reportAliasDeleted");
+    // Mocked list is unchanged until refetch; the row is still shown after a successful call.
+    expect(screen.getByText("Макс П")).toBeInTheDocument();
 
     hookMocks.deleteAlias.mockRejectedValue("nope");
     fireEvent.click(screen.getByRole("button", { name: "common.delete Макс П" }));
     await waitFor(() =>
       expect(toastMock.error).toHaveBeenCalledWith("money.reportAliasDeleteFailed"),
     );
+    expect(screen.getByText("Макс П")).toBeInTheDocument();
   });
 
   it("says when there are none", () => {
