@@ -215,6 +215,7 @@ describe("MoneyRulesPage", () => {
       });
     });
     expect(confirmSpy).toHaveBeenCalledWith("money.ruleDeleteConfirm");
+    expect(screen.getByText("money.rules")).toBeInTheDocument();
     confirmSpy.mockRestore();
   });
 
