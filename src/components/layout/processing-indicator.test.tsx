@@ -87,6 +87,6 @@ describe("ProcessingIndicator", () => {
 
     const dismissButtons = screen.getAllByRole("button");
     await userEvent.setup().click(dismissButtons[dismissButtons.length - 1]);
-    expect(useProcessingQueueStore.getState().jobs["job-1"]).toBeUndefined();
+    expect(useProcessingQueueStore.getState().jobs["job-1"]).toBe(undefined);
   });
 });

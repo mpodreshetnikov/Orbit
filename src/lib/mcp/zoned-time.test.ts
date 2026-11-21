@@ -56,7 +56,7 @@ describe("formatZoned", () => {
   });
 
   it("never renders the UTC clock as if it were local", () => {
-    expect(formatZoned("2026-08-24T15:00:00+00:00", BANGKOK)).not.toContain("15:00");
+    expect(formatZoned("2026-08-24T15:00:00+00:00", BANGKOK).includes("15:00")).toBe(false);
   });
 
   it("shows the raw value rather than nothing when it cannot be parsed", () => {
