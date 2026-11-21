@@ -3,7 +3,7 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
-import { Search, X, FileText, Plus, FileStack, Loader2 } from "lucide-react";
+import { Search, X, FileText, FileStack, CircleSlash } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -25,7 +25,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { RecordCard } from "./record-card";
+import { RecordCard } from "./record-card-view";
 import {
   useMedicalRecords,
   useSoftDeleteRecord,
@@ -194,15 +194,10 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
 
   return (
     <div className="space-y-4 min-w-0 overflow-x-hidden">
-      {/* Header with Add button */}
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-2xl font-bold tracking-tight truncate min-w-0">
           {t("health.title")} — {personName}
         </h1>
-        <Button onClick={() => router.push("/health/records/new")} className="shrink-0">
-          <Plus className="mr-2 h-4 w-4" />
-          {t("health.addRecord")}
-        </Button>
       </div>
 
       {/* Status filter tabs */}
@@ -241,8 +236,8 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
             processingCount > 0 && statusFilter !== "processing" && "text-primary",
           )}
         >
-          <Loader2 className={cn("h-4 w-4", processingCount > 0 && "animate-spin")} />
-          {t("records.statusFilter.processing")}
+          <CircleSlash className="h-4 w-4" />
+          {t("records.statusFilter.notProcessed")}
           {processingCount > 0 && (
             <Badge variant="secondary" className="h-5 px-1.5 text-xs">
               {processingCount}
@@ -394,7 +389,7 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
           {statusFilter === "draft" ? (
             <FileStack className="h-12 w-12 text-muted-foreground/50" />
           ) : statusFilter === "processing" ? (
-            <Loader2 className="h-12 w-12 text-muted-foreground/50" />
+            <CircleSlash className="h-12 w-12 text-muted-foreground/50" />
           ) : (
             <FileText className="h-12 w-12 text-muted-foreground/50" />
           )}
@@ -403,7 +398,7 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
               ? statusFilter === "draft"
                 ? t("records.noDrafts")
                 : statusFilter === "processing"
-                  ? t("records.noProcessing")
+                  ? t("records.noNotProcessed")
                   : t("common.noResults")
               : t("health.noRecords")}
           </h3>
@@ -412,22 +407,10 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
               ? statusFilter === "draft"
                 ? t("records.noDraftsDescription")
                 : statusFilter === "processing"
-                  ? t("records.noProcessingDescription")
+                  ? t("records.noNotProcessedDescription")
                   : t("common.noResults")
-              : t("health.noRecordsDescription")}
+              : t("health.noRecordsViaAssistant")}
           </p>
-          {!hasActiveFilters && (
-            <Button className="mt-4" onClick={() => router.push("/health/records/new")}>
-              <Plus className="mr-2 h-4 w-4" />
-              {t("health.addRecord")}
-            </Button>
-          )}
-          {statusFilter === "draft" && (
-            <Button className="mt-4" onClick={() => router.push("/health/records/new")}>
-              <Plus className="mr-2 h-4 w-4" />
-              {t("health.addRecord")}
-            </Button>
-          )}
         </div>
       )}
 

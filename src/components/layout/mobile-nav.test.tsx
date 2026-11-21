@@ -123,6 +123,8 @@ describe("MobileNav", () => {
     await fireEvent.click(screen.getByRole("button", { name: "nav.medication" }));
     expect(screen.getByText("nav.regularMedication")).toBeInTheDocument();
     expect(screen.getByText("nav.oneTimeMedication")).toBeInTheDocument();
+    expect(screen.queryByText("nav.medicalRecord")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "nav.medicalRecord" })).not.toBeInTheDocument();
 
     await fireEvent.click(screen.getByRole("button", { name: "nav.regularMedication" }));
     expect(navMocks.router.push).toHaveBeenCalledWith("/health/medications/new?kind=regular");

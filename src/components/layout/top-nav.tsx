@@ -7,7 +7,6 @@ import {
   ChevronDown,
   Settings,
   Plus,
-  FileText,
   Ruler,
   Pill,
   Smartphone,
@@ -122,12 +121,6 @@ export function TopNav() {
                     </>
                   ) : (
                     <>
-                      <DropdownMenuItem asChild>
-                        <Link href="/health/records/new" className="flex items-center gap-2">
-                          <FileText className="h-4 w-4" />
-                          {t("nav.medicalRecord")}
-                        </Link>
-                      </DropdownMenuItem>
                       <DropdownMenuItem
                         onClick={() => setMeasurementDialogOpen(true)}
                         className="flex items-center gap-2"

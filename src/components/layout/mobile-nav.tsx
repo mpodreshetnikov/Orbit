@@ -233,14 +233,6 @@ export function MobileNav() {
                   </>
                 ) : (
                   <>
-                    <DropdownMenuItem asChild>
-                      <Link href="/health/records/new" className="flex items-center gap-3 py-2">
-                        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-100 dark:bg-violet-900/30">
-                          <FileText className="h-4 w-4 text-violet-600 dark:text-violet-400" />
-                        </div>
-                        <span className="font-medium">{t("nav.medicalRecord")}</span>
-                      </Link>
-                    </DropdownMenuItem>
                     <DropdownMenuItem
                       onClick={() => setMeasurementDialogOpen(true)}
                       className="flex items-center gap-3 py-2"

@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MedicalRecordListItem } from "@/types";
-import { RecordsList } from "./records-list";
+import { RecordsList } from "./records-list-view";
 
 const hookMocks = vi.hoisted(() => ({
   useMedicalRecords: vi.fn(),
@@ -45,7 +45,7 @@ vi.mock("@/hooks", () => ({
   useUpdateMedicalRecord: (...args: unknown[]) => hookMocks.useUpdateMedicalRecord(...args),
 }));
 
-vi.mock("./record-card", () => ({
+vi.mock("./record-card-view", () => ({
   RecordCard: ({
     record,
     onView,
@@ -196,7 +196,7 @@ describe("RecordsList", () => {
 
     expect(screen.getByRole("heading", { name: /health.title/i })).toBeInTheDocument();
     expect(screen.getByText("records.statusFilter.active")).toBeInTheDocument();
-    expect(screen.getByText("records.statusFilter.processing")).toBeInTheDocument();
+    expect(screen.getByText("records.statusFilter.notProcessed")).toBeInTheDocument();
   });
 
   it("renders error state when records request fails", () => {
@@ -271,15 +271,12 @@ describe("RecordsList", () => {
     expect(routerMock.replace).toHaveBeenCalledWith("/health/records");
   });
 
-  it("renders active empty state and routes to create page", async () => {
+  it("renders active empty state without an upload CTA", () => {
     setupMedicalRecords({ active: [], draft: [], processing: [] });
     render(<RecordsList personId="person-1" personName="Alex" />);
-    const user = userEvent.setup();
 
     expect(screen.getByText("health.noRecords")).toBeInTheDocument();
-    const addButtons = screen.getAllByRole("button", { name: "health.addRecord" });
-    await user.click(addButtons[0]);
-
-    expect(routerMock.push).toHaveBeenCalledWith("/health/records/new");
+    expect(screen.getByText("health.noRecordsViaAssistant")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "health.addRecord" })).not.toBeInTheDocument();
   });
 });
