@@ -28,7 +28,7 @@ describe("extension classic script bundling", () => {
   });
 
   it("bundles the in-page widget through the esbuild API with browser settings", async () => {
-    await buildClassicScriptBundles({ extensionDir, distDir });
+    await expect(buildClassicScriptBundles({ extensionDir, distDir })).resolves.toBeUndefined();
 
     expect(buildMock).toHaveBeenCalledWith({
       bundle: true,
@@ -41,7 +41,7 @@ describe("extension classic script bundling", () => {
   });
 
   it("bundles the content script the same way", async () => {
-    await buildClassicScriptBundles({ extensionDir, distDir });
+    await expect(buildClassicScriptBundles({ extensionDir, distDir })).resolves.toBeUndefined();
 
     // Without this the content script ships as tsc's module output, whose top-level import is a
     // syntax error in a classic script -- so it never runs and the app cannot see the extension.
@@ -56,7 +56,13 @@ describe("extension classic script bundling", () => {
   });
 
   it("builds every declared classic script and nothing else", async () => {
-    await buildClassicScriptBundles({ extensionDir, distDir });
+    await expect(buildClassicScriptBundles({ extensionDir, distDir })).resolves.toBeUndefined();
+    const outfiles = buildMock.mock.calls
+      .map((call) => (call[0] as { outfile: string }).outfile)
+      .toSorted();
+    expect(outfiles).toEqual(
+      EXTENSION_CLASSIC_SCRIPTS.map((script) => path.join(distDir, script.outfile)).toSorted(),
+    );
     expect(buildMock).toHaveBeenCalledTimes(EXTENSION_CLASSIC_SCRIPTS.length);
   });
 });
