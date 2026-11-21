@@ -175,21 +175,21 @@ export default function MoneyReportsScreen() {
           />
         }
       >
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{
-            flexDirection: "row",
-            flexWrap: "nowrap",
-            alignItems: "center",
-            gap: space.sm,
-          }}
-        >
-          <Segmented
-            options={PERIOD_KINDS.map(([kind, key]) => [kind, t(key)])}
-            value={period.kind}
-            onChange={choosePeriod}
-          />
+        <View style={{ gap: space.sm }}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ flexDirection: "row", flexWrap: "nowrap", gap: space.sm }}
+          >
+            <Segmented
+              options={PERIOD_KINDS.filter(([kind]) => kind !== "custom").map(([kind, key]) => [
+                kind,
+                t(key),
+              ])}
+              value={period.kind === "custom" ? "month" : period.kind}
+              onChange={choosePeriod}
+            />
+          </ScrollView>
           <View
             style={{
               flexDirection: "row",
@@ -211,7 +211,12 @@ export default function MoneyReportsScreen() {
             >
               <Icon icon={ChevronLeft} size={20} tone="foreground" />
             </Pressable>
-            <Text weight="semibold" size="sm" numberOfLines={1}>
+            <Text
+              weight="semibold"
+              size="sm"
+              numberOfLines={1}
+              style={{ flex: 1, textAlign: "center" }}
+            >
               {capitalized(periodLabel(period, LOCALE))}
             </Text>
             <Pressable
@@ -222,8 +227,13 @@ export default function MoneyReportsScreen() {
             >
               <Icon icon={ChevronRight} size={20} tone="foreground" />
             </Pressable>
+            <Chip
+              label={t("money.spendingPeriodCustom")}
+              selected={period.kind === "custom"}
+              onPress={() => choosePeriod("custom")}
+            />
           </View>
-        </ScrollView>
+        </View>
         {period.kind === "custom" ? (
           <View style={{ flexDirection: "row", gap: space.md }}>
             <Field label={t("money.spendingCustomFrom")}>
@@ -601,14 +611,16 @@ function Totals({ report }: { report: SpendingReport }) {
             {`${card.key === "net" && card.value > 0 ? "+" : ""}${money(card.value)}`}
           </Text>
           {card.forecast !== undefined && end ? (
-            <Text size="xs" tone="mutedForeground" numberOfLines={1} testID={card.testId}>
-              {t("money.spendingForecastLine", {
-                date: end,
-                amount:
-                  card.key === "net" && card.forecast > 0
-                    ? `+${money(card.forecast)}`
-                    : money(card.forecast),
-              })}
+            <Text size="xs" tone="mutedForeground" testID={card.testId}>
+              <Text size="xs" tone="mutedForeground">
+                {t("money.spendingForecastLineLabel", { date: end })}{" "}
+              </Text>
+              <Text size="xs" tone="mutedForeground">
+                ≈
+                {card.key === "net" && card.forecast > 0
+                  ? `+${money(card.forecast)}`
+                  : money(card.forecast)}
+              </Text>
             </Text>
           ) : null}
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4 }}>

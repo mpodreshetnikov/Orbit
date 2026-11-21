@@ -905,6 +905,7 @@
     "spendingForecastIncome": "Income forecast for {date}",
     "spendingForecastNet": "Net forecast for {date}",
     "spendingForecastLine": "Forecast for {date}: ≈{amount}",
+    "spendingForecastLineLabel": "Forecast for {date}:",
     "spendingForecastDaysLeft": "{days, plural, one {# day left} other {# days left}}",
     "spendingForecastHint": "From your pace on these weekdays over 12 weeks.",
     "spendingChangeNew": "new",

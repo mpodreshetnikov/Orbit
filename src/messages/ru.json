@@ -905,6 +905,7 @@
     "spendingForecastIncome": "Прогноз доходов на {date}",
     "spendingForecastNet": "Прогноз итога на {date}",
     "spendingForecastLine": "Прогноз на {date}: ≈{amount}",
+    "spendingForecastLineLabel": "Прогноз на {date}:",
     "spendingForecastDaysLeft": "{days, plural, one {остался # день} few {осталось # дня} many {осталось # дней} other {осталось # дня}}",
     "spendingForecastHint": "По вашему темпу в эти дни недели за 12 недель.",
     "spendingChangeNew": "новое",

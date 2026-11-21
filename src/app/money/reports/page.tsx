@@ -196,10 +196,57 @@ function PeriodControls({
     </Popover>
   );
 
-  // One nowrap strip: kind chips, then compact ‹ month › + «Период…» (phone must not wrap mid-word).
+  const monthAndCustom = (
+    <div className="flex w-full min-w-0 flex-nowrap items-center gap-1 overflow-x-auto rounded-lg border bg-background p-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8 shrink-0"
+        aria-label={t("money.spendingPrevious")}
+        onClick={() => onChange(shiftPeriod(period, -1))}
+      >
+        <ChevronLeft className="h-4 w-4" />
+      </Button>
+      <span className="min-w-0 flex-1 whitespace-nowrap text-center text-sm font-semibold first-letter:uppercase">
+        {periodLabel(period, locale)}
+      </span>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8 shrink-0"
+        aria-label={t("money.spendingNext")}
+        onClick={() => onChange(shiftPeriod(period, 1))}
+      >
+        <ChevronRight className="h-4 w-4" />
+      </Button>
+      <div
+        className={cn(
+          "ml-0.5 flex shrink-0 rounded-md",
+          period.kind === "custom" ? "bg-muted" : undefined,
+        )}
+      >
+        {customPopover}
+      </div>
+    </div>
+  );
+
+  // Phone: chips on one row; ‹ month › + «Период…» on their own nowrap row (Lead).
+  // Desktop: chips and month+custom share one strip like before.
   return (
-    <div className="flex min-w-0 flex-nowrap items-center gap-2 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-      <div role="group" className="flex shrink-0 rounded-lg bg-muted p-1">
+    <div
+      className={cn(
+        "flex min-w-0 gap-2",
+        // Detect phone via viewport class from parent flex-col — PeriodControls itself stays
+        // responsive with max-md stacking so ‹ month › + Период… never fight the chips for width.
+        "max-md:flex-col md:flex-nowrap md:items-center md:overflow-x-auto md:[-ms-overflow-style:none] md:[scrollbar-width:none] md:[&::-webkit-scrollbar]:hidden",
+      )}
+    >
+      <div
+        role="group"
+        className="flex w-full shrink-0 overflow-x-auto rounded-lg bg-muted p-1 md:w-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
         {chipKinds.map((kind) => (
           <button
             key={kind}
@@ -217,39 +264,7 @@ function PeriodControls({
           </button>
         ))}
       </div>
-      <div className="flex shrink-0 flex-nowrap items-center gap-1 rounded-lg border bg-background p-0.5">
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 shrink-0"
-          aria-label={t("money.spendingPrevious")}
-          onClick={() => onChange(shiftPeriod(period, -1))}
-        >
-          <ChevronLeft className="h-4 w-4" />
-        </Button>
-        <span className="whitespace-nowrap px-0.5 text-center text-sm font-semibold first-letter:uppercase">
-          {periodLabel(period, locale)}
-        </span>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 shrink-0"
-          aria-label={t("money.spendingNext")}
-          onClick={() => onChange(shiftPeriod(period, 1))}
-        >
-          <ChevronRight className="h-4 w-4" />
-        </Button>
-        <div
-          className={cn(
-            "ml-0.5 flex shrink-0 rounded-md",
-            period.kind === "custom" ? "bg-muted" : undefined,
-          )}
-        >
-          {customPopover}
-        </div>
-      </div>
+      {monthAndCustom}
     </div>
   );
 }
@@ -326,13 +341,28 @@ function ForecastLine({
   hint,
   testId,
   t,
+  compact,
 }: {
   date: string;
   amount: string;
   hint: string;
   testId: string;
   t: Translate;
+  /** Phone cards: allow a soft wrap between label and amount, never mid-token. */
+  compact?: boolean;
 }) {
+  if (compact) {
+    return (
+      <p
+        data-testid={testId}
+        title={hint}
+        className="text-[10px] leading-tight text-muted-foreground"
+      >
+        <span className="whitespace-nowrap">{t("money.spendingForecastLineLabel", { date })}</span>{" "}
+        <span className="whitespace-nowrap tabular-nums">≈{amount}</span>
+      </p>
+    );
+  }
   return (
     <p
       data-testid={testId}
@@ -450,6 +480,7 @@ function TotalCards({
                   hint={forecastHint}
                   testId={card.forecastTestId}
                   t={t}
+                  compact={isMobile}
                 />
               ) : null}
               <div className={cn("flex flex-wrap", isMobile ? "gap-1" : "gap-1.5")}>
