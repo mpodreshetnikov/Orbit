@@ -91,11 +91,10 @@ describe("run-deploy phase plan", () => {
       "zero_damaged_pages",
     ];
 
-    for (const setting of SESSION_SETTINGS) {
-      for (const parameter of SUPERUSER_ONLY) {
-        expect(setting, `${parameter} cannot be set by the deploy role`).not.toContain(parameter);
-      }
-    }
+    const forbidden = SUPERUSER_ONLY.filter((parameter) =>
+      SESSION_SETTINGS.some((setting) => setting.includes(parameter)),
+    );
+    expect(forbidden).toEqual([]);
   });
 
   it("stamps the version last, so a failed phase cannot leave the log claiming this sha", () => {
@@ -191,11 +190,13 @@ describe("run-deploy failure report", () => {
   });
 
   it("always says the database is not at this sha, whatever the phase", () => {
-    for (const [phaseIndex, phase] of PHASES.entries()) {
-      expect(report({ phase, phaseIndex, applied: [], failedUnit: phase.file })).toContain(
-        `The database is NOT at ${GIT_SHA}`,
-      );
-    }
+    const missing = PHASES.filter(
+      (phase, phaseIndex) =>
+        !report({ phase, phaseIndex, applied: [], failedUnit: phase.file }).includes(
+          `The database is NOT at ${GIT_SHA}. The version stamp did not run,`,
+        ),
+    ).map((phase) => phase.file);
+    expect(missing).toEqual([]);
   });
 });
 
