@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-11-21T03:04:37.248Z",
-  "total": 289,
+  "generated_at": "2026-11-21T03:16:27.571Z",
+  "total": 287,
   "counts": {
     "browserExtension/popup-src/helpers.test.ts::lone-tocontain": 2,
     "browserExtension/src/core/content-bridge.test.ts::mock-call-only": 10,
@@ -9,8 +9,6 @@
     "browserExtension/src/core/keepalive.test.ts::mock-call-only": 2,
     "browserExtension/src/core/self-update.test.ts::mock-call-only": 3,
     "browserExtension/src/source-page-widget.test.ts::mock-call-only": 1,
-    "native/ios/xcode-project.test.ts::lone-tocontain": 1,
-    "scripts/money-categorization-eval/cassette.test.ts::lone-presence": 1,
     "src/app/api/mcp/route.test.ts::mock-call-only": 1,
     "src/app/api/notifications/route.test.ts::mock-call-only": 2,
     "src/app/health/checkups/[id]/edit/page.test.tsx::lone-presence": 1,

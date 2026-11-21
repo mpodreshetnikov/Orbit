@@ -43,8 +43,11 @@ describe("generated Xcode project", () => {
 
   it("shows the product name under the icon", () => {
     const infoPlist = compactXml(readProjectFile("App/App/Info.plist"));
+    const displayName = /<key>CFBundleDisplayName<\/key><string>([^<]*)<\/string>/.exec(
+      infoPlist,
+    )?.[1];
 
-    expect(infoPlist).toContain(`<key>CFBundleDisplayName</key><string>${IOS_APP_NAME}</string>`);
+    expect(displayName).toBe(IOS_APP_NAME);
   });
 
   it("ships the shared scheme xcodebuild needs to build it anywhere but a developer's Xcode", () => {
