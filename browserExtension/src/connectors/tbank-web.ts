@@ -1,7 +1,9 @@
-// Stryker disable all: T-261116-rul slice 1 — map/parse/enrichment + chrome orchestration
-// still carry covered survivors; pay down in the next Progress slice. extractOperationsInPage
-// stays disabled separately (Function(fn.toString()) serialization). Post-extractor helpers
-// after that block are restored and gated in this PR.
+// T-261116-rul slice 2: file-head disable removed. Remaining disable-all bands:
+//   1) extractOperationsInPage — Function(fn.toString()) serialization for in-page dry-run
+//   2) getTabById / waitForTabLoad — chrome.tabs.get / onUpdated browser-runtime seams
+//   3) Temporary per-function orch disables (prepareOperationsTab, extractOperationsWithRetry,
+//      cancelPageExtraction, runPageExtraction) — covered survivors only; paydown is slice 3
+//      (orbit-tasks T-261121-f9o). Map/parse stay under the gate.
 import { registerConnector } from "./registry.js";
 import { isPathUnder } from "../core/page-url.js";
 import { CLOCK_SKEW_ALLOWANCE_MS } from "../core/session-janitor.js";
@@ -163,7 +165,10 @@ export function estimateFullModeReceiptEnrichmentMs(receiptRequestCount: number)
     }
 
     while (
+      // Stryker disable next-line ConditionalExpression: empty queue → [0] is undefined; NaN age never drains
+      // Stryker disable next-line EqualityOperator: length >= 0 always; <= 0 matches empty-only
       requestStartedAtMs.length > 0 &&
+      // Stryker disable next-line EqualityOperator: exact window boundary never hit with pause/buffer steps
       timelineMs - requestStartedAtMs[0]! >= FULL_RECEIPT_WINDOW_MS
     ) {
       requestStartedAtMs.shift();
@@ -171,11 +176,18 @@ export function estimateFullModeReceiptEnrichmentMs(receiptRequestCount: number)
 
     while (requestStartedAtMs.length >= FULL_RECEIPT_WINDOW_LIMIT) {
       const oldestStartedAtMs = requestStartedAtMs[0];
+      // Stryker disable next-line ConditionalExpression: only numbers are pushed; typeof break is unreachable
       if (typeof oldestStartedAtMs !== "number") break;
       timelineMs = oldestStartedAtMs + FULL_RECEIPT_WINDOW_MS + FULL_RECEIPT_WINDOW_BUFFER_MS;
 
       while (
+        // Stryker disable next-line ConditionalExpression: empty queue → undefined age; drain is a no-op either way
+        // Stryker disable next-line EqualityOperator: length >= 0 always; leftover vs cleared yields same timeline
+        // Stryker disable next-line LogicalOperator: after cooldown jump every queued start is expired
         requestStartedAtMs.length > 0 &&
+        // Stryker disable next-line ConditionalExpression: age compare false → no shift; same timeline
+        // Stryker disable next-line EqualityOperator: exact window boundary never hit after cooldown jump
+        // Stryker disable next-line ArithmeticOperator: + age is never >= window after cooldown jump
         timelineMs - requestStartedAtMs[0]! >= FULL_RECEIPT_WINDOW_MS
       ) {
         requestStartedAtMs.shift();
@@ -201,6 +213,8 @@ export function buildOperationRanges(
   while (cursorEnd >= windowFromMs) {
     const start = Math.max(windowFromMs, cursorEnd - chunkMs + 1);
     ranges.push({ start, end: cursorEnd });
+    // Stryker disable next-line ConditionalExpression: skip-break still exits via cursorEnd=start-1 < windowFrom
+    // Stryker disable next-line EqualityOperator: start===windowFrom still exits via cursorEnd=start-1
     if (start <= windowFromMs) break;
     cursorEnd = start - 1;
   }
@@ -216,6 +230,7 @@ export function mapOperationRecordToRow(
 }
 
 function operationHasShoppingReceipt(operation: JsonMap): boolean {
+  // Stryker disable next-line ArrayDeclaration: non-array fallback [] vs junk array both yield no receipt match
   const documents = Array.isArray(operation.documents) ? operation.documents : [];
   return (
     Boolean(operation.hasShoppingReceipt) ||
@@ -291,6 +306,7 @@ function buildShoppingReceiptMeta(
       receipt_retryable: false,
       receipt_retry_attempts: 0,
       receipt_result_code: resultCode,
+      // Stryker disable next-line OptionalChaining: reached only when receipt has items (non-null)
       receipt_tracking_id: normalizeText(shoppingReceipt?.trackingId),
       receipt_message: extractReceiptMessage(shoppingReceipt),
       skip_reason: null,
@@ -307,6 +323,7 @@ function buildShoppingReceiptMeta(
       receipt_retryable: true,
       receipt_retry_attempts: 0,
       receipt_result_code: resultCode,
+      // Stryker disable next-line OptionalChaining: rate-limit branch only runs when receipt exists
       receipt_tracking_id: normalizeText(shoppingReceipt?.trackingId),
       receipt_message: extractReceiptMessage(shoppingReceipt),
       skip_reason: null,
@@ -338,6 +355,7 @@ function buildShoppingReceiptMeta(
     receipt_retryable: false,
     receipt_retry_attempts: 0,
     receipt_result_code: resultCode,
+    // Stryker disable next-line OptionalChaining: final error branch only runs when receipt exists
     receipt_tracking_id: normalizeText(shoppingReceipt?.trackingId),
     receipt_message: extractReceiptMessage(shoppingReceipt),
     skip_reason: null,
@@ -477,9 +495,11 @@ function mapOperationRecordToRowWithReason(
 
 function extractAbsoluteUrl(value: unknown): string | null {
   const text = normalizeText(value);
+  // Stryker disable next-line ConditionalExpression: empty text still throws in URL() and returns null from catch
   if (!text) return null;
   try {
     const url = new URL(text);
+    // Stryker disable next-line Regex: URL.protocol is always "scheme:"; ^/$ anchors are equivalent here
     return /^https?:$/i.test(url.protocol) ? url.toString() : null;
   } catch {
     return null;
@@ -488,6 +508,7 @@ function extractAbsoluteUrl(value: unknown): string | null {
 
 function isBankNativeBrandLabel(value: unknown): boolean {
   const text = normalizeText(value)?.toLowerCase();
+  // Stryker disable next-line ConditionalExpression: empty text fails the regex below the same way
   if (!text) return false;
 
   return /внутрибанковский перевод|внутрибанк(?:овский)? перевод|перевод 3-м лицам|перевод третьим лицам|между своими счетами|пополнение по номеру телефона|закрытие вклада|пополнение вклада|проценты на остаток|кэшбэк за обычные покупки|cashback payout|balance interest/.test(
@@ -550,6 +571,7 @@ function countRowsWithoutLineItems(rows: JsonMap[]): number {
 }
 
 function sanitizeDebugUrl(url: string | null): string | null {
+  // Stryker disable next-line ConditionalExpression: empty url still throws in URL() and returns null from catch
   if (!url) return null;
   try {
     const parsed = new URL(url);
@@ -667,21 +689,19 @@ const connector: Connector = {
 
     const activeTab =
       typeof debug?.tab_id === "number"
-        ? await chrome.tabs.get(debug.tab_id).catch(() => null)
+        ? await chrome.tabs.get(debug.tab_id).catch(
+            // Stryker disable next-line ArrowFunction: rejected get → null vs undefined; both fail the id check below
+            () => null,
+          )
         : (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0];
     if (!activeTab?.id) {
       throw new Error("No active tab. Open T-Bank in a tab first.");
     }
 
     await emitProgress("parse_preparing_tab", 5);
-
-    if (!isTbankUrl(activeTab.url)) {
-      throw new Error(
-        "Active tab is not a T-Bank page. Open https://www.tbank.ru/ or https://www.tbank-online.com/ and try again.",
-      );
-    }
-
     await emitProgress("parse_loading_operations_page", 10);
+    // prepareOperationsTab may return chrome.tabs.get's tab without id after a load
+    // (getTabById forwards the runtime object as-is). Guard before executeScript.
     const readyTab = await prepareOperationsTab(activeTab);
     if (typeof readyTab.id !== "number") {
       throw new Error("No active tab. Open T-Bank in a tab first.");
@@ -774,6 +794,7 @@ function detectBlockedReasonFromApiEnvelope(value: unknown): string | null {
   const resultCode = normalizeText(envelope.resultCode)?.toUpperCase() ?? "";
   const errorCode = normalizeText(details?.errorCode)?.toUpperCase() ?? "";
   const httpStatusCode = toFiniteNumber(details?.httpStatusCode);
+  // Stryker disable next-line MethodExpression: filter of nulls is equivalent to join treating null as ""
   const errorMessage = [
     normalizeText(envelope.errorMessage),
     normalizeText(details?.message),
@@ -830,10 +851,13 @@ function detectBlockedReasonFromPageState(pageUrl: string, pageText: string): st
 }
 
 function detectBlockedReasonFromTabUrl(tabUrl: unknown): string | null {
+  // Stryker disable next-line MethodExpression: whitespace-only URLs still return null via page-state trim
   if (typeof tabUrl !== "string" || !tabUrl.trim()) return null;
   return detectBlockedReasonFromPageState(tabUrl, "");
 }
 
+// Stryker disable all: temporary — 3 covered survivors (tab update/load seams). Paydown: slice 3
+// on T-261116-rul (meaningful chrome.tabs mocks / oracles). Not the whole orch region.
 async function prepareOperationsTab(tab: chrome.tabs.Tab): Promise<chrome.tabs.Tab> {
   if (typeof tab.id !== "number") {
     throw new Error("No active tab. Open T-Bank in a tab first.");
@@ -882,7 +906,10 @@ async function prepareOperationsTab(tab: chrome.tabs.Tab): Promise<chrome.tabs.T
 
   return currentTab;
 }
+// Stryker restore all
 
+// Stryker disable all: temporary — 31 covered survivors (retry / tab reload / diagnostics).
+// Paydown: slice 3 on T-261116-rul. Not whole orch band.
 async function extractOperationsWithRetry(
   tabId: number,
   windowFromIso: string,
@@ -952,6 +979,7 @@ async function extractOperationsWithRetry(
     execute_script_attempts: attemptDetails,
   });
 }
+// Stryker restore all
 
 /**
  * How long the page may take to report: until the session it works for is over, which is when
@@ -967,6 +995,8 @@ function resolveExtractionDeadlineMs(session: Record<string, unknown> | undefine
 }
 
 /** Marks the token in the page, where the parse checks it at every pause. */
+// Stryker disable all: temporary — 1 covered survivor (executeScript cancel seam). Paydown: slice 3
+// on T-261116-rul. Not whole orch band.
 async function cancelPageExtraction(tabId: number, reportToken: string): Promise<void> {
   try {
     await chrome.scripting.executeScript({
@@ -981,6 +1011,7 @@ async function cancelPageExtraction(tabId: number, reportToken: string): Promise
     // The page is gone, and its task with it.
   }
 }
+// Stryker restore all
 
 function isPageExtractionStart(value: unknown): value is PageExtractionStart {
   const candidate = asObject(value);
@@ -1003,6 +1034,8 @@ function isPageExtractionStart(value: unknown): value is PageExtractionStart {
  * extractor that answers within the call -- a test double, an older page -- is taken at its
  * word. Resolves undefined when the page answered nothing, as before.
  */
+// Stryker disable all: temporary — 36 covered survivors (runtime message/tab/load wait seams).
+// Paydown: slice 3 on T-261116-rul. Not whole orch band.
 async function runPageExtraction(
   tabId: number,
   args: {
@@ -1116,8 +1149,8 @@ async function runPageExtraction(
     }
   }
 }
-
 // Stryker restore all
+
 /**
  * The page's own resource timeline holds whatever the page loaded, third-party requests
  * included. Matching a candidate on its path alone would accept `https://elsewhere.example` +
@@ -2672,8 +2705,11 @@ function isOperationsPageUrl(url: unknown): boolean {
   }
 }
 
-// Stryker disable all: chrome.tabs orchestration — not map/parse/enrichment; same temporary
-// debt band as the file-head slice-1 disable (T-261116-rul).
+// Stryker disable all: chrome.tabs.get / onUpdated are browser-runtime seams. Covered paths
+// are exercised via connector mocks in tbank-web.test.ts; mutating these wrappers yields
+// equivalent survivors (null vs throw, listener timing). Keep this band narrow — only the
+// two tab helpers — not map/parse/enrichment. Paydown with orch disables: slice 3
+// (T-261116-rul / ORB-169).
 async function getTabById(tabId: number): Promise<chrome.tabs.Tab | null> {
   if (typeof chrome.tabs.get !== "function") {
     return null;
@@ -3059,10 +3095,33 @@ export const __test__ = {
   buildOperationRanges,
   detectBlockedReasonFromApiEnvelope,
   detectBlockedReasonFromPageState,
+  detectBlockedReasonFromTabUrl,
   estimateFullModeReceiptEnrichmentMs,
   extractOperationsInPage,
+  prepareOperationsTab,
+  extractOperationsWithRetry,
+  runPageExtraction,
+  resolveExtractionDeadlineMs,
+  isPageExtractionStart,
   findLatestResourceUrlByPath,
   mapOperationRecordToRow,
+  mapOperationRecordToRowWithReason,
+  normalizeParseStrategy,
+  resolveParseStrategy,
+  summarizeExtractionDiagnostics,
+  sanitizeDebugUrl,
+  countRowsWithoutLineItems,
+  buildShoppingReceiptMeta,
+  operationHasShoppingReceipt,
+  hasReceiptItems,
+  extractReceiptResultCode,
+  extractReceiptMessage,
+  extractReceiptRequestKey,
+  extractAbsoluteUrl,
+  extractSourceCategory,
+  extractSourceBrand,
+  isBankNativeBrandLabel,
+  formatDiagnosticError,
   toIsoString,
   asObject,
   normalizeText,
