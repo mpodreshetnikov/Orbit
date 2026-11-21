@@ -1,9 +1,9 @@
 BEGIN;
-SELECT plan(29);
+SELECT plan(30);
 
 SELECT ok(
   to_regprocedure(
-    'public.money_list_transactions_feed(uuid,text,uuid[],public.money_transaction_type[],public.money_transaction_status[],uuid[],text,text,timestamp with time zone,timestamp with time zone,integer,integer,numeric,numeric,boolean)'
+    'public.money_list_transactions_feed(uuid,text,uuid[],public.money_transaction_type[],public.money_transaction_status[],uuid[],text,text,timestamp with time zone,timestamp with time zone,integer,integer,numeric,numeric,boolean,boolean)'
   ) IS NOT NULL,
   'money_list_transactions_feed exists'
 );
@@ -102,7 +102,8 @@ INSERT INTO public.money_transactions (
   comment,
   source_comment,
   is_transfer,
-  dedupe_hash
+  dedupe_hash,
+  raw_payload
 )
 VALUES
   (
@@ -122,7 +123,8 @@ VALUES
     'Morning coffee',
     'Barista note',
     false,
-    'feed-hash-1'
+    'feed-hash-1',
+    jsonb_build_object('operation', jsonb_build_object('mccString', '5814'))
   ),
   (
     '73000000-0000-0000-0000-000000000402',
@@ -141,7 +143,8 @@ VALUES
     'Weekly groceries',
     'Bulk produce',
     false,
-    'feed-hash-2'
+    'feed-hash-2',
+    jsonb_build_object('operation', jsonb_build_object('mcc', '5411'))
   ),
   (
     '73000000-0000-0000-0000-000000000403',
@@ -160,7 +163,8 @@ VALUES
     'March salary',
     'Salary source memo',
     false,
-    'feed-hash-3'
+    'feed-hash-3',
+    NULL
   ),
   (
     '73000000-0000-0000-0000-000000000404',
@@ -179,7 +183,8 @@ VALUES
     'Personal transfer',
     'Internal transfer memo',
     true,
-    'feed-hash-4'
+    'feed-hash-4',
+    NULL
   );
 
 INSERT INTO public.money_line_items (
@@ -765,11 +770,11 @@ SELECT is(
   'summary counts line items with no category under the uncategorized category'
 );
 
--- Compact MCP page: keep line_item_count / category_ids / raw_payload (counterparty/MCC),
--- drop full line jsonb.
+-- Compact MCP page: keep line_item_count / category_ids / mcc, drop line jsonb and raw_payload.
 SELECT ok(
   (
     SELECT bool_and(line_items = '[]'::jsonb)
+      AND bool_and(raw_payload IS NULL)
       AND bool_or(line_item_count > 0)
     FROM public.money_list_transactions_feed(
       '73000000-0000-0000-0000-000000000010'::uuid,
@@ -786,10 +791,38 @@ SELECT ok(
       10,
       NULL,
       NULL,
+      false,
       false
     )
   ),
-  'p_include_line_items=false omits line jsonb but keeps counts'
+  'p_include_line_items=false omits line jsonb and raw_payload but keeps counts'
+);
+
+SELECT is(
+  (
+    SELECT mcc
+    FROM public.money_list_transactions_feed(
+      '73000000-0000-0000-0000-000000000010'::uuid,
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+      'all',
+      'all',
+      NULL,
+      NULL,
+      0,
+      10,
+      NULL,
+      NULL,
+      false,
+      false
+    )
+    WHERE id = '73000000-0000-0000-0000-000000000401'
+  ),
+  '5814',
+  'compact page still projects MCC without returning raw_payload'
 );
 
 UPDATE public.money_line_items

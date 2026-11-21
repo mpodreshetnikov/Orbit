@@ -92,6 +92,10 @@ describe("POST /api/mcp", () => {
       expect(challenge).toBeTruthy();
       expect(challenge).toContain("Bearer");
       expect(challenge).toContain("/.well-known/oauth-protected-resource/api/mcp");
+      const timing = response.headers.get("Server-Timing");
+      expect(timing).toMatch(/auth;dur=\d/);
+      expect(timing).toMatch(/mcp;dur=\d/);
+      expect(timing).toMatch(/total;dur=\d/);
     });
 
     it.each([
@@ -134,6 +138,37 @@ describe("POST /api/mcp", () => {
         id: 1,
         result: { serverInfo: { name: "orbit-health" } },
       });
+      const timing = response.headers.get("Server-Timing") ?? "";
+      expect(timing).toMatch(/auth;dur=\d/);
+      expect(timing).toMatch(/total;dur=\d/);
+    });
+
+    it("answers probe_ping with Server-Timing under 300ms in-process", async () => {
+      const response = await callMcp(
+        {
+          jsonrpc: "2.0",
+          id: 9,
+          method: "tools/call",
+          params: { name: "probe_ping", arguments: {} },
+        },
+        { token: "access-1", headers: { "mcp-protocol-version": "2025-06-18" } },
+      );
+      expect(response.status).toBe(200);
+      const timing = response.headers.get("Server-Timing") ?? "";
+      const auth = Number(/auth;dur=([\d.]+)/.exec(timing)?.[1] ?? NaN);
+      const mcp = Number(/mcp;dur=([\d.]+)/.exec(timing)?.[1] ?? NaN);
+      const total = Number(/total;dur=([\d.]+)/.exec(timing)?.[1] ?? NaN);
+      expect(auth).toBeGreaterThanOrEqual(0);
+      expect(mcp).toBeGreaterThan(0);
+      expect(total).toBeGreaterThan(auth);
+      expect(total).toBeLessThan(300);
+      // mcp bucket is total−auth; must not collapse to 0 or exceed total.
+      expect(mcp).toBeLessThanOrEqual(total + 0.1);
+      expect(Math.abs(mcp - (total - auth))).toBeLessThan(0.15);
+      const message = await readJsonRpc(response);
+      expect(message).toMatchObject({
+        result: { structuredContent: { pong: true } },
+      });
     });
 
     it("lists the Health tools", async () => {
@@ -161,7 +196,8 @@ describe("POST /api/mcp", () => {
     });
 
     it("stamps activity without blocking the request", async () => {
-      await callMcp(INITIALIZE, { token: "access-1" });
+      const response = await callMcp(INITIALIZE, { token: "access-1" });
+      expect(response.status).toBe(200);
       expect(store.touchGrant).toHaveBeenCalledWith("grant-1");
     });
   });
