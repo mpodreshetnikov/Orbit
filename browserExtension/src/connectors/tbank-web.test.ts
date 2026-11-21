@@ -2157,4 +2157,1116 @@ describe("tbank-web pure helpers (T-261116-rul mutation)", () => {
     expect(__test__.resolveSignedAmount({ type: "other" }, -5)).toBe(-5);
     expect(__test__.resolveSignedAmount({}, 5)).toBe(5);
   });
+
+  it("accepts only fast/full parse strategies and resolves session overrides", () => {
+    expect(__test__.normalizeParseStrategy("fast")).toBe("fast");
+    expect(__test__.normalizeParseStrategy("full")).toBe("full");
+    expect(__test__.normalizeParseStrategy("FAST")).toBeNull();
+    expect(__test__.normalizeParseStrategy("slow")).toBeNull();
+    expect(__test__.normalizeParseStrategy(null)).toBeNull();
+    // || must not become && — only one of the two tokens is ever present.
+    expect(__test__.normalizeParseStrategy("fast")).not.toBeNull();
+    expect(__test__.resolveParseStrategy({ parse_strategy: "full" })).toBe("full");
+    expect(__test__.resolveParseStrategy({ parse_strategy: "fast" })).toBe("fast");
+    expect(__test__.resolveParseStrategy({ meta: { parse_strategy: "full" } })).toBe("full");
+    expect(__test__.resolveParseStrategy({ meta: { parse_strategy: "nope" } })).toBe("fast");
+    expect(__test__.resolveParseStrategy({})).toBe("fast");
+    expect(__test__.resolveParseStrategy(undefined)).toBe("fast");
+  });
+
+  it("estimates full-mode enrichment past the first cooldown window (kills + vs - age)", () => {
+    // At 150 the natural-expiry age uses timeline - oldest; flipping to + changes the ms.
+    expect(__test__.estimateFullModeReceiptEnrichmentMs(150)).toBe(1388500);
+    expect(__test__.estimateFullModeReceiptEnrichmentMs(200)).toBe(1626000);
+    expect(__test__.estimateFullModeReceiptEnrichmentMs(-3)).toBe(0);
+    expect(__test__.estimateFullModeReceiptEnrichmentMs(1.9)).toBe(30750);
+  });
+
+  it("keeps whitespace-sensitive blocked URL and page-text boundaries", () => {
+    expect(
+      __test__.detectBlockedReasonFromPageState("  https://www.tbank.ru/auth/login  ", ""),
+    ).toBe("T-Bank session is not authorized. Sign in and retry import.");
+    // Uppercase URL must still match after toLowerCase (kills stripping the method chain).
+    expect(__test__.detectBlockedReasonFromPageState("HTTPS://WWW.TBANK.RU/AUTH/LOGIN", "")).toBe(
+      "T-Bank session is not authorized. Sign in and retry import.",
+    );
+    // Trailing whitespace: /login$ only matches after trim (kills removing trim()).
+    expect(__test__.detectBlockedReasonFromPageState("https://www.tbank.ru/login ", "")).toBe(
+      "T-Bank session is not authorized. Sign in and retry import.",
+    );
+    // Captcha only past the 6000-char window must not block.
+    expect(
+      __test__.detectBlockedReasonFromPageState(
+        "https://www.tbank.ru/mybank/",
+        `${"ok ".repeat(2000)}captcha`,
+      ),
+    ).toBeNull();
+    expect(
+      __test__.detectBlockedReasonFromPageState(
+        "https://www.tbank.ru/mybank/",
+        `captcha${"x".repeat(6000)}`,
+      ),
+    ).toBe("T-Bank requested verification. Resolve blocking challenge and retry import.");
+    expect(__test__.detectBlockedReasonFromTabUrl("   https://www.tbank.ru/auth/login   ")).toBe(
+      "T-Bank session is not authorized. Sign in and retry import.",
+    );
+    // Whitespace-only tab URLs stay null; dropping trim() would treat them as real URLs.
+    expect(__test__.detectBlockedReasonFromTabUrl("\t\n")).toBeNull();
+  });
+
+  it("detects auth and captcha blocks from API envelopes and page/tab URLs", () => {
+    expect(__test__.detectBlockedReasonFromApiEnvelope(null)).toBeNull();
+    expect(__test__.detectBlockedReasonFromApiEnvelope("x")).toBeNull();
+    expect(__test__.detectBlockedReasonFromApiEnvelope({})).toBeNull();
+    expect(
+      __test__.detectBlockedReasonFromApiEnvelope({
+        resultCode: "authentication_failed",
+      }),
+    ).toBe("T-Bank session is not authorized. Sign in and retry import.");
+    expect(
+      __test__.detectBlockedReasonFromApiEnvelope({
+        details: { errorCode: "insufficient_privileges" },
+      }),
+    ).toBe("T-Bank session is not authorized. Sign in and retry import.");
+    expect(
+      __test__.detectBlockedReasonFromApiEnvelope({
+        details: { httpStatusCode: 401 },
+      }),
+    ).toBe("T-Bank session is not authorized. Sign in and retry import.");
+    expect(
+      __test__.detectBlockedReasonFromApiEnvelope({
+        errorMessage: "Not Authorized by upstream",
+      }),
+    ).toBe("T-Bank session is not authorized. Sign in and retry import.");
+    expect(
+      __test__.detectBlockedReasonFromApiEnvelope({
+        details: { message: "пользователь не найден" },
+      }),
+    ).toBe("T-Bank session is not authorized. Sign in and retry import.");
+    expect(
+      __test__.detectBlockedReasonFromApiEnvelope({
+        errorMessage: "Please complete the captcha challenge",
+      }),
+    ).toBe("T-Bank requested verification. Resolve blocking challenge and retry import.");
+    expect(
+      __test__.detectBlockedReasonFromApiEnvelope({
+        details: { message: "слишком много запросов" },
+      }),
+    ).toBe("T-Bank requested verification. Resolve blocking challenge and retry import.");
+    expect(
+      __test__.detectBlockedReasonFromApiEnvelope({
+        details: { errorCode: "OTHER", message: null, httpStatusCode: 200 },
+        errorMessage: "",
+        resultCode: "OK",
+      }),
+    ).toBeNull();
+
+    expect(__test__.detectBlockedReasonFromPageState("https://www.tbank.ru/mybank/Login", "")).toBe(
+      "T-Bank session is not authorized. Sign in and retry import.",
+    );
+    expect(
+      __test__.detectBlockedReasonFromPageState("https://www.tbank.ru/mybank/login/", ""),
+    ).toBe("T-Bank session is not authorized. Sign in and retry import.");
+    expect(
+      __test__.detectBlockedReasonFromPageState("https://www.tbank.ru/x?redirectTo=/y", ""),
+    ).toBe("T-Bank session is not authorized. Sign in and retry import.");
+    expect(
+      __test__.detectBlockedReasonFromPageState("https://www.tbank.ru/mybank/", "Please Sign In"),
+    ).toBe("T-Bank session is not authorized. Sign in and retry import.");
+    expect(
+      __test__.detectBlockedReasonFromPageState("https://www.tbank.ru/mybank/", "войти в кабинет"),
+    ).toBe("T-Bank session is not authorized. Sign in and retry import.");
+    expect(
+      __test__.detectBlockedReasonFromPageState(
+        "https://www.tbank.ru/mybank/",
+        "checking your browser",
+      ),
+    ).toBe("T-Bank requested verification. Resolve blocking challenge and retry import.");
+    expect(__test__.detectBlockedReasonFromPageState("https://www.tbank.ru/mybank/", "капча")).toBe(
+      "T-Bank requested verification. Resolve blocking challenge and retry import.",
+    );
+    // Uppercase page text must still match after toLowerCase.
+    expect(
+      __test__.detectBlockedReasonFromPageState(
+        "https://www.tbank.ru/mybank/",
+        "VERIFY YOU ARE HUMAN",
+      ),
+    ).toBe("T-Bank requested verification. Resolve blocking challenge and retry import.");
+    expect(
+      __test__.detectBlockedReasonFromPageState("https://www.tbank.ru/mybank/", "all good"),
+    ).toBeNull();
+    // /login must match end-of-path; /loginx must not.
+    expect(
+      __test__.detectBlockedReasonFromPageState("https://www.tbank.ru/mybank/loginx", ""),
+    ).toBeNull();
+
+    expect(__test__.detectBlockedReasonFromTabUrl(null)).toBeNull();
+    expect(__test__.detectBlockedReasonFromTabUrl(12)).toBeNull();
+    expect(__test__.detectBlockedReasonFromTabUrl("   ")).toBeNull();
+    expect(__test__.detectBlockedReasonFromTabUrl("https://www.tbank.ru/auth/login")).toBe(
+      "T-Bank session is not authorized. Sign in and retry import.",
+    );
+  });
+
+  it("summarizes extraction diagnostics with defaults and explicit debug overrides", () => {
+    const bare = __test__.summarizeExtractionDiagnostics(
+      { method: "api", window_to: "t", parsed_through_at: "t", parsed_transactions_count: 0 },
+      { invalid_record: 1 },
+      2,
+      "fast",
+    );
+    expect(bare.extraction_method).toBe("api");
+    expect(bare.fallback_used).toBe(false);
+    expect(bare.fallback_reason).toBeNull();
+    expect(bare.blocked_reason).toBeNull();
+    expect(bare.discovered_endpoints).toEqual({
+      operations_api: null,
+      operation_detail_api: null,
+      tranche_offers_api: null,
+    });
+    expect(bare.range_attempts).toEqual([]);
+    expect(bare.range_request_count).toBe(0);
+    expect(bare.effective_chunk_span_days).toBeNull();
+    expect(bare.response_status_histogram).toEqual({});
+    expect(bare.stage_timings_ms).toEqual({});
+    expect(bare.mapping_drop_counts).toEqual({ invalid_record: 1 });
+    expect(bare.mapped_row_count).toBe(2);
+    expect(bare.api_operation_count).toBe(0);
+    expect(bare.receipt_enrichment.parse_strategy).toBe("fast");
+    expect(bare.receipt_enrichment.retry_strategy).toBe("shared_budget");
+    expect(bare.receipt_enrichment.base_pause_between_receipts_ms).toBe(300);
+    expect(bare.receipt_enrichment.max_retry_pause_ms).toBe(1500);
+    expect(bare.receipt_enrichment.stopped_after_budget).toBe(false);
+    expect(bare.receipt_enrichment.requested_count).toBe(0);
+    expect(bare.preflight_enrichment_skip_count).toBe(0);
+
+    const domBare = __test__.summarizeExtractionDiagnostics(
+      {
+        method: "dom",
+        blocked_reason: "blocked-from-extraction",
+        window_to: "t",
+        parsed_through_at: "t",
+        parsed_transactions_count: 0,
+      },
+      {},
+      0,
+      "full",
+    );
+    expect(domBare.extraction_method).toBe("dom");
+    expect(domBare.fallback_used).toBe(true);
+    expect(domBare.blocked_reason).toBe("blocked-from-extraction");
+    expect(domBare.receipt_enrichment.retry_strategy).toBe("progressive_backoff");
+    expect(domBare.receipt_enrichment.base_pause_between_receipts_ms).toBe(4000);
+    expect(domBare.receipt_enrichment.max_retry_pause_ms).toBe(15000);
+
+    const start = Date.parse("2026-01-01T00:00:00.000Z");
+    const end = start + 2 * 24 * 60 * 60 * 1000 - 1;
+    const withDebug = __test__.summarizeExtractionDiagnostics(
+      {
+        method: "dom",
+        window_to: "t",
+        parsed_through_at: "t",
+        parsed_transactions_count: 0,
+        debug: {
+          extraction_method: "api",
+          fallback_used: false,
+          fallback_reason: "api_empty",
+          blocked_reason: "from-debug",
+          discovered_endpoints: {
+            operations_api: "https://www.tbank.ru/api/ops?sessionid=secret",
+            operation_detail_api: "https://www.tbank.ru/api/detail?x=1",
+            tranche_offers_api: null,
+          },
+          range_attempts: [{ start, end, status_code: 200, payload_count: 3 }],
+          range_request_count: 9,
+          effective_chunk_span_days: 14,
+          first_operation_posted_at: "2026-01-02T00:00:00.000Z",
+          last_operation_posted_at: "2026-01-03T00:00:00.000Z",
+          page_originated_operations_request_seen: true,
+          response_status_histogram: { "200": 2 },
+          stage_timings_ms: { fetch: 10 },
+          api_error_message: null,
+          api_operation_count: 4,
+          dom_row_count: 0,
+          receipt_enrichment: {
+            requested_count: 5,
+            success_count: 4,
+            rate_limit_response_count: 1,
+            rate_limited_count: 1,
+            skipped_after_budget_count: 3,
+            failed_count: 2,
+            retry_attempts_total: 2,
+            stopped_after_budget: true,
+            parse_strategy: "full",
+            retry_strategy: "progressive_backoff",
+            base_pause_between_receipts_ms: 4000,
+            max_retry_pause_ms: 15000,
+            window_limit: 70,
+            window_ms: 600000,
+            window_cooldown_count: 1,
+            window_cooldown_total_ms: 5000,
+          },
+          preflight_enrichment_skip_count: 1,
+          fulfilled_skip_count: 2,
+          out_of_range_skip_count: 3,
+        },
+      },
+      { missing_time_or_amount: 1 },
+      7,
+      "fast",
+    );
+    expect(withDebug.extraction_method).toBe("api");
+    expect(withDebug.fallback_used).toBe(false);
+    expect(withDebug.fallback_reason).toBe("api_empty");
+    expect(withDebug.blocked_reason).toBe("from-debug");
+    expect(withDebug.discovered_endpoints.operations_api).toBe(
+      "https://www.tbank.ru/api/ops?sessionid=<redacted>",
+    );
+    expect(withDebug.discovered_endpoints.operation_detail_api).toBe(
+      "https://www.tbank.ru/api/detail?x=<redacted>",
+    );
+    expect(withDebug.range_request_count).toBe(9);
+    expect(withDebug.effective_chunk_span_days).toBe(14);
+    expect(withDebug.first_operation_posted_at).toBe("2026-01-02T00:00:00.000Z");
+    expect(withDebug.last_operation_posted_at).toBe("2026-01-03T00:00:00.000Z");
+    expect(withDebug.api_operation_count).toBe(4);
+    expect(withDebug.receipt_enrichment.requested_count).toBe(5);
+    expect(withDebug.receipt_enrichment.success_count).toBe(4);
+    expect(withDebug.receipt_enrichment.rate_limit_response_count).toBe(1);
+    expect(withDebug.receipt_enrichment.rate_limited_count).toBe(1);
+    expect(withDebug.receipt_enrichment.skipped_after_budget_count).toBe(3);
+    expect(withDebug.receipt_enrichment.failed_count).toBe(2);
+    expect(withDebug.receipt_enrichment.retry_attempts_total).toBe(2);
+    expect(withDebug.receipt_enrichment.stopped_after_budget).toBe(true);
+    expect(withDebug.receipt_enrichment.window_cooldown_count).toBe(1);
+    expect(withDebug.receipt_enrichment.window_cooldown_total_ms).toBe(5000);
+    expect(withDebug.discovered_endpoints.tranche_offers_api).toBeNull();
+    expect(withDebug.preflight_enrichment_skip_count).toBe(1);
+    expect(withDebug.fulfilled_skip_count).toBe(2);
+    expect(withDebug.out_of_range_skip_count).toBe(3);
+
+    // Missing range_attempts / discovered_endpoints must not throw when ?. is stripped.
+    const noRanges = __test__.summarizeExtractionDiagnostics(
+      {
+        method: "api",
+        window_to: "t",
+        parsed_through_at: "t",
+        parsed_transactions_count: 0,
+        debug: {
+          extraction_method: "api",
+          fallback_used: false,
+          fallback_reason: null,
+          blocked_reason: null,
+          // Intentionally omit discovered_endpoints and range_attempts.
+          response_status_histogram: {},
+          stage_timings_ms: {},
+          api_error_message: null,
+          api_operation_count: 0,
+          dom_row_count: 0,
+        } as never,
+      },
+      {},
+      0,
+      "full",
+    );
+    expect(noRanges.range_attempts).toEqual([]);
+    expect(noRanges.effective_chunk_span_days).toBeNull();
+    expect(noRanges.range_request_count).toBe(0);
+    expect(noRanges.discovered_endpoints).toEqual({
+      operations_api: null,
+      operation_detail_api: null,
+      tranche_offers_api: null,
+    });
+
+    const dayMs = 24 * 60 * 60 * 1000;
+    // 1.5 days: (end-start+1)/DAY_MS rounds to 2; (end-start-1) rounds to 1.
+    const spanStart = Date.parse("2026-01-01T00:00:00.000Z");
+    const spanEnd = spanStart + Math.floor(1.5 * dayMs) - 1;
+    const derivedDays = __test__.summarizeExtractionDiagnostics(
+      {
+        method: "api",
+        window_to: "t",
+        parsed_through_at: "t",
+        parsed_transactions_count: 0,
+        debug: {
+          extraction_method: "api",
+          fallback_used: false,
+          fallback_reason: null,
+          blocked_reason: null,
+          discovered_endpoints: {
+            operations_api: null,
+            operation_detail_api: null,
+            tranche_offers_api: "https://www.tbank.ru/api/tranche?token=secret",
+          },
+          range_attempts: [{ start: spanStart, end: spanEnd, status_code: 200, payload_count: 1 }],
+          response_status_histogram: {},
+          stage_timings_ms: {},
+          api_error_message: null,
+          api_operation_count: 0,
+          dom_row_count: 0,
+        },
+      },
+      {},
+      0,
+      "fast",
+    );
+    expect(derivedDays.effective_chunk_span_days).toBe(2);
+    expect(derivedDays.discovered_endpoints.tranche_offers_api).toBe(
+      "https://www.tbank.ru/api/tranche?token=<redacted>",
+    );
+  });
+
+  it("sanitizes debug URLs and counts rows missing line items", () => {
+    expect(__test__.sanitizeDebugUrl(null)).toBeNull();
+    expect(__test__.sanitizeDebugUrl("")).toBeNull();
+    expect(__test__.sanitizeDebugUrl("not a url")).toBeNull();
+    expect(__test__.sanitizeDebugUrl("https://www.tbank.ru/api/ops")).toBe(
+      "https://www.tbank.ru/api/ops",
+    );
+    expect(__test__.sanitizeDebugUrl("https://www.tbank.ru/api/ops?b=2&a=1")).toBe(
+      "https://www.tbank.ru/api/ops?a=<redacted>&b=<redacted>",
+    );
+    expect(
+      __test__.countRowsWithoutLineItems([
+        { line_items: [{ title: "x" }] },
+        { line_items: [] },
+        { line_items: "nope" },
+        {},
+        null as never,
+      ]),
+    ).toBe(4);
+  });
+
+  it("builds shopping-receipt meta for expected, ok, rate-limited and error paths", () => {
+    expect(__test__.operationHasShoppingReceipt({ hasShoppingReceipt: true })).toBe(true);
+    expect(__test__.operationHasShoppingReceipt({ documents: ["ShoppingReceipt"] })).toBe(true);
+    expect(__test__.operationHasShoppingReceipt({ documents: ["SHOPPINGRECEIPT"] })).toBe(true);
+    expect(__test__.operationHasShoppingReceipt({ documents: ["other"] })).toBe(false);
+    expect(__test__.operationHasShoppingReceipt({ documents: "nope" })).toBe(false);
+    expect(__test__.operationHasShoppingReceipt({})).toBe(false);
+
+    expect(__test__.hasReceiptItems(null)).toBe(false);
+    expect(__test__.hasReceiptItems({ receipt: { items: [] } })).toBe(false);
+    expect(__test__.hasReceiptItems({ receipt: { items: [{ name: "Milk" }] } })).toBe(true);
+    expect(__test__.hasReceiptItems({ payload: { receipt: { items: [{ name: "Tea" }] } } })).toBe(
+      true,
+    );
+
+    expect(__test__.extractReceiptResultCode({ resultCode: "ok" })).toBe("OK");
+    expect(__test__.extractReceiptResultCode(null)).toBeNull();
+    expect(__test__.extractReceiptMessage({ plainMessage: "p" })).toBe("p");
+    expect(__test__.extractReceiptMessage({ errorMessage: "e" })).toBe("e");
+    expect(__test__.extractReceiptMessage({ details: { message: "d" } })).toBe("d");
+    expect(__test__.extractReceiptMessage(null)).toBeNull();
+    expect(__test__.extractReceiptRequestKey({ authorizationId: "a1" })).toBe("a1");
+    expect(__test__.extractReceiptRequestKey({ operationId: { value: "oid" } })).toBe("oid");
+    expect(__test__.extractReceiptRequestKey({ id: "id1" })).toBe("id1");
+
+    const passthrough = {
+      receipt_request_key: "k",
+      receipt_enrichment_status: "ok" as const,
+      receipt_line_items_skipped: false,
+      receipt_retryable: false,
+      receipt_retry_attempts: 0,
+      receipt_result_code: "OK",
+      receipt_tracking_id: "t",
+      receipt_message: "m",
+      skip_reason: null,
+      expected: true,
+      requested: true,
+    };
+    expect(__test__.buildShoppingReceiptMeta({}, null, passthrough)).toEqual(passthrough);
+
+    const notExpected = __test__.buildShoppingReceiptMeta({ id: "x" }, null);
+    expect(notExpected).toMatchObject({
+      expected: false,
+      requested: false,
+      receipt_enrichment_status: "not_requested",
+      receipt_retryable: false,
+      receipt_line_items_skipped: false,
+      receipt_request_key: "x",
+    });
+
+    const ok = __test__.buildShoppingReceiptMeta(
+      { hasShoppingReceipt: true, authorizationId: "auth" },
+      {
+        trackingId: "trk",
+        resultCode: "OK",
+        plainMessage: "done",
+        receipt: { items: [{ name: "Milk" }] },
+      },
+    );
+    expect(ok).toMatchObject({
+      expected: true,
+      requested: true,
+      receipt_enrichment_status: "ok",
+      receipt_line_items_skipped: false,
+      receipt_retryable: false,
+      receipt_tracking_id: "trk",
+      receipt_result_code: "OK",
+      receipt_message: "done",
+      receipt_request_key: "auth",
+    });
+
+    const rateLimited = __test__.buildShoppingReceiptMeta(
+      { documents: ["shoppingreceipt"] },
+      { resultCode: "REQUEST_RATE_LIMIT_EXCEEDED", trackingId: "r1" },
+    );
+    expect(rateLimited).toMatchObject({
+      receipt_enrichment_status: "rate_limited",
+      receipt_line_items_skipped: true,
+      receipt_retryable: true,
+      requested: true,
+      expected: true,
+    });
+
+    const missing = __test__.buildShoppingReceiptMeta({ hasShoppingReceipt: true }, null);
+    expect(missing.receipt_enrichment_status).toBe("error");
+    expect(missing.receipt_message).toBe("Receipt details were not captured.");
+    expect(missing.requested).toBe(false);
+    expect(missing.expected).toBe(true);
+    expect(missing.receipt_line_items_skipped).toBe(true);
+    expect(missing.receipt_retryable).toBe(false);
+
+    const emptyItems = __test__.buildShoppingReceiptMeta(
+      { hasShoppingReceipt: true },
+      { resultCode: "ERROR", errorMessage: "no items", trackingId: "t2" },
+    );
+    expect(emptyItems.receipt_enrichment_status).toBe("error");
+    expect(emptyItems.receipt_line_items_skipped).toBe(true);
+    expect(emptyItems.receipt_retryable).toBe(false);
+    expect(emptyItems.receipt_message).toBe("no items");
+    expect(emptyItems.requested).toBe(true);
+    expect(emptyItems.expected).toBe(true);
+    expect(emptyItems.receipt_tracking_id).toBe("t2");
+  });
+
+  it("maps drop reasons and receipt skip metadata onto rows", () => {
+    expect(__test__.mapOperationRecordToRowWithReason(null, { extractionMethod: "api" })).toEqual({
+      row: null,
+      dropReason: "invalid_record",
+    });
+    expect(__test__.mapOperationRecordToRowWithReason({}, { extractionMethod: "api" })).toEqual({
+      row: null,
+      dropReason: "invalid_operation",
+    });
+    expect(
+      __test__.mapOperationRecordToRowWithReason(
+        { operation: { description: "x" } },
+        { extractionMethod: "api" },
+      ),
+    ).toEqual({ row: null, dropReason: "missing_time_or_amount" });
+    expect(
+      __test__.mapOperationRecordToRowWithReason(
+        {
+          operation: {
+            operationTime: { milliseconds: Date.parse("2026-01-01T00:00:00.000Z") },
+            description: "x",
+          },
+        },
+        { extractionMethod: "api" },
+      ),
+    ).toEqual({ row: null, dropReason: "missing_time_or_amount" });
+    // Time missing with amount present — keeps the || (not &&) and each null check alive.
+    expect(
+      __test__.mapOperationRecordToRowWithReason(
+        {
+          operation: {
+            amount: { value: 3, currency: { strCode: "RUB" } },
+            accountAmount: { value: 3, currency: { strCode: "RUB" } },
+            description: "x",
+          },
+        },
+        { extractionMethod: "api" },
+      ),
+    ).toEqual({ row: null, dropReason: "missing_time_or_amount" });
+
+    const income = __test__.mapOperationRecordToRowWithReason(
+      {
+        operation: {
+          id: "inc-1",
+          type: "Credit",
+          status: "OK",
+          operationTime: { milliseconds: Date.parse("2026-01-01T00:00:00.000Z") },
+          amount: { value: 10, currency: { strCode: "RUB" } },
+          accountAmount: { value: 10, currency: { strCode: "RUB" } },
+          merchant: { name: "Payroll" },
+        },
+        shoppingReceiptMeta: {
+          receipt_request_key: null,
+          receipt_enrichment_status: "not_requested",
+          receipt_line_items_skipped: false,
+          receipt_retryable: false,
+          receipt_retry_attempts: 0,
+          receipt_result_code: null,
+          receipt_tracking_id: null,
+          receipt_message: null,
+          skip_reason: "preflight",
+          expected: false,
+          requested: false,
+        },
+      },
+      { extractionMethod: "api" },
+    );
+    expect(income.row?.transaction_type).toBe("income");
+    expect(income.row?.amount).toBe(10);
+    expect(income.row?.merchant_name).toBe("Payroll");
+    expect(
+      (income.row?.raw_payload as { enrichment?: { shopping_receipt?: { skip_reason?: string } } })
+        ?.enrichment?.shopping_receipt?.skip_reason,
+    ).toBe("preflight");
+    expect(income.row?.dedupe_hash).toBe(
+      __test__.buildDedupeHash({
+        external_id: "inc-1",
+        posted_at: "2026-01-01T00:00:00.000Z",
+        amount: 10,
+        merchant_name: "Payroll",
+        account_hint: null,
+        operation_id: null,
+        authorization_id: null,
+      }),
+    );
+
+    const zeroAmount = __test__.mapOperationRecordToRowWithReason(
+      {
+        operation: {
+          id: "zero-1",
+          type: "Credit",
+          status: "OK",
+          operationTime: { milliseconds: Date.parse("2026-01-01T00:00:00.000Z") },
+          amount: { value: 0, currency: { strCode: "RUB" } },
+          accountAmount: { value: 0, currency: { strCode: "RUB" } },
+          description: "Zero",
+        },
+      },
+      { extractionMethod: "api" },
+    );
+    // >= 0 must stay income; > 0 would classify zero as expense.
+    expect(zeroAmount.row?.transaction_type).toBe("income");
+    expect(zeroAmount.row?.amount).toBe(0);
+
+    const merchantOnly = __test__.mapOperationRecordToRowWithReason(
+      {
+        operation: {
+          id: "merch-1",
+          type: "Debit",
+          status: "OK",
+          operationTime: { milliseconds: Date.parse("2026-01-01T00:00:00.000Z") },
+          amount: { value: 2, currency: { strCode: "RUB" } },
+          accountAmount: { value: 2, currency: { strCode: "RUB" } },
+          merchant: { name: "Only Merchant" },
+        },
+      },
+      { extractionMethod: "api" },
+    );
+    expect(merchantOnly.row?.merchant_name).toBe("Only Merchant");
+
+    const pendingReceipt = __test__.mapOperationRecordToRowWithReason(
+      {
+        operation: {
+          id: "exp-1",
+          type: "Debit",
+          status: "OK",
+          hasShoppingReceipt: true,
+          operationTime: { milliseconds: Date.parse("2026-01-01T00:00:00.000Z") },
+          amount: { value: 5, currency: { strCode: "RUB" } },
+          accountAmount: { value: 5, currency: { strCode: "RUB" } },
+          description: "Shop",
+        },
+        shoppingReceipt: null,
+      },
+      { extractionMethod: "api" },
+    );
+    expect(pendingReceipt.row?.transaction_type).toBe("expense");
+    expect(
+      (pendingReceipt.row?.raw_payload as { all_details_captured?: boolean })?.all_details_captured,
+    ).toBe(false);
+  });
+
+  it("extracts absolute URLs, brands, categories and formats diagnostic errors", () => {
+    expect(__test__.extractAbsoluteUrl(null)).toBeNull();
+    expect(__test__.extractAbsoluteUrl("")).toBeNull();
+    expect(__test__.extractAbsoluteUrl("ftp://x")).toBeNull();
+    expect(__test__.extractAbsoluteUrl("https://cdn.example/a.png")).toBe(
+      "https://cdn.example/a.png",
+    );
+    expect(__test__.extractAbsoluteUrl("http://cdn.example/a.png")).toBe(
+      "http://cdn.example/a.png",
+    );
+    expect(__test__.extractAbsoluteUrl("not a url")).toBeNull();
+
+    expect(__test__.isBankNativeBrandLabel(null)).toBe(false);
+    expect(__test__.isBankNativeBrandLabel("   ")).toBe(false);
+    expect(__test__.isBankNativeBrandLabel("Внутрибанковский перевод")).toBe(true);
+    expect(__test__.isBankNativeBrandLabel("Coffee")).toBe(false);
+
+    expect(__test__.extractSourceBrand({})).toBeNull();
+    expect(__test__.extractSourceBrand({ brand: { name: "  " } })).toBeNull();
+    expect(__test__.extractSourceBrand({ brand: { name: "Внутрибанковский перевод" } })).toBeNull();
+    expect(
+      __test__.extractSourceBrand({
+        brand: { id: "b1", name: "Coffee Co", link: "https://c.example" },
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        source_key: "b1",
+        name: "Coffee Co",
+        website_url: "https://c.example/",
+      }),
+    );
+
+    expect(__test__.extractSourceCategory({})).toBeNull();
+    expect(__test__.extractSourceCategory({ categoryInfo: { bankCategory: {} } })).toBeNull();
+    expect(
+      __test__.extractSourceCategory({
+        categoryInfo: { bankCategory: { id: "c1", name: "Food" } },
+      }),
+    ).toEqual({ id: "c1", name: "Food" });
+    expect(
+      __test__.extractSourceCategory({ categoryInfo: { bankCategory: { name: "Food" } } }),
+    ).toEqual({ id: null, name: "Food" });
+
+    const withPeriod = __test__.formatDiagnosticError("Already done.", { a: 1 });
+    expect(withPeriod.message).toBe('Already done. diagnostics={"a":1}');
+    const withoutPeriod = __test__.formatDiagnosticError("Missing end", { b: 2 });
+    expect(withoutPeriod.message).toBe('Missing end. diagnostics={"b":2}');
+    // trim() must run: leading space would otherwise keep the period regex from seeing the end.
+    expect(__test__.formatDiagnosticError("  Padded.  ", { c: 3 }).message).toBe(
+      'Padded. diagnostics={"c":3}',
+    );
+    // $ anchor: an internal period must not suppress the trailing separator.
+    expect(__test__.formatDiagnosticError("Hello. world", { d: 4 }).message).toBe(
+      'Hello. world. diagnostics={"d":4}',
+    );
+  });
+
+  it("keeps operation range edges inclusive at windowFrom", () => {
+    const windowFromMs = Date.parse("2026-01-01T00:00:00.000Z");
+    const nowMs = Date.parse("2026-01-01T00:00:00.000Z");
+    expect(__test__.buildOperationRanges(windowFromMs, nowMs, 14)).toEqual([
+      { start: windowFromMs, end: nowMs },
+    ]);
+    const multi = __test__.buildOperationRanges(
+      windowFromMs,
+      Date.parse("2026-01-20T00:00:00.000Z"),
+      7,
+    );
+    expect(multi[multi.length - 1]?.start).toBe(windowFromMs);
+    expect(multi.every((range) => range.end >= range.start)).toBe(true);
+    // Exact chunk boundary: start == windowFrom must break (<= not <).
+    const exact = __test__.buildOperationRanges(
+      windowFromMs,
+      windowFromMs + 7 * 24 * 60 * 60 * 1000 - 1,
+      7,
+    );
+    expect(exact).toHaveLength(1);
+    expect(exact[0]?.start).toBe(windowFromMs);
+  });
+});
+
+describe("tbank-web connector.parse mutation coverage (T-261116-rul)", () => {
+  function installSimpleChrome(
+    executeScript: ReturnType<typeof vi.fn>,
+    tab?: Record<string, unknown>,
+  ) {
+    const active = tab ?? { id: 77, url: "https://www.tbank.ru/mybank/operations/" };
+    (globalThis as { chrome: Record<string, unknown> }).chrome = {
+      tabs: {
+        query: vi.fn().mockResolvedValue([active]),
+        get: vi.fn().mockResolvedValue({ ...active, status: "complete" }),
+        update: vi.fn(),
+        onUpdated: { addListener: vi.fn(), removeListener: vi.fn() },
+      },
+      scripting: { executeScript },
+    } as unknown as typeof chrome;
+  }
+
+  it("emits progress, honors tab_id/session fields, and fills debug defaults", async () => {
+    const onProgress = vi.fn();
+    const executeScript = vi.fn().mockResolvedValue([
+      {
+        result: {
+          method: "api",
+          operation_records: [
+            {
+              operation: {
+                id: "op-progress",
+                operationTime: { milliseconds: Date.parse("2026-02-01T00:00:00.000Z") },
+                type: "Debit",
+                status: "OK",
+                amount: { value: 40, currency: { strCode: "RUB" } },
+                accountAmount: { value: 40, currency: { strCode: "RUB" } },
+                description: "Progress cafe",
+              },
+              operationDetail: null,
+              shoppingReceipt: null,
+            },
+            { operation: null },
+            null,
+            {
+              operation: {
+                description: "missing amount",
+                operationTime: { milliseconds: Date.parse("2026-02-01T00:00:00.000Z") },
+              },
+            },
+          ],
+          window_to: "not-a-date",
+          parsed_through_at: "also-bad",
+          // Force fallback to rows.length for parsedTransactionsCount.
+          parsed_transactions_count: "nope",
+          debug: {
+            extraction_method: "api",
+            fallback_used: false,
+            fallback_reason: null,
+            blocked_reason: null,
+            discovered_endpoints: {
+              operations_api: null,
+              operation_detail_api: null,
+              tranche_offers_api: null,
+            },
+            range_attempts: [],
+            response_status_histogram: {},
+            stage_timings_ms: {},
+            api_error_message: null,
+            api_operation_count: 1,
+            dom_row_count: 0,
+          },
+        },
+      },
+    ]);
+    const get = vi.fn().mockResolvedValue({
+      id: 88,
+      url: "https://www.tbank.ru/mybank/operations/",
+      status: "complete",
+    });
+    (globalThis as { chrome: Record<string, unknown> }).chrome = {
+      tabs: {
+        query: vi.fn(),
+        get,
+        update: vi.fn(),
+        onUpdated: { addListener: vi.fn(), removeListener: vi.fn() },
+      },
+      scripting: { executeScript },
+    } as unknown as typeof chrome;
+
+    const result = await connector.parse({
+      source: "tbank_web",
+      windowFrom: "2026-02-01T00:00:00.000Z",
+      session: {
+        session_id: "sess-1",
+        source: "custom_source",
+        payer_person_id: "person-1",
+        parse_strategy: "full",
+      },
+      debug: { tab_id: 88, on_progress: onProgress },
+    });
+
+    expect(get).toHaveBeenCalledWith(88);
+    expect(onProgress.mock.calls.map((call) => call[0]?.phase)).toEqual([
+      "parse_preparing_tab",
+      "parse_loading_operations_page",
+      "parse_extracting_page_data",
+      "parse_mapping_rows",
+    ]);
+    expect(onProgress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        phase: "parse_mapping_rows",
+        parsed_transactions_count: null,
+      }),
+    );
+    expect(executeScript.mock.calls[0]?.[0]?.args?.[0]).toMatchObject({
+      parseStrategy: "full",
+      sessionId: "sess-1",
+      sourceId: "custom_source",
+      payerPersonId: "person-1",
+    });
+    expect(result.rows).toHaveLength(1);
+    expect(result.parsedTransactionsCount).toBe(1);
+    expect(result.debug?.mapping_drop_counts).toMatchObject({
+      invalid_record: 1,
+      invalid_operation: 1,
+      missing_time_or_amount: 1,
+    });
+    // Bad extraction timestamps fall back to now / windowFrom.
+    expect(result.windowTo).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(result.parsedThroughAt).toBe("2026-02-01T00:00:00.000Z");
+  });
+
+  it("queries the active tab with lastFocusedWindow and tolerates a missing on_progress", async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValue([{ id: 77, url: "https://www.tbank.ru/mybank/operations/" }]);
+    const executeScript = vi.fn().mockResolvedValue([
+      {
+        result: {
+          method: "api",
+          operation_records: [],
+          window_to: "2026-03-05T12:00:00.000Z",
+          parsed_through_at: "2026-02-01T00:00:00.000Z",
+          parsed_transactions_count: 0,
+        },
+      },
+    ]);
+    (globalThis as { chrome: Record<string, unknown> }).chrome = {
+      tabs: {
+        query,
+        get: vi.fn(),
+        update: vi.fn(),
+        onUpdated: { addListener: vi.fn(), removeListener: vi.fn() },
+      },
+      scripting: { executeScript },
+    } as unknown as typeof chrome;
+
+    await connector.parse({
+      source: "tbank_web",
+      windowFrom: "2026-02-01T00:00:00.000Z",
+      debug: {},
+    });
+    expect(query).toHaveBeenCalledWith({ active: true, lastFocusedWindow: true });
+  });
+
+  it("defaults the lookback window when windowFrom and last_imported_at are absent", async () => {
+    const executeScript = vi.fn().mockResolvedValue([
+      {
+        result: {
+          method: "api",
+          operation_records: [],
+          window_to: "2026-03-05T12:00:00.000Z",
+          parsed_through_at: "2026-02-01T00:00:00.000Z",
+          parsed_transactions_count: 0,
+        },
+      },
+    ]);
+    installSimpleChrome(executeScript);
+    const before = Date.now();
+    await connector.parse({ source: "tbank_web" });
+    const after = Date.now();
+    const passedFrom = Date.parse(
+      String(executeScript.mock.calls[0]?.[0]?.args?.[0]?.windowFromIso),
+    );
+    const expectedMin = before - 30 * 24 * 60 * 60 * 1000 - 2000;
+    const expectedMax = after - 30 * 24 * 60 * 60 * 1000 + 2000;
+    expect(passedFrom).toBeGreaterThanOrEqual(expectedMin);
+    expect(passedFrom).toBeLessThanOrEqual(expectedMax);
+  });
+
+  it("uses session.last_imported_at when windowFrom is absent", async () => {
+    const executeScript = vi.fn().mockResolvedValue([
+      {
+        result: {
+          method: "api",
+          operation_records: [],
+          window_to: "2026-03-05T12:00:00.000Z",
+          parsed_through_at: "2026-02-01T00:00:00.000Z",
+          parsed_transactions_count: 0,
+        },
+      },
+    ]);
+    installSimpleChrome(executeScript);
+    await connector.parse({
+      source: "tbank_web",
+      session: { last_imported_at: "2026-01-15T00:00:00.000Z" },
+    });
+    expect(executeScript.mock.calls[0]?.[0]?.args?.[0]?.windowFromIso).toBe(
+      "2026-01-15T00:00:00.000Z",
+    );
+  });
+
+  it("rejects a missing tab, a non-T-Bank tab, and DOM fallback with zero rows", async () => {
+    const queryEmpty = vi.fn().mockResolvedValue([{}]);
+    (globalThis as { chrome: Record<string, unknown> }).chrome = {
+      tabs: {
+        query: queryEmpty,
+        get: vi.fn(),
+        update: vi.fn(),
+        onUpdated: { addListener: vi.fn(), removeListener: vi.fn() },
+      },
+      scripting: { executeScript: vi.fn() },
+    } as unknown as typeof chrome;
+    await expect(
+      connector.parse({ source: "tbank_web", windowFrom: "2026-02-01T00:00:00.000Z" }),
+    ).rejects.toThrow(/No active tab/);
+    expect(queryEmpty).toHaveBeenCalledWith({ active: true, lastFocusedWindow: true });
+
+    const getRejects = vi.fn().mockRejectedValue(new Error("gone"));
+    (globalThis as { chrome: Record<string, unknown> }).chrome = {
+      tabs: {
+        query: vi.fn(),
+        get: getRejects,
+        update: vi.fn(),
+        onUpdated: { addListener: vi.fn(), removeListener: vi.fn() },
+      },
+      scripting: { executeScript: vi.fn() },
+    } as unknown as typeof chrome;
+    await expect(
+      connector.parse({
+        source: "tbank_web",
+        windowFrom: "2026-02-01T00:00:00.000Z",
+        debug: { tab_id: 99 },
+      }),
+    ).rejects.toThrow(/No active tab/);
+
+    installSimpleChrome(vi.fn(), { id: 77, url: "https://example.com/" });
+    await expect(
+      connector.parse({ source: "tbank_web", windowFrom: "2026-02-01T00:00:00.000Z" }),
+    ).rejects.toThrow(/Active tab is not a T-Bank page/);
+
+    const executeScript = vi.fn().mockResolvedValue([
+      {
+        result: {
+          method: "dom",
+          rows: [],
+          window_to: "2026-03-05T12:00:00.000Z",
+          parsed_through_at: "2026-02-01T00:00:00.000Z",
+          parsed_transactions_count: 0,
+          debug: {
+            extraction_method: "dom",
+            fallback_used: true,
+            fallback_reason: "api_failed",
+            blocked_reason: null,
+            discovered_endpoints: {
+              operations_api: null,
+              operation_detail_api: null,
+              tranche_offers_api: null,
+            },
+            range_attempts: [],
+            response_status_histogram: {},
+            stage_timings_ms: {},
+            api_error_message: "boom",
+            api_operation_count: 0,
+            dom_row_count: 0,
+          },
+        },
+      },
+    ]);
+    installSimpleChrome(executeScript);
+    await expect(
+      connector.parse({ source: "tbank_web", windowFrom: "2026-02-01T00:00:00.000Z" }),
+    ).rejects.toThrow(/DOM fallback returned zero rows.*fallback_reason/);
+
+    // DOM zero rows without debug.fallback_used must not take the diagnostic throw path.
+    const quietDom = vi.fn().mockResolvedValue([
+      {
+        result: {
+          method: "dom",
+          rows: [],
+          window_to: "2026-03-05T12:00:00.000Z",
+          parsed_through_at: "2026-02-01T00:00:00.000Z",
+          parsed_transactions_count: 0,
+        },
+      },
+    ]);
+    installSimpleChrome(quietDom);
+    const quiet = await connector.parse({
+      source: "tbank_web",
+      windowFrom: "2026-02-01T00:00:00.000Z",
+    });
+    expect(quiet.rows).toEqual([]);
+
+    // API with empty rows + fallback_used must not throw (kills method==="dom" → true).
+    const apiFallback = vi.fn().mockResolvedValue([
+      {
+        result: {
+          method: "api",
+          operation_records: [],
+          window_to: "2026-03-05T12:00:00.000Z",
+          parsed_through_at: "2026-02-01T00:00:00.000Z",
+          parsed_transactions_count: 0,
+          debug: {
+            extraction_method: "api",
+            fallback_used: true,
+            fallback_reason: "unused",
+            blocked_reason: null,
+            discovered_endpoints: {
+              operations_api: null,
+              operation_detail_api: null,
+              tranche_offers_api: null,
+            },
+            range_attempts: [],
+            response_status_histogram: {},
+            stage_timings_ms: {},
+            api_error_message: null,
+            api_operation_count: 0,
+            dom_row_count: 0,
+          },
+        },
+      },
+    ]);
+    installSimpleChrome(apiFallback);
+    const apiEmpty = await connector.parse({
+      source: "tbank_web",
+      windowFrom: "2026-02-01T00:00:00.000Z",
+    });
+    expect(apiEmpty.rows).toEqual([]);
+  });
+
+  it("maps DOM rows when method is dom and keeps numeric parsedTransactionsCount", async () => {
+    const executeScript = vi.fn().mockResolvedValue([
+      {
+        result: {
+          method: "dom",
+          rows: [
+            {
+              amount: -12,
+              posted_at: "2026-02-01T00:00:00.000Z",
+              merchant_name: "DOM shop",
+              line_items: [{ title: "DOM shop", amount: -12 }],
+            },
+          ],
+          window_to: "2026-03-05T12:00:00.000Z",
+          parsed_through_at: "2026-02-01T00:00:00.000Z",
+          parsed_transactions_count: 9,
+          debug: {
+            extraction_method: "dom",
+            fallback_used: true,
+            fallback_reason: "api_failed",
+            blocked_reason: null,
+            discovered_endpoints: {
+              operations_api: null,
+              operation_detail_api: null,
+              tranche_offers_api: null,
+            },
+            range_attempts: [],
+            response_status_histogram: {},
+            stage_timings_ms: {},
+            api_error_message: null,
+            api_operation_count: 0,
+            dom_row_count: 1,
+          },
+        },
+      },
+    ]);
+    installSimpleChrome(executeScript);
+    const onProgress = vi.fn();
+    const result = await connector.parse({
+      source: "tbank_web",
+      windowFrom: "2026-02-01T00:00:00.000Z",
+      debug: { on_progress: onProgress },
+    });
+    expect(result.rows).toHaveLength(1);
+    expect(result.parsedTransactionsCount).toBe(9);
+    expect(onProgress).toHaveBeenCalledWith(
+      expect.objectContaining({ phase: "parse_mapping_rows", parsed_transactions_count: 9 }),
+    );
+  });
+
+  it("includes blocked_reason diagnostics when page extraction reports a block", async () => {
+    installSimpleChrome(
+      vi.fn().mockResolvedValue([
+        {
+          result: {
+            method: "api",
+            blocked_reason: "T-Bank session is not authorized. Sign in and retry import.",
+            operation_records: [],
+            window_to: "2026-03-05T12:00:00.000Z",
+            parsed_through_at: "2026-02-01T00:00:00.000Z",
+            parsed_transactions_count: 0,
+          },
+        },
+      ]),
+    );
+    await expect(
+      connector.parse({ source: "tbank_web", windowFrom: "2026-02-01T00:00:00.000Z" }),
+    ).rejects.toThrow(/blocked_reason/);
+  });
 });

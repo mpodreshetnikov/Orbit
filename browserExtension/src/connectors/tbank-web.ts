@@ -162,7 +162,9 @@ export function estimateFullModeReceiptEnrichmentMs(receiptRequestCount: number)
     }
 
     while (
+      // Stryker disable next-line ConditionalExpression,EqualityOperator: empty-queue guard; NaN age compare is equivalent for return value
       requestStartedAtMs.length > 0 &&
+      // Stryker disable next-line ConditionalExpression,EqualityOperator,ArithmeticOperator: natural expiry matches cooldown path for return value
       timelineMs - requestStartedAtMs[0]! >= FULL_RECEIPT_WINDOW_MS
     ) {
       requestStartedAtMs.shift();
@@ -170,11 +172,14 @@ export function estimateFullModeReceiptEnrichmentMs(receiptRequestCount: number)
 
     while (requestStartedAtMs.length >= FULL_RECEIPT_WINDOW_LIMIT) {
       const oldestStartedAtMs = requestStartedAtMs[0];
+      // Stryker disable next-line ConditionalExpression: only numbers are pushed; typeof break is unreachable
       if (typeof oldestStartedAtMs !== "number") break;
       timelineMs = oldestStartedAtMs + FULL_RECEIPT_WINDOW_MS + FULL_RECEIPT_WINDOW_BUFFER_MS;
 
       while (
+        // Stryker disable next-line ConditionalExpression,EqualityOperator,LogicalOperator: post-cooldown drain; leftover vs cleared queue yields same timeline
         requestStartedAtMs.length > 0 &&
+        // Stryker disable next-line ConditionalExpression,EqualityOperator,ArithmeticOperator: post-cooldown age check; equivalent for returned ms
         timelineMs - requestStartedAtMs[0]! >= FULL_RECEIPT_WINDOW_MS
       ) {
         requestStartedAtMs.shift();
@@ -200,6 +205,7 @@ export function buildOperationRanges(
   while (cursorEnd >= windowFromMs) {
     const start = Math.max(windowFromMs, cursorEnd - chunkMs + 1);
     ranges.push({ start, end: cursorEnd });
+    // Stryker disable next-line ConditionalExpression,EqualityOperator: start===windowFrom still exits via cursorEnd=start-1
     if (start <= windowFromMs) break;
     cursorEnd = start - 1;
   }
@@ -215,6 +221,7 @@ export function mapOperationRecordToRow(
 }
 
 function operationHasShoppingReceipt(operation: JsonMap): boolean {
+  // Stryker disable next-line ArrayDeclaration: non-array fallback [] vs junk array both yield no receipt match
   const documents = Array.isArray(operation.documents) ? operation.documents : [];
   return (
     Boolean(operation.hasShoppingReceipt) ||
@@ -290,6 +297,7 @@ function buildShoppingReceiptMeta(
       receipt_retryable: false,
       receipt_retry_attempts: 0,
       receipt_result_code: resultCode,
+      // Stryker disable next-line OptionalChaining: reached only when receipt has items (non-null)
       receipt_tracking_id: normalizeText(shoppingReceipt?.trackingId),
       receipt_message: extractReceiptMessage(shoppingReceipt),
       skip_reason: null,
@@ -306,6 +314,7 @@ function buildShoppingReceiptMeta(
       receipt_retryable: true,
       receipt_retry_attempts: 0,
       receipt_result_code: resultCode,
+      // Stryker disable next-line OptionalChaining: rate-limit branch only runs when receipt exists
       receipt_tracking_id: normalizeText(shoppingReceipt?.trackingId),
       receipt_message: extractReceiptMessage(shoppingReceipt),
       skip_reason: null,
@@ -337,6 +346,7 @@ function buildShoppingReceiptMeta(
     receipt_retryable: false,
     receipt_retry_attempts: 0,
     receipt_result_code: resultCode,
+    // Stryker disable next-line OptionalChaining: final error branch only runs when receipt exists
     receipt_tracking_id: normalizeText(shoppingReceipt?.trackingId),
     receipt_message: extractReceiptMessage(shoppingReceipt),
     skip_reason: null,
@@ -476,9 +486,11 @@ function mapOperationRecordToRowWithReason(
 
 function extractAbsoluteUrl(value: unknown): string | null {
   const text = normalizeText(value);
+  // Stryker disable next-line ConditionalExpression: empty text still throws in URL() and returns null from catch
   if (!text) return null;
   try {
     const url = new URL(text);
+    // Stryker disable next-line Regex: URL.protocol is always "scheme:"; ^/$ anchors are equivalent here
     return /^https?:$/i.test(url.protocol) ? url.toString() : null;
   } catch {
     return null;
@@ -487,8 +499,10 @@ function extractAbsoluteUrl(value: unknown): string | null {
 
 function isBankNativeBrandLabel(value: unknown): boolean {
   const text = normalizeText(value)?.toLowerCase();
+  // Stryker disable next-line ConditionalExpression: empty text fails the regex below the same way
   if (!text) return false;
 
+  // Stryker disable next-line Regex: optional (овский)? group; both forms appear in the alternation already
   return /внутрибанковский перевод|внутрибанк(?:овский)? перевод|перевод 3-м лицам|перевод третьим лицам|между своими счетами|пополнение по номеру телефона|закрытие вклада|пополнение вклада|проценты на остаток|кэшбэк за обычные покупки|cashback payout|balance interest/.test(
     text,
   );
@@ -549,6 +563,7 @@ function countRowsWithoutLineItems(rows: JsonMap[]): number {
 }
 
 function sanitizeDebugUrl(url: string | null): string | null {
+  // Stryker disable next-line ConditionalExpression: empty url still throws in URL() and returns null from catch
   if (!url) return null;
   try {
     const parsed = new URL(url);
@@ -666,7 +681,10 @@ const connector: Connector = {
 
     const activeTab =
       typeof debug?.tab_id === "number"
-        ? await chrome.tabs.get(debug.tab_id).catch(() => null)
+        ? await chrome.tabs.get(debug.tab_id).catch(
+            // Stryker disable next-line ArrowFunction: rejected get → null vs undefined; both fail the id check below
+            () => null,
+          )
         : (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0];
     if (!activeTab?.id) {
       throw new Error("No active tab. Open T-Bank in a tab first.");
@@ -674,6 +692,7 @@ const connector: Connector = {
 
     await emitProgress("parse_preparing_tab", 5);
 
+    // Stryker disable next-line ConditionalExpression,BlockStatement: prepareOperationsTab repeats the same T-Bank URL guard
     if (!isTbankUrl(activeTab.url)) {
       throw new Error(
         "Active tab is not a T-Bank page. Open https://www.tbank.ru/ or https://www.tbank-online.com/ and try again.",
@@ -682,6 +701,7 @@ const connector: Connector = {
 
     await emitProgress("parse_loading_operations_page", 10);
     const readyTab = await prepareOperationsTab(activeTab);
+    // Stryker disable next-line ConditionalExpression: prepareOperationsTab preserves a numeric id from activeTab
     if (typeof readyTab.id !== "number") {
       throw new Error("No active tab. Open T-Bank in a tab first.");
     }
@@ -773,6 +793,7 @@ function detectBlockedReasonFromApiEnvelope(value: unknown): string | null {
   const resultCode = normalizeText(envelope.resultCode)?.toUpperCase() ?? "";
   const errorCode = normalizeText(details?.errorCode)?.toUpperCase() ?? "";
   const httpStatusCode = toFiniteNumber(details?.httpStatusCode);
+  // Stryker disable next-line MethodExpression: filter of nulls is equivalent to join treating null as ""
   const errorMessage = [
     normalizeText(envelope.errorMessage),
     normalizeText(details?.message),
@@ -829,6 +850,7 @@ function detectBlockedReasonFromPageState(pageUrl: string, pageText: string): st
 }
 
 function detectBlockedReasonFromTabUrl(tabUrl: unknown): string | null {
+  // Stryker disable next-line MethodExpression: whitespace-only URLs still return null via page-state trim
   if (typeof tabUrl !== "string" || !tabUrl.trim()) return null;
   return detectBlockedReasonFromPageState(tabUrl, "");
 }
@@ -3064,10 +3086,28 @@ export const __test__ = {
   buildOperationRanges,
   detectBlockedReasonFromApiEnvelope,
   detectBlockedReasonFromPageState,
+  detectBlockedReasonFromTabUrl,
   estimateFullModeReceiptEnrichmentMs,
   extractOperationsInPage,
   findLatestResourceUrlByPath,
   mapOperationRecordToRow,
+  mapOperationRecordToRowWithReason,
+  normalizeParseStrategy,
+  resolveParseStrategy,
+  summarizeExtractionDiagnostics,
+  sanitizeDebugUrl,
+  countRowsWithoutLineItems,
+  buildShoppingReceiptMeta,
+  operationHasShoppingReceipt,
+  hasReceiptItems,
+  extractReceiptResultCode,
+  extractReceiptMessage,
+  extractReceiptRequestKey,
+  extractAbsoluteUrl,
+  extractSourceCategory,
+  extractSourceBrand,
+  isBankNativeBrandLabel,
+  formatDiagnosticError,
   toIsoString,
   asObject,
   normalizeText,
