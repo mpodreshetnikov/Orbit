@@ -3017,12 +3017,14 @@ describe("tbank-web connector.parse mutation coverage (T-261116-rul)", () => {
       scripting: { executeScript },
     } as unknown as typeof chrome;
 
-    await connector.parse({
+    const result = await connector.parse({
       source: "tbank_web",
       windowFrom: "2026-02-01T00:00:00.000Z",
       debug: {},
     });
     expect(query).toHaveBeenCalledWith({ active: true, lastFocusedWindow: true });
+    expect(result.parsedTransactionsCount).toBe(0);
+    expect(result.rows).toEqual([]);
   });
 
   it("defaults the lookback window when windowFrom and last_imported_at are absent", async () => {
