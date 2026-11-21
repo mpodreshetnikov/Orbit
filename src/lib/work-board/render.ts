@@ -104,11 +104,7 @@ export function isTrimmedBoardColumn(column: BoardColumnId): boolean {
  * Newest `updated` first for trimmed columns (blank `updated` sorts last via
  * localeCompare). Tie-break / non-trimmed columns: by id.
  */
-export function compareCardsForColumn(
-  a: BoardCard,
-  b: BoardCard,
-  column: BoardColumnId,
-): number {
+export function compareCardsForColumn(a: BoardCard, b: BoardCard, column: BoardColumnId): number {
   if (isTrimmedBoardColumn(column)) {
     // Stryker disable next-line MethodExpression: trim is cosmetic for ISO dates / blanks already normalized upstream
     const au = a.updated.trim();
