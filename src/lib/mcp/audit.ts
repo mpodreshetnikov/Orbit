@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { generateRequestId } from "@shared/lib/observability/correlation";
 import { createServerLogger } from "@/lib/observability/server-logger";
 import { sha256Hex } from "./crypto";
 import type { McpToolServer } from "./tools/types";
@@ -17,6 +18,8 @@ const toolNameStorage = new AsyncLocalStorage<string>();
 /** Mutable bag for one tool invocation — person id is set after resolve, read at outcome. */
 export interface McpToolAuditScope {
   personId?: string;
+  /** Shared across start + completed for this invocation (OTLP request_id). */
+  requestId: string;
 }
 
 const toolAuditScopeStorage = new AsyncLocalStorage<McpToolAuditScope>();
@@ -54,7 +57,7 @@ export function currentMcpToolName(): string {
 }
 
 export function runWithMcpToolAuditScope<T>(fn: () => T): T {
-  return toolAuditScopeStorage.run({}, fn);
+  return toolAuditScopeStorage.run({ requestId: generateRequestId() }, fn);
 }
 
 export function noteMcpResolvedPersonId(personId: string): void {
@@ -64,8 +67,29 @@ export function noteMcpResolvedPersonId(personId: string): void {
   scope.personId = personId;
 }
 
+/** Note person from an args.person_id string when present (no values logged). */
+export function noteMcpPersonIdFromArgs(args: unknown): void {
+  if (!args || typeof args !== "object" || Array.isArray(args)) return;
+  const personId = (args as { person_id?: unknown }).person_id;
+  if (typeof personId === "string" && personId.length > 0) {
+    noteMcpResolvedPersonId(personId);
+  }
+}
+
+/** Note person from a loaded person-owned row (record, checkup, …). */
+export function noteMcpPersonFromRow(row: { person_id?: unknown } | null | undefined): void {
+  const personId = row?.person_id;
+  if (typeof personId === "string" && personId.length > 0) {
+    noteMcpResolvedPersonId(personId);
+  }
+}
+
 export function currentMcpPersonId(): string | undefined {
   return toolAuditScopeStorage.getStore()?.personId;
+}
+
+export function currentMcpToolRequestId(): string | undefined {
+  return toolAuditScopeStorage.getStore()?.requestId;
 }
 
 /**
@@ -84,8 +108,11 @@ export function installMcpToolNamePropagation(server: McpToolServer): void {
 
 // Stryker disable all: empty `{ userIdHash }` / `{}` spreads are equivalent when hash is unset
 function mcpToolLogger(userIdHash?: string) {
+  const scope = toolAuditScopeStorage.getStore();
   return createServerLogger({
     component: "mcp-tool",
+    // One request_id for start + completed of the same invocation.
+    ...(scope?.requestId ? { requestId: scope.requestId } : {}),
     ...(userIdHash ? { userIdHash } : {}),
   });
 }

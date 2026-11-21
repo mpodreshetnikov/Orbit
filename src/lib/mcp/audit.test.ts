@@ -3,9 +3,12 @@ import {
   hashMcpUserId,
   installMcpToolNamePropagation,
   mcpArgumentShape,
+  noteMcpPersonFromRow,
+  noteMcpPersonIdFromArgs,
   noteMcpResolvedPersonId,
   currentMcpPersonId,
   currentMcpToolName,
+  currentMcpToolRequestId,
   runWithMcpToolAuditScope,
   runWithMcpToolName,
   logMcpAuthAccepted,
@@ -17,25 +20,39 @@ import type { McpToolServer } from "./tools/types";
 import { buildTelemetryEvent } from "@shared/lib/observability/logger";
 import { validateTelemetryLogEvent } from "@shared/lib/observability/schema";
 
-const { infoMock, warnMock, createServerLoggerMock } = vi.hoisted(() => {
+const { infoMock, warnMock, createServerLoggerMock, generateRequestIdMock } = vi.hoisted(() => {
   const infoMock = vi.fn();
   const warnMock = vi.fn();
   return {
     infoMock,
     warnMock,
-    createServerLoggerMock: vi.fn((_options?: { component?: string; userIdHash?: string }) => ({
-      info: infoMock,
-      warn: warnMock,
-      debug: vi.fn(),
-      error: vi.fn(),
-      requestId: "req-test",
-    })),
+    generateRequestIdMock: vi.fn(() => "req-shared-1"),
+    createServerLoggerMock: vi.fn(
+      (_options?: { component?: string; userIdHash?: string; requestId?: string }) => ({
+        info: infoMock,
+        warn: warnMock,
+        debug: vi.fn(),
+        error: vi.fn(),
+        requestId: _options?.requestId ?? "req-test",
+      }),
+    ),
   };
 });
 
 vi.mock("@/lib/observability/server-logger", () => ({
   createServerLogger: createServerLoggerMock,
 }));
+
+vi.mock("@shared/lib/observability/correlation", async () => {
+  const actual =
+    await vi.importActual<typeof import("@shared/lib/observability/correlation")>(
+      "@shared/lib/observability/correlation",
+    );
+  return {
+    ...actual,
+    generateRequestId: generateRequestIdMock,
+  };
+});
 
 describe("mcpArgumentShape", () => {
   it("returns sorted keys and never values", () => {
@@ -78,6 +95,29 @@ describe("tool name and person audit scope", () => {
       expect(currentMcpPersonId()).toBe("person-1");
     });
     expect(currentMcpPersonId()).toBeUndefined();
+  });
+
+  it("notes person id from args.person_id and from a loaded row", async () => {
+    await runWithMcpToolAuditScope(async () => {
+      noteMcpPersonIdFromArgs({ person_id: "person-from-args", query: "x" });
+      expect(currentMcpPersonId()).toBe("person-from-args");
+      noteMcpPersonFromRow({ person_id: "person-from-row" });
+      expect(currentMcpPersonId()).toBe("person-from-row");
+      noteMcpPersonIdFromArgs({ query: "no-person" });
+      expect(currentMcpPersonId()).toBe("person-from-row");
+      noteMcpPersonFromRow(null);
+      expect(currentMcpPersonId()).toBe("person-from-row");
+    });
+  });
+
+  it("assigns one request id for the audit scope", async () => {
+    generateRequestIdMock.mockClear();
+    generateRequestIdMock.mockReturnValueOnce("req-invocation-a");
+    await runWithMcpToolAuditScope(async () => {
+      expect(currentMcpToolRequestId()).toBe("req-invocation-a");
+      expect(generateRequestIdMock).toHaveBeenCalledTimes(1);
+    });
+    expect(currentMcpToolRequestId()).toBeUndefined();
   });
 
   it("ignores noteMcpResolvedPersonId outside an audit scope", () => {
@@ -178,6 +218,41 @@ describe("audit log emitters", () => {
     });
     const withPerson = infoMock.mock.calls[0]?.[1] as Record<string, unknown>;
     expect(withPerson.person_id).toBe("person-resolved");
+  });
+
+  it("reuses one requestId for start and completed inside an audit scope", async () => {
+    generateRequestIdMock.mockReturnValueOnce("req-pair-99");
+    infoMock.mockClear();
+    createServerLoggerMock.mockClear();
+
+    await runWithMcpToolAuditScope(async () => {
+      logMcpToolCallStarted({
+        tool: "activate_medical_record",
+        grantId: "grant-1",
+        clientId: "mcp_abc",
+        userIdHash: "abcd1234efgh5678",
+        argKeys: "record_id",
+        personId: null,
+      });
+      logMcpToolCallCompleted({
+        tool: "activate_medical_record",
+        outcome: "ok",
+        durationMs: 5,
+        grantId: "grant-1",
+        clientId: "mcp_abc",
+        userIdHash: "abcd1234efgh5678",
+        argKeys: "record_id",
+        personId: "person-owned",
+      });
+    });
+
+    const opts = createServerLoggerMock.mock.calls.map(
+      (call) => call[0] as { component: string; requestId?: string; userIdHash?: string },
+    );
+    expect(opts).toHaveLength(2);
+    expect(opts[0]?.requestId).toBe("req-pair-99");
+    expect(opts[1]?.requestId).toBe("req-pair-99");
+    expect(opts[0]?.requestId).toBe(opts[1]?.requestId);
   });
 
   it("emits auth accept and reject without raw tokens", () => {

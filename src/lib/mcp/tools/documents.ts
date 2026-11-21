@@ -31,6 +31,7 @@ import {
   getRecordFindings,
   getRecordObservations,
 } from "../health/records";
+import { noteMcpPersonFromRow } from "../audit";
 import { isoDateSchema, personSelectorSchema, uuidSchema } from "../schemas/common";
 import { invokeEdgeFunctionAsUser } from "../supabase-user-client";
 import { withPerson, withUserClient } from "../tool-context";
@@ -317,6 +318,7 @@ export function registerDocumentTools(server: McpToolServer): void {
     withUserClient<{ record_id: string }>(async (supabase, args) => {
       const record = await getIngestableRecord(supabase, args.record_id);
       if (!record) return fail(`No medical record with id ${args.record_id}.`);
+      noteMcpPersonFromRow(record);
       if (!isIngestableStatus(record.status)) {
         return fail(
           `Record ${args.record_id} is ${record.status}; its pages can no longer be replaced.`,
@@ -501,6 +503,7 @@ export function registerDocumentTools(server: McpToolServer): void {
     }>(async (supabase, args, auth) => {
       const record = await getIngestableRecord(supabase, args.record_id);
       if (!record) return fail(`No medical record with id ${args.record_id}.`);
+      noteMcpPersonFromRow(record);
       if (!isIngestableStatus(record.status)) {
         return fail(
           `Record ${args.record_id} is ${record.status}; only a record that has not been approved can be ingested. Create a new record for a new document.`,
@@ -735,6 +738,7 @@ export function registerDocumentTools(server: McpToolServer): void {
       }
       const record = await getMedicalRecord(supabase, args.record_id);
       if (!record) return fail(`No medical record with id ${args.record_id}.`);
+      noteMcpPersonFromRow(record);
       if (record.status !== "active") {
         return fail(
           `Record ${args.record_id} is ${String(record.status)}; propose_reconciliation is for an approved record. A record in review takes these in ingest_medical_document's reconciliation.`,
@@ -802,6 +806,7 @@ export function registerDocumentTools(server: McpToolServer): void {
     withUserClient<{ record_id: string }>(async (supabase, args, auth) => {
       const record = await getIngestableRecord(supabase, args.record_id);
       if (!record) return fail(`No medical record with id ${args.record_id}.`);
+      noteMcpPersonFromRow(record);
       if (record.status === "active") {
         // Usually the owner already pressed Approve on the card; that is not an error to retry.
         const full = await getMedicalRecord(supabase, args.record_id);

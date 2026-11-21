@@ -17,6 +17,7 @@ import {
   personSelectorSchema,
   uuidSchema,
 } from "../schemas/common";
+import { noteMcpPersonFromRow, noteMcpResolvedPersonId } from "../audit";
 import { resolvePerson } from "../resolve-person";
 import { withPerson, withUserClient } from "../tool-context";
 import { fail, ok, summarizeList } from "../tool-result";
@@ -59,6 +60,7 @@ export function registerRecordTools(server: McpToolServer): void {
             return fail(resolution.message, { candidates: resolution.candidates });
           }
           personId = resolution.person.id;
+          noteMcpResolvedPersonId(personId);
         }
         const records = await listPendingRecords(supabase, { personId, limit: args.limit });
         const next: Record<string, string> = {
@@ -118,6 +120,7 @@ export function registerRecordTools(server: McpToolServer): void {
           return fail(resolution.message, { candidates: resolution.candidates });
         }
         personId = resolution.person.id;
+        noteMcpResolvedPersonId(personId);
       }
 
       const records = await searchMedicalRecords(supabase, {
@@ -163,6 +166,7 @@ export function registerRecordTools(server: McpToolServer): void {
       if (!record) {
         return fail(`No medical record with id ${args.record_id}.`);
       }
+      noteMcpPersonFromRow(record);
 
       const [observations, findings, conditions] = await Promise.all([
         getRecordObservations(supabase, args.record_id),

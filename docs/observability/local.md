@@ -85,10 +85,10 @@ If one surface is missing, validate outbound headers include `traceparent` and `
 After an authenticated MCP tool call (or a deliberate bad bearer):
 
 ```logql
-{service_name="orbit"} | json | component=~"mcp-auth|mcp-tool"
+{service_name="orbit"} |~ "mcp_(auth_|tool_call_)" | json | component=~"mcp-auth|mcp-tool"
 ```
 
-Person-scoped history for a window uses `person_id` on `mcp_tool_call_completed` — full queries in
+Person-scoped history uses body match + `attrs.person_id` (OTLP shape) — full queries in
 [`mcp-usage-audit.md`](./mcp-usage-audit.md).
 
 ## Troubleshooting

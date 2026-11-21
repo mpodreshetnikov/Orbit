@@ -193,6 +193,34 @@ describe("withUserClient scope enforcement", () => {
     expect(started?.argKeys).toBe("person_id,query");
     expect(JSON.stringify(started)).not.toContain("glucose");
   });
+
+  it("puts args.person_id on the completed audit line without withPerson", async () => {
+    const tool = withUserClient(async () => ok("done"));
+    const result = await runWithMcpToolName("search_medical_records", () =>
+      tool({ person_id: "person-arg-1", query: "x" }, context(["health:read"])),
+    );
+
+    expect(result.isError).toBeUndefined();
+    const completed = vi.mocked(logMcpToolCallCompleted).mock.calls[0]?.[0];
+    expect(completed?.personId).toBe("person-arg-1");
+    expect(JSON.stringify(completed)).not.toContain("glucose");
+  });
+
+  it("notes person_id from a handler that loads a person-owned row", async () => {
+    const { noteMcpPersonFromRow } = await import("./audit");
+    const tool = withUserClient(async () => {
+      noteMcpPersonFromRow({ person_id: "person-from-record" });
+      return ok("activated");
+    });
+    const result = await runWithMcpToolName("activate_medical_record", () =>
+      tool({ record_id: "rec-1" }, context(["health:read", "health:write"])),
+    );
+
+    expect(result.isError).toBeUndefined();
+    const completed = vi.mocked(logMcpToolCallCompleted).mock.calls[0]?.[0];
+    expect(completed?.personId).toBe("person-from-record");
+    expect(completed?.tool).toBe("activate_medical_record");
+  });
 });
 
 describe("mcpElapsedMs", () => {

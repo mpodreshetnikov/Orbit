@@ -7,6 +7,7 @@ import {
   logMcpToolCallCompleted,
   logMcpToolCallStarted,
   mcpArgumentShape,
+  noteMcpPersonIdFromArgs,
   noteMcpResolvedPersonId,
   runWithMcpToolAuditScope,
 } from "./audit";
@@ -117,6 +118,8 @@ export function withUserClient<Args>(handler: ToolHandler<Args>, options: ToolOp
       const argKeys = mcpArgumentShape(args);
       const clientId = getClientIdFromContext(ctx);
       const startedAt = performance.now();
+      // Person-scoped tools that skip withPerson still pass person_id in args.
+      noteMcpPersonIdFromArgs(args);
 
       let auth: McpAuthExtra;
       try {
