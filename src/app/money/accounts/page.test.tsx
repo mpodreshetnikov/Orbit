@@ -233,6 +233,7 @@ describe("MoneyAccountsPage", () => {
         is_active: true,
       });
     });
+    expect(screen.getByText("money.accounts")).toBeInTheDocument();
   });
 
   it("edits and deletes an existing account", async () => {
@@ -273,6 +274,8 @@ describe("MoneyAccountsPage", () => {
         ownerPersonId: "person-1",
       });
     });
+    // Mocked list is unchanged until refetch; the account row stays on screen.
+    expect(screen.getByText(makeAccount().account_label)).toBeInTheDocument();
   });
 
   it("adds a card and normalizes last4 before submit", async () => {
@@ -296,5 +299,7 @@ describe("MoneyAccountsPage", () => {
         card_label: "Debit",
       });
     });
+    expect(screen.getByText("money.accounts")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "money.addCard" })).toBeInTheDocument();
   });
 });

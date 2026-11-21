@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-11-21T08:16:59.599Z",
-  "total": 228,
+  "generated_at": "2026-11-21T09:14:04.451Z",
+  "total": 216,
   "counts": {
     "browserExtension/src/core/content-bridge.test.ts::mock-call-only": 10,
     "browserExtension/src/core/import-runner.test.ts::mock-call-only": 2,
@@ -9,10 +9,7 @@
     "src/app/health/medications/[id]/page.test.tsx::mock-call-only": 1,
     "src/app/health/medications/new/page.test.tsx::mock-call-only": 2,
     "src/app/health/medications/page.test.tsx::mock-call-only": 1,
-    "src/app/money/accounts/page.test.tsx::mock-call-only": 3,
     "src/app/money/categories/page.test.tsx::mock-call-only": 5,
-    "src/app/money/transactions/page.test.tsx::mock-call-only": 2,
-    "src/app/settings/page.test.tsx::mock-call-only": 3,
     "src/components/catalogs/body-site-edit-dialog.test.tsx::mock-call-only": 2,
     "src/components/catalogs/finding-type-edit-dialog.test.tsx::mock-call-only": 2,
     "src/components/catalogs/measurement-catalog-edit-dialog.test.tsx::mock-call-only": 1,
@@ -54,7 +51,6 @@
     "src/hooks/use-money-accounts.test.tsx::mock-call-only": 3,
     "src/hooks/use-money-cards.test.tsx::mock-call-only": 4,
     "src/hooks/use-money-categories.test.tsx::mock-call-only": 3,
-    "src/hooks/use-money-reports.test.tsx::mock-call-only": 2,
     "src/hooks/use-money-transactions.test.tsx::mock-call-only": 3,
     "src/hooks/use-notifications.test.tsx::mock-call-only": 5,
     "src/hooks/use-observation-catalog.test.tsx::mock-call-only": 3,
@@ -72,7 +68,6 @@
     "src/lib/mcp/tools/medications.test.ts::lone-tocontain": 14,
     "src/lib/mcp/tools/medications.test.ts::mock-call-only": 4,
     "src/lib/mcp/tools/records.test.ts::mock-call-only": 2,
-    "src/lib/medications/regenerate-dose-events.test.ts::mock-call-only": 3,
-    "src/lib/supabase-server.test.ts::mock-call-only": 2
+    "src/lib/medications/regenerate-dose-events.test.ts::mock-call-only": 3
   }
 }
