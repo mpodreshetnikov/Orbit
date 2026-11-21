@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-11-16T05:35:35.892Z",
-  "total": 311,
+  "generated_at": "2026-11-21T02:08:12.698Z",
+  "total": 302,
   "counts": {
     "browserExtension/popup-src/helpers.test.ts::lone-tocontain": 2,
     "browserExtension/src/core/content-bridge.test.ts::mock-call-only": 10,
@@ -15,11 +15,6 @@
     "scripts/extension/verify-classic-scripts.test.ts::lone-tocontain": 1,
     "scripts/extraction-eval/cassette.test.ts::lone-presence": 1,
     "scripts/extraction-eval/report.test.ts::lone-tocontain": 5,
-    "scripts/just/check-pr-size.test.ts::lone-presence": 1,
-    "scripts/just/check-pr-size.test.ts::lone-tocontain": 3,
-    "scripts/just/cursor-agent-git-hooks.test.ts::lone-tocontain": 1,
-    "scripts/just/run-deploy.test.ts::lone-tocontain": 2,
-    "scripts/just/task-claim-hook.test.ts::lone-tocontain": 2,
     "scripts/money-categorization-eval/cassette.test.ts::lone-presence": 1,
     "src/app/api/mcp/route.test.ts::mock-call-only": 1,
     "src/app/api/notifications/route.test.ts::mock-call-only": 2,

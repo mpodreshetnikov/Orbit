@@ -106,7 +106,9 @@ describe("gitHooksProblem", () => {
     const { home, hooksDir } = scratchHomeWithDispatcher(repoRoot);
     fs.symlinkSync(".dispatcher", path.join(hooksDir, "pre-push"));
     fs.symlinkSync(".dispatcher", path.join(hooksDir, "commit-msg"));
-    expect(gitHooksProblem({ repoRoot, home })).toContain(".git/hooks");
+    expect(gitHooksProblem({ repoRoot, home })).toBe(
+      `${hooksDir}/.cursor-original-hooks-path is '${repoRoot}/.git/hooks', not '${path.join(repoRoot, ".githooks")}', so the tracked push gate does not run.`,
+    );
   });
 
   it("names a missing commit-msg dispatcher link when tracked", () => {

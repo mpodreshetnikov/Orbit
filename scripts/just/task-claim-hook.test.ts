@@ -289,7 +289,9 @@ describe("the hook itself", () => {
     git(lonely, "init", "-q", "-b", "main", ".");
     void code;
 
-    expect(runHook(lonely, edit(lonely, "src/x.ts"), {})).toContain("not reachable");
+    expect(runHook(lonely, edit(lonely, "src/x.ts"), {})).toBe(
+      message({ verdict: "unlinked" }, "src/x.ts"),
+    );
   });
 
   it("ignores tools that do not edit files", () => {
@@ -565,9 +567,12 @@ describe("the pre-commit end", () => {
     commitThroughGlobalHooks(code, { ORBIT_TASKS_REGISTRY: registry });
     fs.mkdirSync(path.join(code, "docs", "tasks"), { recursive: true });
     fs.writeFileSync(path.join(code, "docs", "tasks", "T-1-x.md"), "registry\n");
-    expect(commitThroughGlobalHooks(code, { ORBIT_TASKS_REGISTRY: registry })).not.toContain(
-      "task-claim (pre-commit)",
-    );
+    // Advisory noise from sibling hooks may land on stderr; the claim gate itself must stay quiet.
+    expect(
+      commitThroughGlobalHooks(code, { ORBIT_TASKS_REGISTRY: registry }).includes(
+        "task-claim (pre-commit)",
+      ),
+    ).toBe(false);
   });
 
   it("treats local Claude (CLAUDECODE / AI_AGENT=claude-code_*) as an agent session", () => {

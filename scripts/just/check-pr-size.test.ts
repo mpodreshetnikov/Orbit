@@ -162,6 +162,7 @@ describe("change size evaluation", () => {
       branch: "feature/x",
     });
 
+    expect(result.overLimit).toBe(true);
     expect(result.branchExemption).toBeUndefined();
   });
 
@@ -292,8 +293,9 @@ describe("what the failure tells the agent to do", () => {
   });
 
   it("says CI will fail when an advisory run is already over the limit", () => {
-    expect(formatWarning(evaluate([[1501, 0, "src/a.ts"]]), "origin/main")).toContain(
-      "CI will fail on it",
+    const warning = formatWarning(evaluate([[1501, 0, "src/a.ts"]]), "origin/main");
+    expect(warning).toMatch(
+      /^\[pr-size\] This branch adds 1501 reviewable lines against origin\/main, over the limit of 1500\. CI will fail on it\./m,
     );
   });
 });
@@ -528,14 +530,15 @@ describe("base ref resolution", () => {
   );
 
   it("checks against the base it was given", () => {
-    expect(resolvedAgainst(runScript([], { PR_SIZE_BASE: "origin/main" }))).toContain(
-      "origin/main",
+    // Match the resolved base whether the verdict is OK (`limit N`) or over-limit.
+    expect(resolvedAgainst(runScript([], { PR_SIZE_BASE: "origin/main" }))).toMatch(
+      /against origin\/main, (?:limit \d+|over the limit of \d+)/,
     );
   });
 
   it("treats the zero sha as no baseline rather than an unresolvable ref", () => {
-    expect(resolvedAgainst(runScript([], { PR_SIZE_BASE: checkPrSize.ZERO_SHA }))).toContain(
-      "origin/main",
+    expect(resolvedAgainst(runScript([], { PR_SIZE_BASE: checkPrSize.ZERO_SHA }))).toMatch(
+      /against origin\/main, (?:limit \d+|over the limit of \d+)/,
     );
   });
 
