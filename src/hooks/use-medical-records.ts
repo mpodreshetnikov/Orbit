@@ -26,7 +26,7 @@ const STATUS_GROUP_MAP: Record<string, string[]> = {
   active: ["active"],
   // Drafts and records needing user review
   draft: ["draft", "ocr_review", "structure_review"],
-  // Left behind by the removed UI OCR path (or still mid-pipeline): not "active" yet
+  // Records being processed by AI or OCR failed (user can retry)
   processing: ["ocr_processing", "structuring", "processing", "ocr_failed"],
   // Removed records
   removed: ["removed"],

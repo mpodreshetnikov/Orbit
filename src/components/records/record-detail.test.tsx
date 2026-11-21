@@ -84,6 +84,7 @@ vi.mock("@/hooks", () => ({
   usePersonObservationHistory: (...args: unknown[]) =>
     hookMocks.usePersonObservationHistory(...args),
   usePersons: (...args: unknown[]) => hookMocks.usePersons(...args),
+  useBackgroundOCR: () => ({ retryOcr: vi.fn().mockResolvedValue(undefined) }),
 }));
 
 vi.mock("./attachment-preview", () => ({
@@ -454,7 +455,7 @@ describe("RecordDetail", () => {
   });
 
   it("renders loading/error states and a neutral unprocessed OCR status", async () => {
-    const { RecordDetail } = await import("./record-detail");
+    const { RecordDetail } = await import("./record-detail-gate");
 
     hookMocks.useMedicalRecord.mockReturnValue({
       data: null,
@@ -512,7 +513,7 @@ describe("RecordDetail", () => {
   }, 20000);
 
   it("shows no-attachments copy for unprocessed records without files", async () => {
-    const { RecordDetail } = await import("./record-detail");
+    const { RecordDetail } = await import("./record-detail-gate");
 
     hookMocks.useMedicalRecord.mockReturnValue({
       data: baseRecord({
@@ -531,7 +532,7 @@ describe("RecordDetail", () => {
   });
 
   it("names the cause of a failed OCR in the reader's language", async () => {
-    const { RecordDetail } = await import("./record-detail");
+    const { RecordDetail } = await import("./record-detail-gate");
     hookMocks.useMedicalRecord.mockReturnValue({
       data: baseRecord({
         status: "ocr_failed",
@@ -563,7 +564,7 @@ describe("RecordDetail", () => {
   });
 
   it("says on the review screen that a page of the document was lost", async () => {
-    const { RecordDetail } = await import("./record-detail");
+    const { RecordDetail } = await import("./record-detail-gate");
 
     hookMocks.useMedicalRecord.mockReturnValue({
       data: baseRecord({
@@ -593,7 +594,7 @@ describe("RecordDetail", () => {
   });
 
   it("renders ocr and structure review branches", async () => {
-    const { RecordDetail } = await import("./record-detail");
+    const { RecordDetail } = await import("./record-detail-gate");
 
     hookMocks.useMedicalRecord.mockReturnValue({
       data: baseRecord({ status: "ocr_review" }),
@@ -616,7 +617,7 @@ describe("RecordDetail", () => {
   });
 
   it("keeps a failed structuring visible on the OCR review screen", async () => {
-    const { RecordDetail } = await import("./record-detail");
+    const { RecordDetail } = await import("./record-detail-gate");
 
     hookMocks.useMedicalRecord.mockReturnValue({
       data: baseRecord({
@@ -644,7 +645,7 @@ describe("RecordDetail", () => {
   });
 
   it("renders active detail and opens add observation dialog", async () => {
-    const { RecordDetail } = await import("./record-detail");
+    const { RecordDetail } = await import("./record-detail-gate");
     render(<RecordDetail recordId="record-1" />);
 
     expect(screen.getByText("CBC Report")).toBeInTheDocument();
@@ -682,7 +683,7 @@ describe("RecordDetail", () => {
         },
       ],
     });
-    const { RecordDetail } = await import("./record-detail");
+    const { RecordDetail } = await import("./record-detail-gate");
     render(<RecordDetail recordId="record-1" />);
     const user = userEvent.setup();
 
@@ -721,7 +722,7 @@ describe("RecordDetail", () => {
     hookMocks.useHardDeleteRecord.mockReturnValue(hardDeleteMutation);
     hookMocks.useRestoreRecord.mockReturnValue(restoreMutation);
 
-    const { RecordDetail } = await import("./record-detail");
+    const { RecordDetail } = await import("./record-detail-gate");
 
     const activeView = render(<RecordDetail recordId="record-1" />);
     const user = userEvent.setup();
@@ -783,7 +784,7 @@ describe("RecordDetail", () => {
     hookMocks.useRecordFindings.mockReturnValue({ data: [] });
     hookMocks.useRecordConditions.mockReturnValue({ data: [] });
 
-    const { RecordDetail } = await import("./record-detail");
+    const { RecordDetail } = await import("./record-detail-gate");
     render(<RecordDetail recordId="record-1" />);
 
     expect(screen.getByText("records.noDate")).toBeInTheDocument();
@@ -820,7 +821,7 @@ describe("RecordDetail", () => {
       refetch,
     });
 
-    const { RecordDetail } = await import("./record-detail");
+    const { RecordDetail } = await import("./record-detail-gate");
     const stuckView = render(<RecordDetail recordId="record-1" />);
 
     expect(screen.getAllByText("records.status.notProcessed").length).toBeGreaterThan(0);
@@ -884,7 +885,7 @@ describe("RecordDetail", () => {
       refetch: vi.fn(),
     });
 
-    const { RecordDetail } = await import("./record-detail");
+    const { RecordDetail } = await import("./record-detail-gate");
     render(<RecordDetail recordId="record-1" />);
     const user = userEvent.setup();
 
@@ -913,7 +914,7 @@ describe("RecordDetail", () => {
     hookMocks.useUpdateConditionRecord.mockReturnValue(updateConditionMutation);
     hookMocks.useDeleteConditionRecord.mockReturnValue(deleteConditionMutation);
 
-    const { RecordDetail } = await import("./record-detail");
+    const { RecordDetail } = await import("./record-detail-gate");
     render(<RecordDetail recordId="record-1" />);
 
     const user = userEvent.setup();

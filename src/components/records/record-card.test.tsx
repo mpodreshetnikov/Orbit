@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { MedicalRecordListItem } from "@/types";
-import { RecordCard } from "./record-card";
+import { RecordCard } from "./record-card-view";
 
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,

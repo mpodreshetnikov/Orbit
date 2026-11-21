@@ -4,7 +4,16 @@ import React from "react";
 import { useTranslations } from "next-intl";
 import { format } from "date-fns";
 import { useDateFnsLocale } from "@/lib/date-locale";
-import { Calendar, Paperclip, MoreVertical, Eye, Trash2, RotateCcw, FileCheck } from "lucide-react";
+import {
+  Calendar,
+  Paperclip,
+  MoreVertical,
+  Eye,
+  Trash2,
+  RotateCcw,
+  Loader2,
+  FileCheck,
+} from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,7 +25,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { MedicalRecordListItem, RecordType } from "@/types";
-import { isStuckPendingOcrStatus, isUnprocessedRecordStatus } from "@/lib/medical-record-status";
 import { cn } from "@/lib/utils";
 
 interface RecordCardProps {
@@ -52,16 +60,18 @@ export function RecordCard({
 
   const isRemoved = record.status === "removed";
   const isDraft = record.status === "draft";
-  const isUnprocessed = isUnprocessedRecordStatus(record.status);
-  // Soft-remove stays for ocr_failed (and active/draft); hide only while still "in pipeline".
-  const hideSoftRemove = isStuckPendingOcrStatus(record.status) || record.status === "structuring";
+  const isProcessing =
+    record.status === "ocr_processing" ||
+    record.status === "structuring" ||
+    record.status === "processing";
+  const isOcrFailed = record.status === "ocr_failed";
 
   return (
     <Card
       className={cn(
         "group tap-target cursor-pointer select-none transition-all hover:shadow-md min-w-0 w-full overflow-hidden",
         isRemoved && "opacity-60",
-        isUnprocessed && "border-muted-foreground/30",
+        (isProcessing || isOcrFailed) && "border-primary/50",
       )}
       onClick={() => onView(record)}
     >
@@ -76,9 +86,15 @@ export function RecordCard({
               >
                 {t(`records.types.${record.record_type}`)}
               </Badge>
-              {isUnprocessed && (
-                <Badge variant="outline" className="text-xs text-muted-foreground">
-                  {t("records.status.notProcessed")}
+              {isProcessing && (
+                <Badge variant="outline" className="text-xs gap-1 border-primary/50 text-primary">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  {t("records.status.processing")}
+                </Badge>
+              )}
+              {isOcrFailed && (
+                <Badge variant="outline" className="text-xs border-destructive/50 text-destructive">
+                  {t("processing.failedTapToRetry")}
                 </Badge>
               )}
               {isDraft && (
@@ -146,7 +162,7 @@ export function RecordCard({
                 </DropdownMenuItem>
               )}
 
-              {!isRemoved && !hideSoftRemove && (
+              {!isRemoved && !isProcessing && (
                 <DropdownMenuItem
                   onClick={() => onRemove(record)}
                   className="text-destructive focus:text-destructive"

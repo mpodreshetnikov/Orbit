@@ -7,7 +7,6 @@ import Link from "next/link";
 import { format } from "date-fns";
 import { useDateFnsLocale } from "@/lib/date-locale";
 import { translateOcrFailure } from "@/lib/health/ocr-failure";
-import { isStuckPendingOcrStatus } from "@/lib/medical-record-status";
 import {
   ArrowLeft,
   Calendar,
@@ -23,6 +22,7 @@ import {
   ChevronUp,
   FileText,
   Plus,
+  Loader2,
   FlaskConical,
   ArrowUp,
   ArrowDown,
@@ -106,6 +106,8 @@ import {
   usePersonFindingHistory,
   usePersonConditionRecordHistory,
   usePersonObservationHistory,
+  useBackgroundOCR,
+  usePersons,
   useRuleOnProposedClosure,
 } from "@/hooks";
 import { FindingRow, FindingEditDialog, type FindingComparison } from "@/components/findings";
@@ -295,6 +297,8 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
     record?.person_id ?? null,
   );
   const { data: personObservationHistory } = usePersonObservationHistory(record?.person_id ?? null);
+  const { retryOcr } = useBackgroundOCR();
+  const { data: persons } = usePersons();
 
   const [showRemoveDialog, setShowRemoveDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -752,112 +756,74 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
   const isOcrReview = record.status === "ocr_review";
   const isOcrFailed = record.status === "ocr_failed";
   const isStructureReview = record.status === "structure_review";
-  const isUnprocessedPipeline =
-    isStuckPendingOcrStatus(record.status) || record.status === "structuring" || isOcrFailed;
+  const isProcessing = record.status === "ocr_processing" || record.status === "structuring";
 
-  // UI OCR/upload path is gone: neutral status instead of eternal "processing" / retry,
-  // but keep read-only access to stored attachments and OCR text. Soft-remove stays for
-  // ocr_failed so unwanted failed rows can leave the Not processed list.
-  if (isUnprocessedPipeline) {
+  // Show OCR failed state: error message and Retry OCR button
+  if (isOcrFailed) {
+    const personName = persons?.find((p) => p.id === record.person_id)?.name ?? record.title ?? "";
+    const hasAttachments = record.attachments.length > 0;
+    const handleRetryOcr = async () => {
+      if (!hasAttachments) {
+        return;
+      }
+      await retryOcr({
+        recordId,
+        personId: record.person_id,
+        personName,
+      });
+      refetch();
+    };
     return (
       <div className="space-y-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex items-start gap-3 min-w-0 flex-1">
-            <Button variant="ghost" size="icon" className="shrink-0" onClick={() => router.back()}>
-              <ArrowLeft className="h-5 w-5" />
-            </Button>
-            <div className="min-w-0 flex-1">
-              <Badge variant="outline" className="mb-1 text-muted-foreground">
-                {t("records.status.notProcessed")}
-              </Badge>
-              <h1 className="text-xl sm:text-2xl font-bold tracking-tight">
-                {record.title || t("records.status.notProcessed")}
-              </h1>
-              <p className="text-muted-foreground">{t("records.status.notProcessedHint")}</p>
-            </div>
-          </div>
-          {isOcrFailed ? (
-            <Button
-              variant="destructive"
-              onClick={handleRemove}
-              disabled={softDeleteMutation.isPending}
-            >
-              <Trash2 className="mr-2 h-4 w-4" />
-              {t("records.actions.remove")}
-            </Button>
-          ) : null}
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="icon" onClick={() => router.back()}>
+            <ArrowLeft className="h-5 w-5" />
+          </Button>
+          <h1 className="text-2xl font-bold tracking-tight">{t("processing.ocrFailed")}</h1>
         </div>
-
-        <div className="rounded-lg border border-dashed p-4 space-y-2">
-          <p className="text-sm text-muted-foreground">{t("records.status.viaAssistant")}</p>
-          {isOcrFailed && record.ocr_error ? (
-            <p className="text-sm text-muted-foreground">
-              {translateOcrFailure(record.ocr_error, t)}
-            </p>
-          ) : null}
-        </div>
-
-        {record.ocr_text ? (
-          <div className="rounded-lg border border-dashed border-muted-foreground/30 bg-muted/30 p-3">
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => setShowOcrText(!showOcrText)}
-              className="w-full justify-between text-left h-auto p-0 hover:bg-transparent"
-            >
-              <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-                <FileText className="h-4 w-4" />
-                <span>
-                  {t("records.detail.ocrText")}
-                  {` (${record.ocr_text.length} ${t("records.wizard.chars")})`}
-                </span>
-              </div>
-              {showOcrText ? (
-                <ChevronUp className="h-4 w-4 text-muted-foreground" />
-              ) : (
-                <ChevronDown className="h-4 w-4 text-muted-foreground" />
-              )}
-            </Button>
-            {showOcrText ? (
-              <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap rounded bg-black/5 p-3 text-xs text-muted-foreground dark:bg-white/5">
-                {record.ocr_text}
-              </pre>
-            ) : null}
-          </div>
-        ) : null}
-
-        <div>
-          <h2 className="text-lg font-semibold mb-4">
-            {t("records.detail.attachments")} ({record.attachments.length})
-          </h2>
-          {record.attachments.length === 0 ? (
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-6 space-y-4">
+          <p className="text-sm text-muted-foreground">
+            {/* The column holds a cause code, not a sentence: the server composes in English and
+                does not know the reader's language. */}
+            {translateOcrFailure(record.ocr_error, t)}
+          </p>
+          {!hasAttachments ? (
             <p className="text-sm text-muted-foreground">{t("records.detail.noAttachments")}</p>
-          ) : (
-            <AttachmentGrid attachments={record.attachments} />
-          )}
+          ) : null}
+          <Button onClick={handleRetryOcr} disabled={!hasAttachments}>
+            {t("processing.retryOcr")}
+          </Button>
         </div>
+      </div>
+    );
+  }
 
-        {isOcrFailed ? (
-          <AlertDialog open={showRemoveDialog} onOpenChange={setShowRemoveDialog}>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>{t("records.confirm.removeTitle")}</AlertDialogTitle>
-                <AlertDialogDescription>
-                  {t("records.confirm.removeMessage")}
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-                <AlertDialogAction
-                  onClick={confirmRemove}
-                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                >
-                  {t("common.remove")}
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        ) : null}
+  // Show processing state (use record title from OCR when available)
+  if (isProcessing) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="icon" onClick={() => router.back()}>
+            <ArrowLeft className="h-5 w-5" />
+          </Button>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">
+              {record.title || t("processing.processing")}
+            </h1>
+            <p className="text-muted-foreground">
+              {record.status === "ocr_processing"
+                ? t("processing.ocrInProgress")
+                : t("processing.structureInProgress")}
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-col items-center justify-center py-16">
+          <Loader2 className="h-16 w-16 animate-spin text-primary" />
+          <p className="mt-4 text-sm text-muted-foreground">{t("processing.pleaseWait")}</p>
+          <Button variant="outline" className="mt-6" onClick={() => refetch()}>
+            {t("common.refresh")}
+          </Button>
+        </div>
       </div>
     );
   }

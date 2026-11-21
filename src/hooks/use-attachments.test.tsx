@@ -47,19 +47,19 @@ describe("use-attachments", () => {
     await waitFor(() => expect(disabledHook.result.current.fetchStatus).toBe("idle"));
     expect(createClientMock).not.toHaveBeenCalled();
 
+    const createSignedUrl = vi.fn().mockResolvedValue({
+      data: { signedUrl: "https://signed.test/file-1" },
+      error: null,
+    });
+    const from = vi.fn(() => ({ createSignedUrl }));
     createClientMock.mockReturnValue({
-      storage: {
-        from: vi.fn(() => ({
-          createSignedUrl: vi.fn().mockResolvedValue({
-            data: { signedUrl: "https://signed.test/file-1" },
-            error: null,
-          }),
-        })),
-      },
+      storage: { from },
     });
     const successHook = renderHookWithQueryClient(() => useAttachmentUrl("path/a"));
     await waitFor(() => expect(successHook.result.current.isSuccess).toBe(true));
     expect(successHook.result.current.data).toBe("https://signed.test/file-1");
+    expect(from).toHaveBeenCalledWith("medical-attachments");
+    expect(createSignedUrl).toHaveBeenCalledWith("path/a", 3600);
 
     createClientMock.mockReturnValue({
       storage: {

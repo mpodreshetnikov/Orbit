@@ -21,3 +21,13 @@ export function isStuckPendingOcrStatus(status: string): boolean {
 export function isUnprocessedRecordStatus(status: string): boolean {
   return (UNPROCESSED_RECORD_STATUSES as readonly string[]).includes(status);
 }
+
+/** Detail gate: stuck OCR, mid-structuring, or failed OCR — no in-app retry/upload. */
+export function isUnprocessedPipelineStatus(status: string): boolean {
+  return isUnprocessedRecordStatus(status);
+}
+
+/** Soft-remove stays for ocr_failed; hide while still mid-pipeline. */
+export function shouldHideSoftRemove(status: string): boolean {
+  return isStuckPendingOcrStatus(status) || status === "structuring";
+}

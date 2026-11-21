@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MedicalRecordListItem } from "@/types";
-import { RecordsList } from "./records-list";
+import { RecordsList } from "./records-list-view";
 
 const hookMocks = vi.hoisted(() => ({
   useMedicalRecords: vi.fn(),
@@ -45,7 +45,7 @@ vi.mock("@/hooks", () => ({
   useUpdateMedicalRecord: (...args: unknown[]) => hookMocks.useUpdateMedicalRecord(...args),
 }));
 
-vi.mock("./record-card", () => ({
+vi.mock("./record-card-view", () => ({
   RecordCard: ({
     record,
     onView,

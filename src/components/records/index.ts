@@ -1,7 +1,7 @@
-export * from "./record-card";
-export * from "./records-list";
+export * from "./record-card-view";
+export * from "./records-list-view";
 export * from "./attachment-preview";
-export * from "./record-detail";
+export { RecordDetail } from "./record-detail-gate";
 export * from "./ocr-review-step";
 export {
   ObservationRow,
