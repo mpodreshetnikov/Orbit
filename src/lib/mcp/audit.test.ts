@@ -44,10 +44,9 @@ vi.mock("@/lib/observability/server-logger", () => ({
 }));
 
 vi.mock("@shared/lib/observability/correlation", async () => {
-  const actual =
-    await vi.importActual<typeof import("@shared/lib/observability/correlation")>(
-      "@shared/lib/observability/correlation",
-    );
+  const actual = await vi.importActual<typeof import("@shared/lib/observability/correlation")>(
+    "@shared/lib/observability/correlation",
+  );
   return {
     ...actual,
     generateRequestId: generateRequestIdMock,
