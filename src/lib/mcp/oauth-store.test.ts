@@ -650,6 +650,7 @@ describe("listGrantsForUser", () => {
 
     expect(argsFor(GRANTS, "is")).toEqual([["revoked_at", null]]);
     expect(argsFor(GRANTS, "eq")).toEqual([["auth_user_id", "user-1"]]);
+    expect(argsFor(GRANTS, "order")).toEqual([["created_at", { ascending: false }]]);
   });
 
   it("surfaces a query error", async () => {

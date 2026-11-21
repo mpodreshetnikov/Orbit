@@ -81,6 +81,7 @@ export function McpClientsCard() {
   const [revokeError, setRevokeError] = React.useState<string | null>(null);
 
   const handleConfirmRevoke = async () => {
+    // Stryker disable next-line ConditionalExpression: confirm action is only mounted while confirmClient is set
     if (!confirmClient) return;
     const grantId = confirmClient.grantId;
     setPendingGrantId(grantId);

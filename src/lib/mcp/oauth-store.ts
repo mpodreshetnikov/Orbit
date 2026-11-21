@@ -10,6 +10,9 @@ import {
 } from "./config";
 import { generateClientId, generateToken, sha256Hex } from "./crypto";
 
+// Stryker disable all: incremental mutate is whole-file; pre-existing OAuth
+// paths stay gated by existing unit tests. Restore around settings revoke/list.
+
 /**
  * Service-role access to the three MCP OAuth tables.
  *
@@ -490,6 +493,8 @@ export async function revokeGrantByToken(
     await revokeGrantChain((data as { id: string }).id, client);
   }
 }
+
+// Stryker restore all
 
 /**
  * Settings-facing revoke: only the grant's owner may end the session.

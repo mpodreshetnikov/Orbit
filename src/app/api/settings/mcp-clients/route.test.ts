@@ -28,6 +28,7 @@ describe("GET /api/settings/mcp-clients", () => {
 
     const response = await GET();
     expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({ error: "Unauthorized" });
     expect(listGrantsForUserMock).not.toHaveBeenCalled();
   });
 

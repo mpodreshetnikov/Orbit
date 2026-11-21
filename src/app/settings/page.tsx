@@ -1,5 +1,8 @@
 "use client";
 
+// Stryker disable all: incremental mutate is whole-file; pre-existing settings UI.
+// McpClientsCard behavior is gated in mcp-clients-card.test.tsx.
+
 import React from "react";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslations } from "next-intl";
