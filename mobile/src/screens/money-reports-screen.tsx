@@ -23,7 +23,7 @@ import {
 import type { SpendingMerchant, SpendingReport } from "@orbit-types/money-spending-report-ux";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { Stack, useRouter, type Href } from "expo-router";
-import { ChevronDown, ChevronLeft, ChevronRight, Filter, X } from "lucide-react-native";
+import { Calendar, ChevronDown, ChevronLeft, ChevronRight, Filter, X } from "lucide-react-native";
 import { useState } from "react";
 import {
   Alert,
@@ -227,11 +227,28 @@ export default function MoneyReportsScreen() {
             >
               <Icon icon={ChevronRight} size={20} tone="foreground" />
             </Pressable>
-            <Chip
-              label={t("money.spendingPeriodCustom")}
-              selected={period.kind === "custom"}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t("money.spendingPeriodCustom")}
+              accessibilityState={{ selected: period.kind === "custom" }}
+              hitSlop={space.sm}
               onPress={() => choosePeriod("custom")}
-            />
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 4,
+                flexShrink: 0,
+                paddingHorizontal: space.sm,
+                paddingVertical: 6,
+                borderRadius: radius.md,
+                backgroundColor: period.kind === "custom" ? palette.muted : "transparent",
+              }}
+            >
+              <Icon icon={Calendar} size={16} tone="foreground" />
+              <Text size="sm" weight="medium" numberOfLines={1}>
+                {t("money.spendingPeriodCustom")}
+              </Text>
+            </Pressable>
           </View>
         </View>
         {period.kind === "custom" ? (
@@ -543,7 +560,7 @@ function previousBasisShort(previousStart: string): string {
   }).format(new Date(`${previousStart}T00:00:00Z`));
 }
 
-/** Spending, income and net side by side; quiet forecast line inside each card. */
+/** Spending, income and net side by side; date once above, short forecast inside each card. */
 function Totals({ report }: { report: SpendingReport }) {
   const scheme = useColorScheme();
   const { totals, forecast, period } = report;
@@ -588,57 +605,65 @@ function Totals({ report }: { report: SpendingReport }) {
     },
   ];
   return (
-    <View style={{ flexDirection: "row", gap: space.sm }}>
-      {cards.map((card) => (
-        <Card
-          key={card.key}
-          testID={`spending-total-${card.key}`}
-          style={{ flex: 1, padding: space.md, gap: 2, overflow: "hidden" }}
-        >
-          <Text size="xs" tone="mutedForeground" numberOfLines={1}>
-            {t(card.title)}
-          </Text>
-          <Text
-            weight="bold"
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            style={
-              card.key === "net" && card.value > 0
-                ? { color: toneColor("good", scheme) }
-                : undefined
-            }
-          >
-            {`${card.key === "net" && card.value > 0 ? "+" : ""}${money(card.value)}`}
-          </Text>
-          {card.forecast !== undefined && end ? (
-            <Text size="xs" tone="mutedForeground" testID={card.testId}>
-              <Text size="xs" tone="mutedForeground">
-                {t("money.spendingForecastLineLabel", { date: end })}{" "}
+    <View style={{ gap: space.xs, width: "100%" }}>
+      {end ? (
+        <Text size="xs" tone="mutedForeground" numberOfLines={1}>
+          {t("money.spendingForecastDate", { date: end })}
+        </Text>
+      ) : null}
+      <View style={{ flexDirection: "row", gap: 4, width: "100%" }}>
+        {cards.map((card) => {
+          const forecastAmount =
+            card.forecast === undefined
+              ? null
+              : card.key === "net" && card.forecast > 0
+                ? `+${money(card.forecast)}`
+                : money(card.forecast);
+          return (
+            <Card
+              key={card.key}
+              testID={`spending-total-${card.key}`}
+              style={{ flex: 1, minWidth: 0, padding: space.sm, gap: 2 }}
+            >
+              <Text size="xs" tone="mutedForeground" numberOfLines={1}>
+                {t(card.title)}
               </Text>
-              <Text size="xs" tone="mutedForeground">
-                ≈
-                {card.key === "net" && card.forecast > 0
-                  ? `+${money(card.forecast)}`
-                  : money(card.forecast)}
+              <Text
+                weight="bold"
+                size="sm"
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                style={
+                  card.key === "net" && card.value > 0
+                    ? { color: toneColor("good", scheme) }
+                    : undefined
+                }
+              >
+                {`${card.key === "net" && card.value > 0 ? "+" : ""}${money(card.value)}`}
               </Text>
-            </Text>
-          ) : null}
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4 }}>
-            <Change
-              value={card.value}
-              base={card.previous}
-              mode={card.key}
-              basisLabel={prevBadge}
-            />
-            <Change
-              value={card.value}
-              base={card.lastYear}
-              mode={card.key}
-              basisLabel={yearBadge}
-            />
-          </View>
-        </Card>
-      ))}
+              {forecastAmount ? (
+                <Text size="xs" tone="mutedForeground" testID={card.testId}>
+                  {t("money.spendingForecastShort", { amount: forecastAmount })}
+                </Text>
+              ) : null}
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 2 }}>
+                <Change
+                  value={card.value}
+                  base={card.previous}
+                  mode={card.key}
+                  basisLabel={prevBadge}
+                />
+                <Change
+                  value={card.value}
+                  base={card.lastYear}
+                  mode={card.key}
+                  basisLabel={yearBadge}
+                />
+              </View>
+            </Card>
+          );
+        })}
+      </View>
     </View>
   );
 }

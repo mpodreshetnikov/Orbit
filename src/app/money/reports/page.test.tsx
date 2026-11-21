@@ -196,6 +196,7 @@ describe("MoneyReportsPage", () => {
     expect(
       within(screen.getByTestId("spending-total-net")).getByTestId("spending-forecast-net"),
     ).toHaveTextContent(/money\.spendingForecastLine/);
+    expect(screen.queryByText(/money\.spendingForecastDate/)).not.toBeInTheDocument();
     expect(screen.queryByText("money.spendingCompareLegend(2025)")).not.toBeInTheDocument();
     expect(screen.getByTestId("spending-view-transactions")).toHaveAttribute(
       "href",
@@ -343,22 +344,23 @@ describe("MoneyReportsPage", () => {
     expect(screen.getByText("money.spendingLoadFailed")).toBeInTheDocument();
   });
 
-  it("fits the totals side by side on a phone with forecast inside each card", () => {
+  it("fits the totals side by side on a phone with short forecast and date above", () => {
     hookMocks.useIsMobile.mockReturnValue(true);
     render(<MoneyReportsPage />);
     const expense = screen.getByTestId("spending-total-expense");
     expect(within(expense).getByText(/▲ 8%.*money\.spendingBadgePrevious/)).toBeInTheDocument();
+    expect(screen.getByText(/money\.spendingForecastDate/)).toBeInTheDocument();
     expect(within(expense).getByTestId("spending-forecast")).toHaveTextContent(
-      /money\.spendingForecastLine/,
+      /money\.spendingForecastShort/,
     );
     expect(
       within(screen.getByTestId("spending-total-income")).getByTestId("spending-forecast-income"),
-    ).toBeInTheDocument();
+    ).toHaveTextContent(/money\.spendingForecastShort/);
     expect(
       within(screen.getByTestId("spending-total-net")).getByTestId("spending-forecast-net"),
-    ).toBeInTheDocument();
+    ).toHaveTextContent(/money\.spendingForecastShort/);
     expect(screen.queryByText("money.spendingCompareLegend(2025)")).not.toBeInTheDocument();
-    expect(screen.getByText("money.spendingPeriodCustom")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "money.spendingPeriodCustom" })).toBeInTheDocument();
 
     const food = screen.getByTestId("spending-row-food");
     expect(food).toHaveTextContent("63%");

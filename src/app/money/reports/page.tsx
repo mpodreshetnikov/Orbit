@@ -3,7 +3,7 @@
 import React, { useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { ChevronDown, ChevronLeft, ChevronRight, Filter, X } from "lucide-react";
+import { Calendar, ChevronDown, ChevronLeft, ChevronRight, Filter, X } from "lucide-react";
 import { useIsMobile, useMoneyAccounts } from "@/hooks";
 import { useMoneySpendingReport } from "@/hooks/use-money-spending-report";
 import { useIntlLocale } from "@/lib/date-locale";
@@ -162,14 +162,17 @@ function PeriodControls({
         <button
           type="button"
           aria-pressed={period.kind === "custom"}
+          aria-label={labels.custom}
+          title={labels.custom}
           className={cn(
-            "whitespace-nowrap rounded-md px-2.5 py-1.5 text-sm",
+            "inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-2 py-1.5 text-sm",
             period.kind === "custom"
               ? "bg-background font-semibold shadow-sm"
               : "text-muted-foreground",
           )}
         >
-          {labels.custom}
+          <Calendar className="h-3.5 w-3.5 shrink-0" aria-hidden />
+          <span>{labels.custom}</span>
         </button>
       </PopoverTrigger>
       <PopoverContent className="w-64 space-y-3">
@@ -232,14 +235,13 @@ function PeriodControls({
     </div>
   );
 
-  // Phone: chips on one row; ‹ month › + «Период…» on their own nowrap row (Lead).
+  // Phone: chips on one row; ‹ month › + calendar «Период»/«Range» on their own nowrap row (Lead).
   // Desktop: chips and month+custom share one strip like before.
   return (
     <div
       className={cn(
         "flex min-w-0 gap-2",
-        // Detect phone via viewport class from parent flex-col — PeriodControls itself stays
-        // responsive with max-md stacking so ‹ month › + Период… never fight the chips for width.
+        // max-md stacking so ‹ month › + Period never fight the chips for width.
         "max-md:flex-col md:flex-nowrap md:items-center md:overflow-x-auto md:[-ms-overflow-style:none] md:[scrollbar-width:none] md:[&::-webkit-scrollbar]:hidden",
       )}
     >
@@ -332,8 +334,8 @@ function forecastDateLabel(periodEnd: string, locale: string) {
 }
 
 /**
- * Quiet forecast line inside a total card (`Прогноз на 30 нояб.: ≈X`). Title carries days-left +
- * pace hint; forecast amounts are unchanged.
+ * Quiet forecast line. Desktop: full `Прогноз на {date}: ≈X` inside the card. Phone: short
+ * `Прогноз ≈X` inside the card (date sits once above the three cards — Lead v4).
  */
 function ForecastLine({
   date,
@@ -348,28 +350,23 @@ function ForecastLine({
   hint: string;
   testId: string;
   t: Translate;
-  /** Phone cards: allow a soft wrap between label and amount, never mid-token. */
+  /** Phone cards: short copy that fits without mid-word wraps. */
   compact?: boolean;
 }) {
-  if (compact) {
-    return (
-      <p
-        data-testid={testId}
-        title={hint}
-        className="text-[10px] leading-tight text-muted-foreground"
-      >
-        <span className="whitespace-nowrap">{t("money.spendingForecastLineLabel", { date })}</span>{" "}
-        <span className="whitespace-nowrap tabular-nums">≈{amount}</span>
-      </p>
-    );
-  }
   return (
     <p
       data-testid={testId}
       title={hint}
-      className="truncate whitespace-nowrap text-[11px] leading-tight text-muted-foreground"
+      className={cn(
+        "text-muted-foreground",
+        compact
+          ? "whitespace-normal break-words text-[10px] leading-snug"
+          : "truncate whitespace-nowrap text-[11px] leading-tight",
+      )}
     >
-      {t("money.spendingForecastLine", { date, amount })}
+      {compact
+        ? t("money.spendingForecastShort", { amount })
+        : t("money.spendingForecastLine", { date, amount })}
     </p>
   );
 }
@@ -447,19 +444,32 @@ function TotalCards({
     card.key === "net" && card.current > 0 && "text-teal-800 dark:text-teal-300";
 
   return (
-    <div className={cn(isMobile ? "space-y-2" : "space-y-3")}>
-      <div className={cn(isMobile ? "grid grid-cols-3 gap-1.5" : "grid gap-4 md:grid-cols-3")}>
+    <div className={cn("w-full max-w-full", isMobile ? "space-y-1.5" : "space-y-3")}>
+      {isMobile && forecast ? (
+        <p
+          title={forecastHint}
+          className="whitespace-nowrap text-[11px] leading-tight text-muted-foreground"
+        >
+          {t("money.spendingForecastDate", { date: endLabel })}
+        </p>
+      ) : null}
+      <div
+        className={cn(
+          "grid w-full max-w-full",
+          isMobile ? "grid-cols-3 gap-1" : "gap-4 md:grid-cols-3",
+        )}
+      >
         {cards.map((card) => (
           <Card
             key={card.key}
-            className={isMobile ? "min-w-0 overflow-hidden" : undefined}
+            className={isMobile ? "min-w-0 max-w-full" : undefined}
             data-testid={`spending-total-${card.key}`}
           >
-            <CardContent className={cn("space-y-1", isMobile ? "p-2" : "space-y-2 p-5")}>
+            <CardContent className={cn("space-y-1", isMobile ? "p-1.5" : "space-y-2 p-5")}>
               <p
                 className={cn(
                   "truncate whitespace-nowrap text-muted-foreground",
-                  isMobile ? "text-xs" : "text-sm",
+                  isMobile ? "text-[11px]" : "text-sm",
                 )}
               >
                 {card.title}
@@ -483,7 +493,7 @@ function TotalCards({
                   compact={isMobile}
                 />
               ) : null}
-              <div className={cn("flex flex-wrap", isMobile ? "gap-1" : "gap-1.5")}>
+              <div className={cn("flex flex-wrap", isMobile ? "gap-0.5" : "gap-1.5")}>
                 <Change
                   value={card.current}
                   base={card.previous}
@@ -1355,7 +1365,7 @@ export default function MoneyReportsPage() {
                   ))}
                 </div>
               </div>
-              <p className="truncate whitespace-nowrap text-sm text-muted-foreground">
+              <p className="text-sm leading-snug text-muted-foreground [overflow-wrap:anywhere]">
                 {t(isMobile ? "money.spendingCategoriesHintTouch" : "money.spendingCategoriesHint")}
               </p>
             </CardHeader>
