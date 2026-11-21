@@ -48,6 +48,7 @@ describe("LoginForm", () => {
         }),
       }),
     );
+    expect(screen.getByRole("button")).toBeInTheDocument();
   });
 
   it("uses /health redirect when no search redirect is provided", async () => {
@@ -75,6 +76,7 @@ describe("LoginForm", () => {
         }),
       }),
     );
+    expect(screen.getByRole("button")).toBeInTheDocument();
   });
 
   it("shows Supabase error message when oauth sign-in fails", async () => {

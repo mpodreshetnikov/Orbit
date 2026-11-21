@@ -165,6 +165,7 @@ describe("MoneyReportsPage", () => {
       accountIds: ["acc-1"],
       categoryId: "food",
     });
+    expect(screen.getByTestId("spending-total-expense")).toBeInTheDocument();
   });
 
   it("shows the three totals with their comparisons and the forecast", () => {

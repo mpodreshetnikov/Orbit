@@ -1,6 +1,6 @@
 import React, { type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { usePushSubscribe } from "./use-push-subscribe";
 
@@ -43,6 +43,7 @@ describe("usePushSubscribe", () => {
         keys: { p256dh: "p256", auth: "auth" },
       }),
     });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
   });
 
   it("throws API response text when subscription request fails", async () => {
