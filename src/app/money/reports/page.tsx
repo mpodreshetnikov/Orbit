@@ -91,17 +91,30 @@ function Change({
   mode,
   label,
   newLabel,
+  title,
 }: {
   value: number;
   base: number;
   mode: SpendingReportMode | "net";
+  /** Kept for rare call sites; prefer a once-per-section legend + `title` tooltip. */
   label?: string;
   newLabel?: string;
+  title?: string;
 }) {
   const change = percentChange(value, base);
   const text = formatChange(change, { value, base, newLabel });
+  const tone = changeTone(change, mode);
   return (
-    <span className={TONE_CLASS[changeTone(change, mode)]}>
+    <span
+      title={title ?? label}
+      className={cn(
+        "inline-flex max-w-full items-center whitespace-nowrap rounded-md px-1.5 py-0.5 text-[11px] font-medium tabular-nums leading-none",
+        tone === "good" && "bg-teal-500/10",
+        tone === "bad" && "bg-orange-500/10",
+        tone === "neutral" && "bg-muted",
+        TONE_CLASS[tone],
+      )}
+    >
       {text ?? "—"}
       {label && text ? ` ${label}` : null}
     </span>
@@ -130,8 +143,8 @@ function PeriodControls({
   };
 
   return (
-    <>
-      <div role="group" className="flex rounded-lg bg-muted p-1">
+    <div className="flex min-w-0 items-center gap-2 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div role="group" className="flex shrink-0 rounded-lg bg-muted p-1">
         {PERIOD_KINDS.map((kind) =>
           kind === "custom" ? (
             <Popover key={kind} open={customOpen} onOpenChange={setCustomOpen}>
@@ -140,7 +153,7 @@ function PeriodControls({
                   type="button"
                   aria-pressed={period.kind === kind}
                   className={cn(
-                    "rounded-md px-3 py-1.5 text-sm",
+                    "whitespace-nowrap rounded-md px-3 py-1.5 text-sm",
                     period.kind === kind
                       ? "bg-background font-semibold shadow-sm"
                       : "text-muted-foreground",
@@ -182,7 +195,7 @@ function PeriodControls({
               aria-pressed={period.kind === kind}
               onClick={() => onChange(periodContaining(kind, isoDay(new Date())))}
               className={cn(
-                "rounded-md px-3 py-1.5 text-sm",
+                "whitespace-nowrap rounded-md px-3 py-1.5 text-sm",
                 period.kind === kind
                   ? "bg-background font-semibold shadow-sm"
                   : "text-muted-foreground",
@@ -193,7 +206,7 @@ function PeriodControls({
           ),
         )}
       </div>
-      <div className="flex items-center gap-1 rounded-lg border bg-background p-0.5">
+      <div className="flex shrink-0 items-center gap-1 rounded-lg border bg-background p-0.5">
         <Button
           type="button"
           variant="ghost"
@@ -203,7 +216,7 @@ function PeriodControls({
         >
           <ChevronLeft className="h-4 w-4" />
         </Button>
-        <span className="min-w-36 text-center text-sm font-semibold first-letter:uppercase">
+        <span className="min-w-28 whitespace-nowrap text-center text-sm font-semibold first-letter:uppercase">
           {periodLabel(period, locale)}
         </span>
         <Button
@@ -216,7 +229,7 @@ function PeriodControls({
           <ChevronRight className="h-4 w-4" />
         </Button>
       </div>
-    </>
+    </div>
   );
 }
 
@@ -239,7 +252,7 @@ function AccountFilter({
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button type="button" variant="outline" className="gap-1">
+        <Button type="button" variant="outline" className="shrink-0 gap-1 whitespace-nowrap">
           {label}
           <ChevronDown className="h-4 w-4" />
         </Button>
@@ -273,53 +286,40 @@ function AccountFilter({
   );
 }
 
-function Forecast({ report, t, locale }: { report: SpendingReport; t: Translate; locale: string }) {
-  const { totals, forecast, period, currency } = report;
-  if (!forecast) return null;
-  const endLabel = new Intl.DateTimeFormat(locale, {
+/** Short end-of-period date for the calm forecast line under a total. */
+function forecastDateLabel(periodEnd: string, locale: string) {
+  return new Intl.DateTimeFormat(locale, {
     day: "numeric",
-    month: "long",
+    month: "short",
     timeZone: "UTC",
-  }).format(new Date(`${period.end}T00:00:00Z`));
-  const money = (amount: number) => formatReportAmount(amount, currency, locale);
-  const done = forecast.expense > 0 ? Math.min(100, (totals.expense / forecast.expense) * 100) : 0;
+  }).format(new Date(`${periodEnd}T00:00:00Z`));
+}
+
+/**
+ * One muted forecast line under a total (`к 30 ноя: ≈X`) — replaces the old multi-row forecast
+ * card. Title carries days-left + pace hint; logic (expense / income / net) is unchanged.
+ */
+function ForecastLine({
+  date,
+  amount,
+  hint,
+  testId,
+  t,
+}: {
+  date: string;
+  amount: string;
+  hint: string;
+  testId: string;
+  t: Translate;
+}) {
   return (
-    <div data-testid="spending-forecast" className="space-y-1.5">
-      <p className="flex justify-between gap-2 text-sm">
-        <span className="text-muted-foreground">
-          {t("money.spendingForecast", { date: endLabel })}
-        </span>
-        <span className="font-semibold">≈ {money(forecast.expense)}</span>
-      </p>
-      <p className="flex justify-between gap-2 text-sm">
-        <span className="text-muted-foreground">
-          {t("money.spendingForecastIncome", { date: endLabel })}
-        </span>
-        <span className="font-semibold">≈ {money(forecast.income)}</span>
-      </p>
-      <p className="flex justify-between gap-2 text-sm">
-        <span className="text-muted-foreground">
-          {t("money.spendingForecastNet", { date: endLabel })}
-        </span>
-        <span
-          className={cn(
-            "font-semibold",
-            forecast.net > 0 && "text-teal-800 dark:text-teal-300",
-            forecast.net < 0 && "text-orange-800 dark:text-orange-300",
-          )}
-        >
-          ≈ {forecast.net > 0 ? "+" : ""}
-          {money(forecast.net)}
-        </span>
-      </p>
-      <div className="relative h-2 overflow-hidden rounded bg-muted">
-        <div className="absolute inset-y-0 left-0 bg-orange-600" style={{ width: `${done}%` }} />
-      </div>
-      <p className="text-xs text-muted-foreground">
-        {t("money.spendingForecastDaysLeft", { days: forecast.days_left })} ·{" "}
-        {t("money.spendingForecastHint")}
-      </p>
-    </div>
+    <p
+      data-testid={testId}
+      title={hint}
+      className="truncate whitespace-nowrap text-[11px] leading-tight text-muted-foreground"
+    >
+      {t("money.spendingForecastLine", { date, amount })}
+    </p>
   );
 }
 
@@ -334,9 +334,13 @@ function TotalCards({
   locale: string;
   isMobile: boolean;
 }) {
-  const { totals, period, currency } = report;
+  const { totals, period, currency, forecast } = report;
   const money = (amount: number) => formatReportAmount(amount, currency, locale);
   const year = String(period.last_year);
+  const endLabel = forecastDateLabel(period.end, locale);
+  const forecastHint = forecast
+    ? `${t("money.spendingForecastDaysLeft", { days: forecast.days_left })} · ${t("money.spendingForecastHint")}`
+    : "";
   const cards = [
     {
       key: "expense" as const,
@@ -345,6 +349,8 @@ function TotalCards({
       current: totals.expense,
       previous: totals.previous_expense,
       lastYear: totals.last_year_expense,
+      forecastAmount: forecast ? money(forecast.expense) : null,
+      forecastTestId: "spending-forecast",
     },
     {
       key: "income" as const,
@@ -353,6 +359,8 @@ function TotalCards({
       current: totals.income,
       previous: totals.previous_income,
       lastYear: totals.last_year_income,
+      forecastAmount: forecast ? money(forecast.income) : null,
+      forecastTestId: "spending-forecast-income",
     },
     {
       key: "net" as const,
@@ -361,16 +369,36 @@ function TotalCards({
       current: totals.net,
       previous: totals.previous_net,
       lastYear: totals.last_year_net,
+      forecastAmount: forecast ? `${forecast.net > 0 ? "+" : ""}${money(forecast.net)}` : null,
+      forecastTestId: "spending-forecast-net",
     },
   ];
   const netClass = (card: (typeof cards)[number]) =>
     card.key === "net" && card.current > 0 && "text-teal-800 dark:text-teal-300";
+  const legend = (
+    <p className="whitespace-nowrap text-[11px] text-muted-foreground">
+      {t("money.spendingCompareLegend", { year })}
+    </p>
+  );
 
   if (isMobile) {
-    // Three narrow tiles side by side, the forecast under them: the phone sees all three numbers
-    // without scrolling, which three stacked cards would not allow.
+    // Three narrow tiles side by side; one shared forecast line under them so nothing truncates
+    // mid-word inside the cards.
+    const narrowMoney = (amount: number) => {
+      try {
+        return new Intl.NumberFormat(locale, {
+          style: "currency",
+          currency,
+          currencyDisplay: "narrowSymbol",
+          maximumFractionDigits: 0,
+        }).format(amount);
+      } catch {
+        return money(amount);
+      }
+    };
     return (
-      <div className="space-y-3">
+      <div className="space-y-2">
+        {legend}
         <div className="grid grid-cols-3 gap-1.5">
           {cards.map((card) => (
             <Card
@@ -379,80 +407,108 @@ function TotalCards({
               data-testid={`spending-total-${card.key}`}
             >
               <CardContent className="space-y-1 p-2">
-                <p className="text-xs text-muted-foreground">{card.title}</p>
-                <p className={cn("text-sm font-bold leading-tight tabular-nums", netClass(card))}>
-                  {card.value}
+                <p className="truncate whitespace-nowrap text-xs text-muted-foreground">
+                  {card.title}
                 </p>
-                <p className="text-xs">
+                <p
+                  className={cn(
+                    "truncate whitespace-nowrap text-sm font-bold leading-tight tabular-nums",
+                    netClass(card),
+                  )}
+                >
+                  {card.key === "net" && card.current > 0 ? "+" : ""}
+                  {narrowMoney(card.current)}
+                </p>
+                <div className="flex flex-wrap gap-1">
                   <Change
                     value={card.current}
                     base={card.previous}
                     mode={card.key}
-                    label={t("money.spendingVsPreviousShort")}
+                    title={t("money.spendingVsPreviousShort")}
                     newLabel={t("money.spendingChangeNew")}
                   />
-                </p>
-                <p className="text-xs">
                   <Change
                     value={card.current}
                     base={card.lastYear}
                     mode={card.key}
-                    label={t("money.spendingVsLastYear", { year })}
+                    title={t("money.spendingVsLastYear", { year })}
                     newLabel={t("money.spendingChangeNew")}
                   />
-                </p>
+                </div>
               </CardContent>
             </Card>
           ))}
         </div>
-        {report.forecast ? (
-          <Card>
-            <CardContent className="p-4">
-              <Forecast report={report} t={t} locale={locale} />
-            </CardContent>
-          </Card>
+        {forecast ? (
+          <p
+            title={forecastHint}
+            className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 whitespace-nowrap text-[11px] leading-tight text-muted-foreground"
+          >
+            <span data-testid="spending-forecast">
+              {t("money.spendingForecastLine", {
+                date: endLabel,
+                amount: narrowMoney(forecast.expense),
+              })}
+            </span>
+            <span data-testid="spending-forecast-income" className="text-muted-foreground/80">
+              · ≈{narrowMoney(forecast.income)}
+            </span>
+            <span
+              data-testid="spending-forecast-net"
+              className={cn(
+                forecast.net > 0 && "text-teal-800 dark:text-teal-300",
+                forecast.net < 0 && "text-orange-800 dark:text-orange-300",
+              )}
+            >
+              · ≈{forecast.net > 0 ? "+" : ""}
+              {narrowMoney(forecast.net)}
+            </span>
+          </p>
         ) : null}
       </div>
     );
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
+      {legend}
       <div className="grid gap-4 md:grid-cols-3">
         {cards.map((card) => (
           <Card key={card.key} data-testid={`spending-total-${card.key}`}>
             <CardContent className="space-y-2 p-5">
               <p className="text-sm text-muted-foreground">{card.title}</p>
-              <p className={cn("text-3xl font-bold tracking-tight", netClass(card))}>
+              <p className={cn("text-3xl font-bold tracking-tight tabular-nums", netClass(card))}>
                 {card.value}
               </p>
-              <p className="flex flex-wrap gap-x-3 text-sm">
+              {card.forecastAmount ? (
+                <ForecastLine
+                  date={endLabel}
+                  amount={card.forecastAmount}
+                  hint={forecastHint}
+                  testId={card.forecastTestId}
+                  t={t}
+                />
+              ) : null}
+              <div className="flex flex-wrap gap-1.5">
                 <Change
                   value={card.current}
                   base={card.previous}
                   mode={card.key}
-                  label={t("money.spendingVsPrevious")}
+                  title={t("money.spendingVsPrevious")}
                   newLabel={t("money.spendingChangeNew")}
                 />
                 <Change
                   value={card.current}
                   base={card.lastYear}
                   mode={card.key}
-                  label={t("money.spendingVsLastYear", { year })}
+                  title={t("money.spendingVsLastYear", { year })}
                   newLabel={t("money.spendingChangeNew")}
                 />
-              </p>
+              </div>
             </CardContent>
           </Card>
         ))}
       </div>
-      {report.forecast ? (
-        <Card>
-          <CardContent className="p-5">
-            <Forecast report={report} t={t} locale={locale} />
-          </CardContent>
-        </Card>
-      ) : null}
     </div>
   );
 }
@@ -516,7 +572,8 @@ function CategoryMap({
               <span
                 className={cn(
                   // Keep whole words; overflow clips instead of letter-splitting (e.g. Uncategorize/d).
-                  "block overflow-hidden break-normal font-semibold leading-tight",
+                  "block overflow-hidden break-keep font-semibold leading-tight",
+                  isMobile && "whitespace-nowrap",
                   roomy && !isMobile ? "text-base" : "text-xs",
                 )}
               >
@@ -524,7 +581,12 @@ function CategoryMap({
               </span>
             )}
             {roomy ? (
-              <span className={cn("block", isMobile ? "text-xs" : "text-sm")}>
+              <span
+                className={cn(
+                  "block whitespace-nowrap tabular-nums",
+                  isMobile ? "text-xs" : "text-sm",
+                )}
+              >
                 {formatReportAmount(amount, report.currency, locale)} · {share}%
               </span>
             ) : null}
@@ -638,19 +700,19 @@ function CategoryList({
                     )}
                     <span className="truncate">{name}</span>
                   </span>
-                  <span className="mt-0.5 flex flex-wrap gap-x-2 text-xs">
+                  <span className="mt-0.5 flex flex-wrap gap-1">
                     <Change
                       value={amount}
                       base={previousOf(category, mode)}
                       mode={mode}
-                      label={t("money.spendingVsPreviousShort")}
+                      title={t("money.spendingVsPreviousShort")}
                       newLabel={t("money.spendingChangeNew")}
                     />
                     <Change
                       value={amount}
                       base={lastYearOf(category, mode)}
                       mode={mode}
-                      label={t("money.spendingVsLastYear", { year })}
+                      title={t("money.spendingVsLastYear", { year })}
                       newLabel={t("money.spendingChangeNew")}
                     />
                   </span>
@@ -932,8 +994,11 @@ function MerchantList({
   const visible = showAll ? report.merchants : report.merchants.slice(0, LIST_TOP_N);
   return (
     <Card className="min-w-0 w-full">
-      <CardHeader className="pb-2">
+      <CardHeader className="space-y-1 pb-2">
         <CardTitle className="text-base">{t("money.spendingMerchants")}</CardTitle>
+        <p className="whitespace-nowrap text-[11px] text-muted-foreground">
+          {t("money.spendingVsPreviousShort")}
+        </p>
       </CardHeader>
       <CardContent className="space-y-3">
         <ul data-testid="spending-merchants" className="space-y-3">
@@ -961,21 +1026,23 @@ function MerchantList({
                   </span>
                 )}
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium">{merchant.name}</span>
-                  <span className="mt-0.5 flex flex-wrap gap-x-2 text-xs text-muted-foreground">
-                    <span>
+                  <span className="block truncate whitespace-nowrap text-sm font-medium">
+                    {merchant.name}
+                  </span>
+                  <span className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+                    <span className="whitespace-nowrap">
                       {t("money.spendingMerchantCount", { count: merchant.transaction_count })}
                     </span>
                     <Change
                       value={merchant.expense}
                       base={merchant.previous_expense}
                       mode="expense"
-                      label={t("money.spendingVsPreviousShort")}
+                      title={t("money.spendingVsPreviousShort")}
                       newLabel={t("money.spendingChangeNew")}
                     />
                   </span>
                 </span>
-                <span className="text-sm font-semibold">
+                <span className="whitespace-nowrap text-sm font-semibold tabular-nums">
                   {formatReportAmount(merchant.expense, report.currency, locale)}
                 </span>
               </button>
@@ -1111,9 +1178,16 @@ export default function MoneyReportsPage() {
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold">{t("money.spendingTitle")}</h1>
-        <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h1 className="text-2xl font-semibold">{t("money.spendingTitle")}</h1>
+          {!isMobile ? (
+            <span className="whitespace-nowrap text-sm text-muted-foreground">
+              {t("money.spendingCurrencyNote", { currency: REPORT_CURRENCY })}
+            </span>
+          ) : null}
+        </div>
+        <div className="flex min-w-0 items-center gap-2 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <PeriodControls
             key={`${period.start}:${period.end}`}
             period={period}
@@ -1132,21 +1206,17 @@ export default function MoneyReportsPage() {
             }
             t={t}
           />
-          <span className="text-sm text-muted-foreground">
-            {t("money.spendingCurrencyNote", { currency: REPORT_CURRENCY })}
-          </span>
         </div>
-      </div>
-
-      <div>
         <a
           href={transactionsHref}
           target={isMobile ? undefined : "_blank"}
           rel={isMobile ? undefined : "noreferrer"}
           data-testid="spending-view-transactions"
-          className="inline-flex h-9 items-center justify-center rounded-md border border-input bg-background px-3 text-sm font-medium shadow-sm hover:bg-accent hover:text-accent-foreground"
+          className="inline-flex w-fit whitespace-nowrap text-sm font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
         >
-          {t("money.spendingViewTransactions")}
+          {isMobile
+            ? t("money.spendingViewTransactionsShort")
+            : t("money.spendingViewTransactions")}
         </a>
       </div>
 
@@ -1255,7 +1325,7 @@ export default function MoneyReportsPage() {
                         });
                       }}
                       className={cn(
-                        "rounded-md px-3 py-1 text-sm",
+                        "whitespace-nowrap rounded-md px-3 py-1 text-sm",
                         mode === value
                           ? "bg-background font-semibold shadow-sm"
                           : "text-muted-foreground",
@@ -1269,6 +1339,11 @@ export default function MoneyReportsPage() {
               <p className="text-sm text-muted-foreground">
                 {t(isMobile ? "money.spendingCategoriesHintTouch" : "money.spendingCategoriesHint")}
               </p>
+              {isMobile ? (
+                <p className="whitespace-nowrap text-[11px] text-muted-foreground">
+                  {t("money.spendingCompareLegend", { year: String(report.period.last_year) })}
+                </p>
+              ) : null}
             </CardHeader>
             <CardContent>
               {mapCategories.length === 0 ? (

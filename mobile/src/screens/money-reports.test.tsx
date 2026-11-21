@@ -161,20 +161,18 @@ describe("the money report", () => {
   it("is reached from the money tab: totals with their changes, the forecast, the map, the list, the days and the shops", async () => {
     await renderScreens(routes, "/money");
     await fireEvent.press(await screen.findByText("Отчеты"));
-    expect(await screen.findByTestId("spending-total-expense")).toHaveTextContent(amount("40 000"));
-    expect(screen.getByTestId("spending-total-net")).toHaveTextContent(/^\+60\s000\s₽$/);
-    expect(screen.getByText("▼ 20% к пред.")).toBeOnTheScreen();
-    expect(screen.getByText("▲ 25% к ср. 2025")).toBeOnTheScreen();
-    expect(screen.getByText("▲ 11% к пред.")).toBeOnTheScreen();
-    expect(screen.getAllByText("0% к ср. 2025")).toHaveLength(2); // Income, and the food row.
+    expect(await screen.findByTestId("spending-total-expense")).toHaveTextContent(/40\s000\s₽/);
+    expect(screen.getByTestId("spending-total-net")).toHaveTextContent(/\+60\s000\s₽/);
+    expect(screen.getAllByText("▼ 20%").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("▲ 25%").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("▲ 11%").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("0%").length).toBeGreaterThanOrEqual(2); // Income, and the food row.
+    expect(screen.getAllByText("к пред. · к ср. 2025").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Октябрь 2026 г.")).toBeOnTheScreen();
-    expect(screen.getByText("Прогноз расходов на 31 октября")).toBeOnTheScreen();
-    expect(screen.getByTestId("spending-forecast")).toHaveTextContent(/^≈ 52\s000\s₽$/);
-    expect(screen.getByTestId("spending-forecast-income")).toHaveTextContent(/^≈ 110\s000\s₽$/);
-    expect(screen.getByTestId("spending-forecast-net")).toHaveTextContent(/^≈ \+58\s000\s₽$/);
-    expect(screen.getByText("Прогноз доходов на 31 октября")).toBeOnTheScreen();
-    expect(screen.getByText("Прогноз итога на 31 октября")).toBeOnTheScreen();
-    expect(screen.getByText(/^осталось 10 дней · /)).toBeOnTheScreen();
+    expect(screen.getByTestId("spending-forecast")).toHaveTextContent(/к .*≈.*52\s000/);
+    expect(screen.getByTestId("spending-forecast-income")).toHaveTextContent(/≈.*110\s000/);
+    expect(screen.getByTestId("spending-forecast-net")).toHaveTextContent(/≈.*\+58\s000/);
+    expect(screen.queryByText(/^Прогноз расходов/)).toBeNull();
     expect(screen.getByText("Для части операций взят ближайший прошлый курс.")).toBeOnTheScreen();
     expect(screen.getByTestId("spending-treemap")).toBeOnTheScreen();
     expect(screen.getByTestId("spending-row-food")).toBeOnTheScreen();
@@ -186,9 +184,9 @@ describe("the money report", () => {
     expect(screen.getByText("14 операций")).toBeOnTheScreen();
     expect(screen.getByText("1 операция")).toBeOnTheScreen();
     expect(screen.getByText("К")).toBeOnTheScreen(); // The initial of a shop without a logo.
-    expect(screen.getAllByText("▲ 20% к пред.").length).toBeGreaterThanOrEqual(2); // food + Пятёрочка
+    expect(screen.getAllByText("▲ 20%").length).toBeGreaterThanOrEqual(2); // food + Пятёрочка
     expect(screen.getAllByText(/новое/).length).toBeGreaterThanOrEqual(1); // shop/category with no prior
-    expect(screen.getByText("Посмотреть транзакции из отчёта")).toBeOnTheScreen();
+    expect(screen.getByText("Транзакции")).toBeOnTheScreen();
     expect(reportArgs().at(-1)).toEqual({
       p_person_id: PERSON.id,
       p_start: "2026-10-01",
@@ -452,6 +450,6 @@ describe("the money report", () => {
       forecast: { expense: 80000, income: 50000, net: -30000, days_left: 5 },
     });
     await renderScreens(routes, "/money/reports");
-    expect(await screen.findByTestId("spending-forecast-net")).toHaveTextContent(/^≈ -30\s000\s₽$/);
+    expect(await screen.findByTestId("spending-forecast-net")).toHaveTextContent(/≈.*-30\s000/);
   });
 });
