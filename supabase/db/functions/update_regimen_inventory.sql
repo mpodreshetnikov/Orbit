@@ -16,6 +16,7 @@ DECLARE
   v_inv jsonb;
   v_current numeric;
   v_unit text;
+  v_next numeric;
 BEGIN
   -- Validate caller
   IF auth.uid() IS NULL THEN
@@ -26,7 +27,13 @@ BEGIN
     RETURN;
   END IF;
 
-  SELECT r.inventory INTO v_inv FROM public.med_regimens r WHERE r.id = p_regimen_id;
+  -- Lock the regimen before reading inventory so concurrent writers cannot
+  -- overwrite each other's field-level changes with a stale whole-object write.
+  SELECT r.inventory INTO v_inv
+  FROM public.med_regimens r
+  WHERE r.id = p_regimen_id
+  FOR UPDATE;
+
   IF v_inv IS NULL OR (v_inv->>'enabled')::boolean IS NOT TRUE THEN
     RETURN;
   END IF;
@@ -35,17 +42,20 @@ BEGIN
   v_current := COALESCE((v_inv->>'current_amount')::numeric, 0);
 
   IF p_type = 'refill' THEN
-    v_inv := jsonb_set(v_inv, '{current_amount}', to_jsonb(v_current + p_amount), true);
+    v_next := v_current + p_amount;
   ELSIF p_type = 'set_absolute' THEN
-    v_inv := jsonb_set(v_inv, '{current_amount}', to_jsonb(GREATEST(0, p_amount)), true);
-  ELSIF p_type = 'correction' THEN
-    v_inv := jsonb_set(v_inv, '{current_amount}', to_jsonb(GREATEST(0, v_current + p_amount)), true);
+    v_next := GREATEST(0, p_amount);
+  ELSE
+    v_next := GREATEST(0, v_current + p_amount);
   END IF;
 
   INSERT INTO public.med_inventory_transactions (regimen_id, event_id, type, amount, unit, note)
   VALUES (p_regimen_id, NULL, p_type::public.med_inventory_transaction_type, p_amount, v_unit, NULLIF(trim(p_note), ''));
 
-  UPDATE public.med_regimens SET inventory = v_inv, updated_at = now() WHERE id = p_regimen_id;
+  UPDATE public.med_regimens
+  SET inventory = jsonb_set(inventory, '{current_amount}', to_jsonb(v_next), true),
+      updated_at = now()
+  WHERE id = p_regimen_id;
 END;
 $$;
 
@@ -54,4 +64,4 @@ REVOKE ALL ON FUNCTION public.update_regimen_inventory(uuid, text, numeric, text
 GRANT EXECUTE ON FUNCTION public.update_regimen_inventory(uuid, text, numeric, text) TO authenticated;
 
 COMMENT ON FUNCTION public.update_regimen_inventory(uuid, text, numeric, text) IS
-  'Insert inventory transaction (refill/set_absolute/correction) and update regimen inventory current_amount.';
+  'Insert inventory transaction (refill/set_absolute/correction) and update regimen inventory current_amount. Serializes on the regimen row (T-0020).';
