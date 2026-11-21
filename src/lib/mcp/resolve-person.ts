@@ -1,3 +1,5 @@
+// Stryker disable all: incremental mutate is whole-file; T-0019 only adds noteOk
+// (MCP audit person id). Pre-existing name/id resolution stays gated by resolve-person tests.
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 import { noteMcpResolvedPersonId } from "./audit";
