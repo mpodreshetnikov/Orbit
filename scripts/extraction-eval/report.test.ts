@@ -143,7 +143,10 @@ describe("renderMarkdown", () => {
     const markdown = renderMarkdown(
       summary({ cases: [{ caseId: "002", score }], aggregate: aggregate([score]) }),
     );
-    expect(markdown).toContain("| findings_to_resolve |");
+    // Empty set scores 0/0/0 at 100% — the row must still appear so the set cannot vanish.
+    expect(markdown).toMatch(
+      /^\| findings_to_resolve \| 0 \| 0 \| 0 \| 100\.0% \| 100\.0% \| 100\.0% \|$/m,
+    );
   });
 });
 
@@ -235,7 +238,10 @@ describe("renderVariance", () => {
     ]);
     const without = aggregate([scoreCase("002", snapshot(), snapshot(), [])]);
     const variance = renderVariance([withRow, without]);
-    expect(variance).toContain("condition resolution supporting_obs_code (1 of 2 runs)");
+    // Only one of two runs compared the field — the dimension label must say so, not look stable.
+    expect(variance).toMatch(
+      /^\| condition resolution supporting_obs_code \(1 of 2 runs\) \| 100\.0% \| stable \| 100\.0% \|$/m,
+    );
   });
 });
 
@@ -389,9 +395,8 @@ describe("renderMarkdown cost by stage", () => {
   });
 
   it("is left out entirely when nothing reported a stage", () => {
-    expect(renderMarkdown(summary({ cases: [{ caseId: "001" }] }))).not.toContain(
-      "## Cost by stage",
-    );
+    const rendered = renderMarkdown(summary({ cases: [{ caseId: "001" }] }));
+    expect(rendered.includes("## Cost by stage")).toBe(false);
   });
 });
 
@@ -415,7 +420,8 @@ describe("renderMarkdown cost by stage across passes", () => {
   });
 
   it("falls back to the rendered pass when no pass set is given", () => {
-    expect(renderMarkdown(summary({ cases: [one(2)] }))).toContain("$2.0000");
+    const rendered = renderMarkdown(summary({ cases: [one(2)] }));
+    expect(rendered).toMatch(/^\| \*\*total\*\* \| 1 \| \| \| \*\*\$2\.0000\*\* \| \|$/m);
   });
 
   // A replay's dollars are the recording's, and the no-cases-scored guard can return before the
@@ -427,8 +433,8 @@ describe("renderMarkdown cost by stage across passes", () => {
   });
 
   it("says a live run measured itself", () => {
-    expect(renderMarkdown(summary({ cases: [one(1)], mode: "live" }))).toContain(
-      "Measured on this run",
-    );
+    const rendered = renderMarkdown(summary({ cases: [one(1)], mode: "live" }));
+    expect(rendered).toMatch(/^## Cost by stage$/m);
+    expect(rendered).toMatch(/^> Measured on this run\.$/m);
   });
 });
