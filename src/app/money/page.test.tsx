@@ -9,8 +9,7 @@ vi.mock("next/navigation", () => ({
 
 describe("MoneyHome", () => {
   it("redirects to reports", () => {
-    MoneyHome();
-
+    expect(MoneyHome()).toBeUndefined();
     expect(redirectMock).toHaveBeenCalledWith("/money/reports");
   });
 });

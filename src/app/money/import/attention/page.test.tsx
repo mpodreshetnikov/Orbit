@@ -191,6 +191,8 @@ describe("MoneyImportAttentionPage", () => {
     render(<MoneyImportAttentionPage />);
 
     await waitFor(() => expect(reloadPage).toHaveBeenCalledTimes(1));
+    // Reload is requested; this mount still shows the checking card until the tab returns.
+    expect(screen.getByTestId("money-import-attention")).toBeInTheDocument();
   });
 
   it("offers the reload instead of making it when there is nowhere to remember one", async () => {

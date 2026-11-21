@@ -154,6 +154,7 @@ describe("useNotificationRouting + useUpdateNotificationRouting", () => {
       { onConflict: "recipient_user_id,person_id" },
     );
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["notification-routing"] });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
     invalidateQueries.mockRestore();
   });
 });
