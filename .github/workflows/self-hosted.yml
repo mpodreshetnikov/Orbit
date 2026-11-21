@@ -132,6 +132,8 @@ jobs:
           ORBIT_SECRET_SERVICE_ROLE_KEY: ${{ secrets.SERVICE_ROLE_KEY }}
           ORBIT_SECRET_VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
           ORBIT_SECRET_VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          # RO PAT for private orbit-tasks (Maxim work board). Empty is fine until Lead provisions it.
+          ORBIT_SECRET_ORBIT_TASKS_GITHUB_TOKEN: ${{ secrets.ORBIT_TASKS_GITHUB_TOKEN }}
           # The hosted project to move from, for migrate-from-supabase only (docs/SELF_HOSTING.md,
           # "Moving from hosted Supabase"): the SOURCE_* settings, or else the ones this repository's
           # hosted production deploys with (main.yml). deploy/ci/deploy.sh takes one whole set,

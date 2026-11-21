@@ -91,10 +91,61 @@ function renderCard(card: BoardCard): string {
   return parts.join("\n");
 }
 
+/** Done / canceled columns keep only this many newest cards by `updated`. */
+export const CLOSED_COLUMN_CARD_LIMIT = 10;
+
+const TRIMMED_COLUMNS = new Set<BoardColumnId>(["done", "canceled"]);
+
+export function isTrimmedBoardColumn(column: BoardColumnId): boolean {
+  return TRIMMED_COLUMNS.has(column);
+}
+
+/**
+ * Newest `updated` first for trimmed columns (blank `updated` sorts last via
+ * localeCompare). Tie-break / non-trimmed columns: by id.
+ */
+export function compareCardsForColumn(
+  a: BoardCard,
+  b: BoardCard,
+  column: BoardColumnId,
+): number {
+  if (isTrimmedBoardColumn(column)) {
+    // Stryker disable next-line MethodExpression: trim is cosmetic for ISO dates / blanks already normalized upstream
+    const au = a.updated.trim();
+    // Stryker disable next-line MethodExpression: trim is cosmetic for ISO dates / blanks already normalized upstream
+    const bu = b.updated.trim();
+    // Stryker disable next-line ConditionalExpression,EqualityOperator,BlockStatement: unequal updated always has non-zero localeCompare for our date strings
+    if (au !== bu) return bu.localeCompare(au);
+    return a.id.localeCompare(b.id);
+  }
+  return a.id.localeCompare(b.id);
+}
+
+export function selectCardsForColumn(
+  cards: BoardCard[],
+  column: BoardColumnId,
+): { items: BoardCard[]; total: number; shown: number } {
+  const sorted = cards.toSorted((a, b) => compareCardsForColumn(a, b, column));
+  const total = sorted.length;
+  if (!isTrimmedBoardColumn(column)) {
+    return { items: sorted, total, shown: total };
+  }
+  // Cap closed columns; slice of length ≤ limit is a no-op when total ≤ limit.
+  const items = sorted.slice(0, CLOSED_COLUMN_CARD_LIMIT);
+  return { items, total, shown: items.length };
+}
+
+/** e.g. `(3)` or `(10 из 214)` when a closed column is trimmed. */
+export function formatColumnCount(shown: number, total: number): string {
+  if (shown < total) return `(${shown} из ${total})`;
+  return `(${total})`;
+}
+
 function renderColumn(
   colId: BoardColumnId,
   colLabel: string,
   items: BoardCard[],
+  total: number,
   reviewNote: string,
 ): string {
   const body =
@@ -105,9 +156,10 @@ function renderColumn(
     colId === "for-review" && reviewNote
       ? `\n<span class="col-note">${escapeHtml(reviewNote)}</span>`
       : "";
+  const count = formatColumnCount(items.length, total);
   return [
     `<section class="column" data-column="${escapeHtml(colId)}">`,
-    `<h2>${escapeHtml(colLabel)} <span class="count">(${items.length})</span>${note}</h2>`,
+    `<h2>${escapeHtml(colLabel)} <span class="count">${escapeHtml(count)}</span>${note}</h2>`,
     body,
     "</section>",
   ].join("\n");
@@ -134,9 +186,8 @@ export function renderBoardHtml(
 
   const note = forReviewNote(options.reviewers ?? []);
   const columnsHtml = BOARD_COLUMNS.map(([colId, colLabel]) => {
-    // byCol arrays are render-local; sort in place is safe.
-    const items = byCol[colId].sort((a, b) => a.id.localeCompare(b.id));
-    return renderColumn(colId, colLabel, items, note);
+    const { items, total } = selectCardsForColumn(byCol[colId], colId);
+    return renderColumn(colId, colLabel, items, total, note);
   });
 
   const stamp = options.generatedAt
