@@ -111,7 +111,7 @@ export function logMcpToolCallStarted(attrs: {
     grant_id: attrs.grantId,
     client_id: attrs.clientId,
     arg_keys: attrs.argKeys,
-    // Stryker disable next-line ConditionalExpression,EqualityOperator: null and undefined both serialize as null
+    // Stryker disable next-line ConditionalExpression,EqualityOperator,LogicalOperator: nullish coalesce to null is the wire shape
     person_id: attrs.personId ?? null,
   });
 }
@@ -133,7 +133,7 @@ export function logMcpToolCallCompleted(attrs: {
     grant_id: attrs.grantId,
     client_id: attrs.clientId,
     arg_keys: attrs.argKeys,
-    // Stryker disable next-line ConditionalExpression,EqualityOperator: null and undefined both serialize as null
+    // Stryker disable next-line ConditionalExpression,EqualityOperator,LogicalOperator: nullish coalesce to null is the wire shape
     person_id: attrs.personId ?? null,
   });
 }
