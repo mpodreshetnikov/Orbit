@@ -188,6 +188,8 @@ describe("SettingsPage", () => {
         checkup_notification_timezone: "Europe/Warsaw",
       });
     });
+    expect(screen.getByLabelText("settings.pwa.notificationTime")).toHaveValue("07:45");
+    expect(screen.getByLabelText("settings.pwa.notificationTimezone")).toHaveValue("Europe/Warsaw");
   });
 
   it("toggles per-person routing and saves shared prefix", async () => {
@@ -218,6 +220,7 @@ describe("SettingsPage", () => {
         custom_prefix: "Pet",
       });
     });
+    expect(screen.getByText("Dog")).toBeInTheDocument();
 
     firstRender.unmount();
 
@@ -288,6 +291,7 @@ describe("SettingsPage", () => {
         checkup_notification_timezone: "UTC",
       });
     });
+    expect(screen.getByLabelText("settings.pwa.notificationTime")).toHaveValue("09:00");
   });
 
   it("falls back to Notification constructor when service-worker notification fails", async () => {

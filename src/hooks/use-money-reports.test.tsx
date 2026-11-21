@@ -369,6 +369,7 @@ describe("use-money-reports", () => {
       { onConflict: "person_id,category_id,month_start" },
     );
     expect(invalidateSpy).toHaveBeenCalled();
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
   });
 
   it("creates and loads self-transfer aliases", async () => {
@@ -581,6 +582,7 @@ describe("use-money-reports", () => {
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ["money-budget-report", "person-1", "2026-03-01"],
     });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
   });
 
   it("filters malformed aliases and deletes aliases while invalidating report queries", async () => {

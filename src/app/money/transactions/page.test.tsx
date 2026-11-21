@@ -510,6 +510,13 @@ describe("MoneyTransactionsPage", () => {
           to: expectedTo,
         }),
       );
+      const feedArgs = hookMocks.useInfiniteMoneyTransactionFeed.mock.calls.at(-1)?.[1] as {
+        from?: string;
+        to?: string;
+      };
+      expect(feedArgs.from).toBe(expectedFrom);
+      expect(feedArgs.to).toBe(expectedTo);
+      expect(screen.getByTestId("transaction-list")).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
@@ -786,6 +793,9 @@ describe("MoneyTransactionsPage", () => {
     fireEvent.scroll(list);
 
     expect(fetchNextPage).toHaveBeenCalledTimes(1);
+    // Near-bottom scroll should keep the feed mounted while paging.
+    expect(list).toBeInTheDocument();
+    expect(list.scrollTop).toBe(120);
   });
 
   it("shows the active filter count on the mobile filter button", async () => {
