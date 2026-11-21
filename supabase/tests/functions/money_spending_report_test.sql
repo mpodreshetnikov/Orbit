@@ -1,10 +1,10 @@
 BEGIN;
-SELECT plan(19);
+SELECT plan(30);
 
 SELECT has_function(
   'public',
   'money_get_spending_report',
-  ARRAY['uuid', 'date', 'date', 'character', 'uuid[]', 'uuid', 'date']
+  ARRAY['uuid', 'date', 'date', 'character', 'uuid[]', 'uuid', 'date', 'uuid', 'text']
 );
 
 INSERT INTO public.persons (id, name, kind)
@@ -39,10 +39,13 @@ VALUES
    'manual', '2026-03-06T10:00:00Z', -700, 'RUB', 'transfer', 'posted', 'Self', 'Макс П', true, 'spending-report-4'),
   ('7c000000-0000-0000-0000-000000000105', '7c000000-0000-0000-0000-000000000010', '7c000000-0000-0000-0000-000000000020',
    'manual', '2026-03-15T10:00:00Z', -10, 'USD', 'expense', 'posted', 'Pharmacy', NULL, false, 'spending-report-5'),
-  -- The previous period of the same length (2026-01-29 .. 2026-02-28): food 400.
+  -- The previous period of the same length (2026-01-29 .. 2026-02-28): food 400 early, food 250 late.
+  -- Incomplete compare through Mar 20 keeps only the first 20 previous days (through Feb 17), so 400.
   ('7c000000-0000-0000-0000-000000000106', '7c000000-0000-0000-0000-000000000010', '7c000000-0000-0000-0000-000000000020',
    'manual', '2026-02-10T10:00:00Z', -400, 'RUB', 'expense', 'posted', 'Food store', NULL, false, 'spending-report-6'),
-  -- Last year: food 3650, so an average 31-day period is 310.
+  ('7c000000-0000-0000-0000-000000000109', '7c000000-0000-0000-0000-000000000010', '7c000000-0000-0000-0000-000000000020',
+   'manual', '2026-02-25T10:00:00Z', -250, 'RUB', 'expense', 'posted', 'Food store', NULL, false, 'spending-report-9'),
+  -- Last year: food 3650, so an average 20-day (incomplete) window is 200; full 31-day would be 310.
   ('7c000000-0000-0000-0000-000000000107', '7c000000-0000-0000-0000-000000000010', '7c000000-0000-0000-0000-000000000020',
    'manual', '2025-06-01T10:00:00Z', -3650, 'RUB', 'expense', 'posted', 'Food store', NULL, false, 'spending-report-7'),
   -- Cancelled, never counts.
@@ -58,6 +61,8 @@ VALUES
   ('7c000000-0000-0000-0000-000000000203', '7c000000-0000-0000-0000-000000000106', 'Groceries', -400, 'final',
    (SELECT id FROM public.money_categories WHERE system_key = 'food' LIMIT 1)),
   ('7c000000-0000-0000-0000-000000000204', '7c000000-0000-0000-0000-000000000107', 'Groceries', -3650, 'final',
+   (SELECT id FROM public.money_categories WHERE system_key = 'food' LIMIT 1)),
+  ('7c000000-0000-0000-0000-000000000205', '7c000000-0000-0000-0000-000000000109', 'Groceries', -250, 'final',
    (SELECT id FROM public.money_categories WHERE system_key = 'food' LIMIT 1));
 
 CREATE TEMP TABLE report AS
@@ -70,13 +75,25 @@ SELECT is((SELECT (body -> 'totals' ->> 'expense')::numeric FROM report), 2200::
 SELECT is((SELECT (body -> 'totals' ->> 'income')::numeric FROM report), 5000::numeric, 'income is counted apart');
 SELECT is((SELECT (body -> 'totals' ->> 'net')::numeric FROM report), 2800::numeric, 'net is income less spending');
 SELECT is((SELECT (body -> 'totals' ->> 'previous_expense')::numeric FROM report), 400::numeric,
-  'the previous period is the 31 days before the period');
-SELECT is((SELECT round((body -> 'totals' ->> 'last_year_expense')::numeric, 2) FROM report), 310.00::numeric,
-  'last year''s average is its total scaled to the period''s length');
-SELECT is((SELECT body -> 'period' ->> 'previous_start' FROM report), '2026-01-29', 'the previous period starts 31 days back');
+  'incomplete period compares only the first compare_days of the previous window (drops Feb 25)');
+SELECT is((SELECT round((body -> 'totals' ->> 'last_year_expense')::numeric, 2) FROM report), 200.00::numeric,
+  'last year''s average is scaled to the elapsed compare_days, not the full month');
+SELECT is((SELECT body -> 'period' ->> 'previous_start' FROM report), '2026-02-01',
+  'a calendar month compares against the previous calendar month (not equal-length slide)');
+SELECT is((SELECT (body -> 'period' ->> 'compare_days')::integer FROM report), 20, 'compare_days is elapsed days while incomplete');
+SELECT is((SELECT body -> 'period' ->> 'previous_compare_end' FROM report), '2026-02-20',
+  'previous_compare_end is the same day-count of the previous month (Mar 1–20 vs Feb 1–20)');
 
-SELECT is((SELECT round((body -> 'forecast' ->> 'expense')::numeric, 2) FROM report), 2550.00::numeric,
+SELECT is((SELECT round((body -> 'forecast' ->> 'expense')::numeric, 2) FROM report), 2570.83::numeric,
   'the forecast adds each remaining day''s weekday average over twelve weeks');
+SELECT ok(
+  (SELECT body -> 'forecast' ? 'income' FROM report),
+  'forecast carries income while the period is running'
+);
+SELECT ok(
+  (SELECT body -> 'forecast' ? 'net' FROM report),
+  'forecast carries net (income − expense)'
+);
 SELECT is((SELECT (body -> 'forecast' ->> 'days_left')::integer FROM report), 11, 'eleven days are left after the 20th');
 SELECT is(
   (SELECT body -> 'forecast' FROM (
@@ -100,7 +117,7 @@ SELECT is(
    FROM report, jsonb_array_elements(body -> 'categories') AS category
    WHERE category ->> 'system_key' = 'food'),
   400::numeric,
-  'food carries its previous period'
+  'food carries its truncated previous period'
 );
 SELECT is(
   (SELECT jsonb_array_length(category -> 'months')
@@ -123,6 +140,13 @@ SELECT is(
   ARRAY['Food store', 'Pharmacy', 'Cafe X'],
   'merchants come by spending, largest first'
 );
+SELECT is(
+  (SELECT (merchant ->> 'previous_expense')::numeric
+   FROM report, jsonb_array_elements(body -> 'merchants') AS merchant
+   WHERE merchant ->> 'name' = 'Food store'),
+  400::numeric,
+  'merchants carry truncated previous spending'
+);
 
 SELECT is((SELECT jsonb_array_length(body -> 'days') FROM report), 31, 'one point per day of the period');
 
@@ -142,6 +166,61 @@ SELECT is(
   ) -> 'totals' ->> 'expense')::numeric),
   1000::numeric,
   'a category filter keeps only that category''s branch'
+);
+
+SELECT is(
+  (SELECT (public.money_get_spending_report(
+    '7c000000-0000-0000-0000-000000000010', '2026-03-01', '2026-03-31', 'RUB', NULL, NULL, '2026-03-20',
+    NULL, 'Food store'
+  ) -> 'totals' ->> 'expense')::numeric),
+  1000::numeric,
+  'a merchant filter keeps only that shop'
+);
+
+-- Completed period (today after end): previous includes the late Feb spend; last year scales to 31 days.
+SELECT is(
+  (SELECT (public.money_get_spending_report(
+    '7c000000-0000-0000-0000-000000000010', '2026-03-01', '2026-03-31', 'RUB', NULL, NULL, '2026-04-01'
+  ) -> 'totals' ->> 'previous_expense')::numeric),
+  650::numeric,
+  'a completed period compares the full previous window (Feb 10 + Feb 25)'
+);
+
+SELECT is(
+  (SELECT round((public.money_get_spending_report(
+    '7c000000-0000-0000-0000-000000000010', '2026-03-01', '2026-03-31', 'RUB', NULL, NULL, '2026-04-01'
+  ) -> 'totals' ->> 'last_year_expense')::numeric, 2)),
+  310.00::numeric,
+  'a completed period scales last year to the full period length'
+);
+
+-- Calendar month incomplete: Nov 1–16 vs Oct 1–16 (same day-count of previous month).
+SELECT is(
+  (SELECT body -> 'period' ->> 'previous_start' FROM (
+    SELECT public.money_get_spending_report(
+      '7c000000-0000-0000-0000-000000000010', '2026-11-01', '2026-11-30', 'RUB', NULL, NULL, '2026-11-16'
+    ) AS body
+  ) AS nov),
+  '2026-10-01',
+  'incomplete November compares from October 1, not a 30-day slide to October 2'
+);
+SELECT is(
+  (SELECT body -> 'period' ->> 'previous_compare_end' FROM (
+    SELECT public.money_get_spending_report(
+      '7c000000-0000-0000-0000-000000000010', '2026-11-01', '2026-11-30', 'RUB', NULL, NULL, '2026-11-16'
+    ) AS body
+  ) AS nov),
+  '2026-10-16',
+  'incomplete November truncates previous to October 16 (Nov 1–16 vs Oct 1–16)'
+);
+SELECT is(
+  (SELECT (body -> 'period' ->> 'compare_days')::integer FROM (
+    SELECT public.money_get_spending_report(
+      '7c000000-0000-0000-0000-000000000010', '2026-11-01', '2026-11-30', 'RUB', NULL, NULL, '2026-11-16'
+    ) AS body
+  ) AS nov),
+  16,
+  'incomplete November elapsed day-count is 16'
 );
 
 SELECT throws_ok(

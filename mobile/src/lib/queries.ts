@@ -436,7 +436,7 @@ export function useSpendingReport(
     personId: string | undefined;
   },
 ) {
-  const { personId, period, currency, accountIds, categoryId } = query;
+  const { personId, period, currency, accountIds, categoryId, brandId, merchantName } = query;
   return useQuery({
     queryKey: [
       "money-spending-report",
@@ -446,6 +446,8 @@ export function useSpendingReport(
       currency,
       [...accountIds].sort().join(","),
       categoryId,
+      brandId ?? null,
+      merchantName ?? null,
     ],
     queryFn: () => fetchSpendingReport({ ...query, personId: personId! }),
     enabled: !!personId,
