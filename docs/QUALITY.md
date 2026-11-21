@@ -347,16 +347,29 @@ The count is not the metric. `T-0006` merged as seven (#28, #30, #33, #34, #35, 
 
 ## User-Interface Changes Ship On Every Platform
 
-Orbit has two user interfaces: the web app (`src/`) and the native iOS client (`mobile/`). Set by
-the owner on 2026-10-21:
+Orbit has two user interfaces: the web app (`src/`) and the native client under `mobile/`. Today the
+native client **ships iOS only** (`mobile/app.config.ts` has an `ios` block and no `android` block).
+Set by the owner on 2026-10-21, with the mobile coverage posture clarified under `T-261114-x7e`
+(2026-11-21):
 
-1. **A user-interface feature is built for every platform at once**, unless the person asking names
-   one. A plan for such a feature has a milestone per platform; a platform left out is a recorded
-   decision with that person's reason, never an omission.
-2. **`mobile/src` is covered at 90% of lines and of branches.** The threshold is
-   `jest.coverageThreshold` in `mobile/package.json`; `mobile-check`, which CI runs on any change
-   under `mobile/`, fails below it. Screens are tested rendered, through Expo Router, against the
-   in-memory Supabase in `mobile/test/`.
+1. **A user-interface feature is built for every shipped platform at once**, unless the person asking
+   names one. A plan for such a feature has a milestone per platform; a platform left out is a
+   recorded decision with that person's reason, never an omission.
+2. **Mobile unit coverage by shipped platform** (recipe: `mobile-check`):
+   - **iOS (shipped):** `mobile/src` is covered at **90% of lines and of branches**. The threshold is
+     `jest.coverageThreshold` in `mobile/package.json`. `mobile-check` runs lint, typecheck and
+     `test-unit-mobile` (`jest --coverage` under `jest-expo`). Quality Gates
+     (`.github/workflows/main.yml`) runs `mobile-install` + `mobile-check` whenever
+     `mobileImpact` is true (any path under `mobile/`, or `supabase/db/database.types.ts`).
+     `main protection` requires Quality Gates, so a pull request that lowers mobile coverage below
+     the floor fails merge when `mobile/` is in scope. Local `check` / `ci` deliberately omit
+     `mobile-check` (it needs `mobile/node_modules`); after editing `mobile/`, run `mobile-check`.
+     Screens are tested rendered, through Expo Router, against the in-memory Supabase in
+     `mobile/test/`. Do not add tests solely to pad coverage without asserting behaviour.
+   - **Android (not shipped):** there is no `android` block in `mobile/app.config.ts`, so there is
+     no Android native client to gate. The coverage gate for Android applies when Android is first
+     shipped under `mobile/` — follow-up `T-261121-zwz` in the task registry. When that ships, the
+     same `mobile-check` / 90% path and this matrix apply to Android.
 3. **The agent proves the change itself, with pictures, before merge.** Web: the
    `change-review-screenshots` skill. iOS: the `Mobile recordings` workflow
    (`.github/workflows/mobile-recordings.yml`) runs on every pull request that touches `mobile/`,
@@ -370,17 +383,17 @@ the owner on 2026-10-21:
 
 For most code changes, **`ci`** satisfies static/build and test requirements; add the extra checks below when applicable.
 
-| Change Type                            | Mandatory Checks                                                      | Additional Checks                                                                                                 | Evidence Required                              |
-| -------------------------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| Docs only                              | `lint` (if touched TS/JS snippets only), docs links check             | none                                                                                                              | list of changed docs and cross-links validated |
-| UI/routes/components                   | `dev` + `ci`                                                          | run `test-e2e` when route participates in user processing flows; manual happy-path walkthrough on affected routes | command outcomes + screenshots/recording       |
-| iOS client (`mobile/`)                 | `mobile-check` (90% coverage gate)                                    | `Mobile recordings` workflow green on the head; a Maestro flow for each changed flow                              | simulator screenshots + MP4 per flow           |
-| Hooks/client orchestration             | `dev` + `ci`                                                          | run `test-e2e` when hook affects end-to-end user flows; walkthrough for stale cache/mutation behavior             | command outcomes + brief behavior notes        |
-| Edge/API workflow                      | `dev` + `ci`                                                          | verify auth behavior and error path handling; run `test-e2e` for user-triggered workflows                         | command outcomes + endpoint behavior notes     |
-| DB schema/policy/function/trigger/cron | `dev` + `ci` + `db-lint`, `db-test`, `db-run` or `db-reset` as needed | verify migration + `supabase/db` parity                                                                           | command outcomes + SQL diff rationale          |
-| Extension/service worker/import flow   | `dev` + `ci`                                                          | extension bridge/manual import scenario                                                                           | command outcomes + scenario transcript         |
-| Scripts/tooling                        | `dev` + `ci`                                                          | verify CLI behavior and error handling                                                                            | command outcomes + command transcript          |
-| CI/deploy/security config              | `dev` + `ci`, `secrets-preflight`                                     | check workflow/job behavior and required env contracts                                                            | command outcomes + config review notes         |
+| Change Type                            | Mandatory Checks                                                                                     | Additional Checks                                                                                                 | Evidence Required                              |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| Docs only                              | `lint` (if touched TS/JS snippets only), docs links check                                            | none                                                                                                              | list of changed docs and cross-links validated |
+| UI/routes/components                   | `dev` + `ci`                                                                                         | run `test-e2e` when route participates in user processing flows; manual happy-path walkthrough on affected routes | command outcomes + screenshots/recording       |
+| Native mobile client (`mobile/`)       | `mobile-check` (90% lines+branches; iOS shipped; Android not shipped — `T-261121-zwz` on first ship) | `Mobile recordings` workflow green on the head; a Maestro flow for each changed iOS flow                          | simulator screenshots + MP4 per flow           |
+| Hooks/client orchestration             | `dev` + `ci`                                                                                         | run `test-e2e` when hook affects end-to-end user flows; walkthrough for stale cache/mutation behavior             | command outcomes + brief behavior notes        |
+| Edge/API workflow                      | `dev` + `ci`                                                                                         | verify auth behavior and error path handling; run `test-e2e` for user-triggered workflows                         | command outcomes + endpoint behavior notes     |
+| DB schema/policy/function/trigger/cron | `dev` + `ci` + `db-lint`, `db-test`, `db-run` or `db-reset` as needed                                | verify migration + `supabase/db` parity                                                                           | command outcomes + SQL diff rationale          |
+| Extension/service worker/import flow   | `dev` + `ci`                                                                                         | extension bridge/manual import scenario                                                                           | command outcomes + scenario transcript         |
+| Scripts/tooling                        | `dev` + `ci`                                                                                         | verify CLI behavior and error handling                                                                            | command outcomes + command transcript          |
+| CI/deploy/security config              | `dev` + `ci`, `secrets-preflight`                                                                    | check workflow/job behavior and required env contracts                                                            | command outcomes + config review notes         |
 
 ## How To Check Quality (Execution + Validation)
 

@@ -692,7 +692,13 @@ describe("RECORD_DRAFT_HTML", () => {
   });
 
   it("asks before declining", () => {
-    expect(RECORD_DRAFT_HTML).toContain("Да, отклонить");
+    // First click only arms a confirm timer and relabels the button; the second click declines.
+    expect(RECORD_DRAFT_HTML).toMatch(
+      /busy === "decline" \|\| busy === "dismiss" \? "Отклоняем…" : confirmTimer \? "Да, отклонить" : "Отклонить"/,
+    );
+    expect(RECORD_DRAFT_HTML).toMatch(
+      /function onDecline\(\) \{\s*if \(busy\) return;\s*if \(!confirmTimer\) \{\s*confirmTimer = setTimeout\(function \(\) \{ confirmTimer = null; render\(\); \}, 4000\);/,
+    );
   });
 
   it("hands only a failed approve to Claude, which cannot decline", () => {

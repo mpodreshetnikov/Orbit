@@ -28,7 +28,7 @@ Use these command IDs in plans, PRs, and handoffs:
 - `test`: `just quality-smoke-build` (smoke/integration build gate)
 - `mobile-install`: `just mobile-install` (install the native iOS client's own locked dependencies; its tree is separate from the web app's)
 - `mobile-start`: `just mobile-start` (long-running: start the Expo dev server and open it in Expo Go on a phone--see `mobile/README.md` and the background note below)
-- `mobile-check`: `just mobile-check` (lint, typecheck and tests for the native iOS client, failing below 90% coverage; **not** covered by `check`)
+- `mobile-check`: `just mobile-check` (lint, typecheck and tests for the native mobile client under `mobile/`, failing below 90% lines+branches; Quality Gates runs it on `mobileImpact`; **not** covered by `check`; iOS shipped; Android not shipped — coverage gate on first ship is `T-261121-zwz`, see `docs/QUALITY.md`)
 - `test-unit-mobile`: `just test-unit-mobile`
 - `ios-sync`: `just ios-sync` (copy web assets and native plugins into `ios/`; run after changing `capacitor.config.ts` or adding a Capacitor plugin)
 - `ios-open`: `just ios-open` (open the iOS app shell in Xcode; macOS only)

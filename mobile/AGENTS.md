@@ -65,9 +65,12 @@ JavaScript bundle; it deploys nothing and writes nothing to the instance.
 Policy is in `docs/QUALITY.md` under "User-Interface Changes Ship On Every Platform"; here is how.
 
 **Tests.** `just mobile-check` runs lint, typecheck and `jest --coverage` under `jest-expo`, and fails
-below 90% of lines or branches of `src/`. A screen test renders through Expo Router with
-`renderScreens` (`test/render.tsx`) against `test/fake-supabase.ts` and `test/fixtures.ts`; `render`
-and `fireEvent` are async in `@testing-library/react-native` 14, so await both. Never put a test file
+below 90% of lines or branches of `src/`. Quality Gates runs that recipe on every `mobileImpact`
+change; local `check` does not. This is the iOS coverage gate (the only shipped native platform
+today). Android is not shipped (no `android` block); the coverage gate for Android is
+`T-261121-zwz` when it first ships. Do not pad coverage with behaviour-free tests. A screen test renders through Expo Router with `renderScreens`
+(`test/render.tsx`) against `test/fake-supabase.ts` and `test/fixtures.ts`; `render` and
+`fireEvent` are async in `@testing-library/react-native` 14, so await both. Never put a test file
 under `src/app/`: Expo Router would treat it as a route.
 
 **Recordings.** The `Mobile recordings` workflow runs on every pull request touching `mobile/` (and by

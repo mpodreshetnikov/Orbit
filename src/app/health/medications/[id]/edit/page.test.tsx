@@ -78,7 +78,7 @@ describe("edit medication page", () => {
   it("renders loading state when regimen is loading", () => {
     useRegimenMock.mockReturnValue({ data: null, isLoading: true, error: null });
     const { container } = render(<EditMedicationPage params={resolvedParams({ id: "reg-1" })} />);
-    expect(container.querySelector(".animate-pulse")).toBeTruthy();
+    expect(container.querySelectorAll(".animate-pulse").length).toBeGreaterThan(0);
   });
 
   it("renders error state when error exists and regimen is present", () => {

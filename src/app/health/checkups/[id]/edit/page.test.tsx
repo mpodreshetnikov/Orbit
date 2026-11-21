@@ -79,7 +79,7 @@ describe("edit checkup page", () => {
   it("renders loading skeleton", () => {
     useCheckupItemMock.mockReturnValue({ data: null, isLoading: true, error: null });
     const { container } = render(<EditCheckupPage params={resolvedParams({ id: "checkup-1" })} />);
-    expect(container.querySelector(".animate-pulse")).toBeTruthy();
+    expect(container.querySelectorAll(".animate-pulse").length).toBeGreaterThan(0);
   });
 
   it("renders error state when item is missing", () => {
