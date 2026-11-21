@@ -41,7 +41,6 @@ const KNOWN_HARDCODED_COPY_BASELINE: Record<string, number> = {
   "components/layout/scroll-to-top.tsx": 1,
   "components/oauth/consent-form.tsx": 8,
   "components/records/attachment-preview.tsx": 1,
-  "components/records/record-card.tsx": 1,
   "components/records/record-detail.tsx": 1,
   "components/ui/dialog.tsx": 1,
   "components/ui/sheet.tsx": 1,
