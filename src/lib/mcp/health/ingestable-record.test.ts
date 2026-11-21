@@ -1,15 +1,13 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import {
-  currentMcpPersonId,
-  runWithMcpToolAuditScope,
-} from "../audit";
+import { currentMcpPersonId, runWithMcpToolAuditScope } from "../audit";
 import { getIngestableRecord } from "./ingestable-record";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 
-function clientWith(
-  result: { data: unknown; error: { message: string } | null },
-): SupabaseClient<Database> {
+function clientWith(result: {
+  data: unknown;
+  error: { message: string } | null;
+}): SupabaseClient<Database> {
   const maybeSingle = vi.fn().mockResolvedValue(result);
   const eq = vi.fn().mockReturnValue({ maybeSingle });
   const select = vi.fn().mockReturnValue({ eq });
@@ -51,8 +49,6 @@ describe("getIngestableRecord", () => {
 
   it("surfaces a query error", async () => {
     const client = clientWith({ data: null, error: { message: "boom" } });
-    await expect(getIngestableRecord(client, "rec-1")).rejects.toThrow(
-      /Failed to load the record/,
-    );
+    await expect(getIngestableRecord(client, "rec-1")).rejects.toThrow(/Failed to load the record/);
   });
 });
