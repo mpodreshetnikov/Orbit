@@ -12,12 +12,14 @@ import {
   isGrantUserAllowed,
   issueGrant,
   linkCodeToGrant,
+  findGrantById,
   listGrantsForUser,
   pruneUnusedClients,
   registerClient,
   revokeGrant,
   revokeGrantByToken,
   revokeGrantChain,
+  revokeGrantOwnedByUser,
   touchGrant,
 } from "./oauth-store";
 
@@ -655,5 +657,83 @@ describe("listGrantsForUser", () => {
     await expect(listGrantsForUser("user-1", client)).rejects.toThrow(
       /Failed to list OAuth grants/,
     );
+  });
+});
+
+describe("findGrantById", () => {
+  it("returns the grant when it exists", async () => {
+    const { client, argsFor } = makeClient({
+      [GRANTS]: [{ data: { id: "grant-1", auth_user_id: "user-1", revoked_at: null } }],
+    });
+
+    await expect(findGrantById("grant-1", client)).resolves.toMatchObject({ id: "grant-1" });
+    expect(argsFor(GRANTS, "eq")).toEqual([["id", "grant-1"]]);
+  });
+
+  it("returns null when missing", async () => {
+    const { client } = makeClient({ [GRANTS]: [{ data: null }] });
+    await expect(findGrantById("missing", client)).resolves.toBeNull();
+  });
+
+  it("surfaces a lookup error", async () => {
+    const { client } = makeClient({ [GRANTS]: [{ error: { message: "boom" } }] });
+    await expect(findGrantById("grant-1", client)).rejects.toThrow(/Failed to look up OAuth grant/);
+  });
+});
+
+describe("revokeGrantOwnedByUser", () => {
+  it("revokes the grant chain when the caller owns it", async () => {
+    const { client, argsFor } = makeClient({
+      [GRANTS]: [
+        { data: { id: "grant-1", auth_user_id: "user-1", revoked_at: null } }, // find
+        { data: null }, // revoke root
+        { data: [] }, // children
+      ],
+    });
+
+    await expect(revokeGrantOwnedByUser("grant-1", "user-1", client)).resolves.toBe(true);
+    expect(argsFor(GRANTS, "eq")).toEqual(
+      expect.arrayContaining([
+        ["id", "grant-1"],
+        ["rotated_from", "grant-1"],
+      ]),
+    );
+  });
+
+  it("refuses another user's grant without touching it", async () => {
+    const { client, argsFor } = makeClient({
+      [GRANTS]: [{ data: { id: "grant-1", auth_user_id: "other", revoked_at: null } }],
+    });
+
+    await expect(revokeGrantOwnedByUser("grant-1", "user-1", client)).resolves.toBe(false);
+    expect(argsFor(GRANTS, "update")).toHaveLength(0);
+  });
+
+  it("still kills live successors when the listed grant was rotated away", async () => {
+    const { client, argsFor } = makeClient({
+      [GRANTS]: [
+        // find: ancestor already revoked by refresh
+        { data: { id: "grant-1", auth_user_id: "user-1", revoked_at: "2026-11-21T04:00:00.000Z" } },
+        { data: null }, // revokeGrant on ancestor (no-op update)
+        { data: [{ id: "grant-2" }] }, // live child via rotated_from
+        { data: null }, // revoke grant-2
+        { data: [] }, // no further children
+      ],
+    });
+
+    await expect(revokeGrantOwnedByUser("grant-1", "user-1", client)).resolves.toBe(true);
+    expect(argsFor(GRANTS, "eq")).toEqual(
+      expect.arrayContaining([
+        ["id", "grant-1"],
+        ["rotated_from", "grant-1"],
+        ["id", "grant-2"],
+      ]),
+    );
+  });
+
+  it("is a no-op for a missing grant", async () => {
+    const missing = makeClient({ [GRANTS]: [{ data: null }] });
+    await expect(revokeGrantOwnedByUser("missing", "user-1", missing.client)).resolves.toBe(false);
+    expect(missing.argsFor(GRANTS, "update")).toHaveLength(0);
   });
 });

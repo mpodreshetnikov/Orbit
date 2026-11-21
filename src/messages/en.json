@@ -80,6 +80,24 @@
       "routingPrefixPlaceholder": "e.g., My Dog",
       "routingPrefixHint": "Shown as (Prefix) in the notification title. Leave empty to use the person's name."
     },
+    "mcp": {
+      "title": "Connected assistants",
+      "description": "AI assistants you gave access to your Orbit health and money data. Revoking ends their access immediately and cannot be undone.",
+      "empty": "No assistants have access right now.",
+      "unnamedClient": "Unnamed assistant",
+      "lastUsed": "Last used {when}",
+      "neverUsed": "Never used",
+      "connectedAt": "Connected {when}",
+      "revoke": "Revoke access",
+      "revoking": "Revoking…",
+      "revokeConfirmTitle": "Revoke access for {name}?",
+      "revokeConfirmDescription": "This assistant will immediately lose access to your Orbit health and money data. This cannot be undone.",
+      "revokeConfirmAction": "Revoke access",
+      "revokeError": "Could not revoke access: {error}",
+      "revokeErrorFallback": "unknown error",
+      "loadError": "Could not load connected assistants: {error}",
+      "loadErrorFallback": "unknown error"
+    },
     "notificationsDebug": {
       "title": "Notifications debug",
       "description": "Manually trigger the notifications cron Edge Function for testing.",

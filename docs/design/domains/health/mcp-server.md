@@ -26,9 +26,13 @@ medication tools write.
 | `/api/oauth/authorize/decision`                   | Consent form target; mints the authorization code.              |
 | `/api/oauth/token`                                | Authorization-code and refresh-token grants.                    |
 | `/api/oauth/revoke`                               | RFC 7009 revocation.                                            |
+| `/api/settings/mcp-clients`                       | Session-gated list of the signed-in user's live grants.         |
+| `/api/settings/mcp-clients/[grantId]`             | Session-gated revoke (`DELETE`); next tool call then 401s.      |
 
-Everything 404s unless `MCP_SERVER_ENABLED=1`, so an unintended deployment cannot be registered as
-a connector against real data.
+Everything under `/api/mcp`, `/api/oauth/*` and `/.well-known/*` 404s unless `MCP_SERVER_ENABLED=1`,
+so an unintended deployment cannot be registered as a connector against real data. The settings
+routes stay available whenever the app is up: a user must still be able to end a grant after the
+master switch is flipped off.
 
 ## Why the authorize step is a page, not a route handler
 
@@ -76,7 +80,10 @@ the read path, and any secret at rest.
 
 The cost is that minted tokens are not revocable through GoTrue, so "sign out everywhere" does not
 kill MCP access. Revocation is enforced on our side instead: every request reads the grant row and
-checks `revoked_at`, `access_token_expires_at`, and live `allowed_users` membership.
+checks `revoked_at`, `access_token_expires_at`, and live `allowed_users` membership. The owner ends
+a connector from `/settings` (Connected assistants): that DELETE hits
+`/api/settings/mcp-clients/[grantId]`, sets `revoked_at` on the grant chain, and the next tool call
+answers 401.
 
 ## Auth failure vs infrastructure failure
 

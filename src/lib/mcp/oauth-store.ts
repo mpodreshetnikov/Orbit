@@ -370,6 +370,22 @@ export async function issueGrant(
   };
 }
 
+export async function findGrantById(
+  grantId: string,
+  client = getOAuthAdminClient(),
+): Promise<GrantRow | null> {
+  const { data, error } = await client
+    .from("mcp_oauth_grants")
+    .select("*")
+    .eq("id", grantId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to look up OAuth grant: ${error.message}`);
+  }
+  return (data as GrantRow | null) ?? null;
+}
+
 export async function findGrantByAccessToken(
   accessToken: string,
   client = getOAuthAdminClient(),
@@ -473,6 +489,26 @@ export async function revokeGrantByToken(
   if (data) {
     await revokeGrantChain((data as { id: string }).id, client);
   }
+}
+
+/**
+ * Settings-facing revoke: only the grant's owner may end the session.
+ *
+ * A row that refresh already marked revoked is still a valid handle: the live
+ * successor points at it via `rotated_from`, so we walk the chain anyway. A
+ * missing or foreign grant is reported as not found.
+ */
+export async function revokeGrantOwnedByUser(
+  grantId: string,
+  authUserId: string,
+  client = getOAuthAdminClient(),
+): Promise<boolean> {
+  const grant = await findGrantById(grantId, client);
+  if (!grant || grant.auth_user_id !== authUserId) {
+    return false;
+  }
+  await revokeGrantChain(grantId, client);
+  return true;
 }
 
 export async function touchGrant(grantId: string, client = getOAuthAdminClient()): Promise<void> {

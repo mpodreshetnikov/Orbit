@@ -31,6 +31,7 @@ import {
   useNotificationRouting,
   useUpdateNotificationRouting,
 } from "@/hooks";
+import { McpClientsCard } from "@/components/settings/mcp-clients-card";
 
 type PermissionStatus = "default" | "granted" | "denied" | "unsupported";
 type ServiceWorkerStatus = "checking" | "registered" | "not-registered" | "unsupported";
@@ -565,6 +566,8 @@ export default function SettingsPage() {
             })}
           </CardContent>
         </Card>
+
+        <McpClientsCard />
 
         {/* Install Instructions Card */}
         <Card>
