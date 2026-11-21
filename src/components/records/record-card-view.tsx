@@ -16,10 +16,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { MedicalRecordListItem, RecordType } from "@/types";
-import {
-  isUnprocessedRecordStatus,
-  shouldHideSoftRemove,
-} from "@/lib/medical-record-status";
+import { isUnprocessedRecordStatus, shouldHideSoftRemove } from "@/lib/medical-record-status";
 import { cn } from "@/lib/utils";
 
 interface RecordCardProps {
