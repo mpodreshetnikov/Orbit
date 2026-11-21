@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-11-21T02:08:12.698Z",
-  "total": 302,
+  "generated_at": "2026-11-21T02:40:41.891Z",
+  "total": 296,
   "counts": {
     "browserExtension/popup-src/helpers.test.ts::lone-tocontain": 2,
     "browserExtension/src/core/content-bridge.test.ts::mock-call-only": 10,
@@ -13,8 +13,6 @@
     "scripts/extension/analyze-tbank-debug-artifact.test.ts::lone-tocontain": 4,
     "scripts/extension/esbuild-widget.test.ts::mock-call-only": 2,
     "scripts/extension/verify-classic-scripts.test.ts::lone-tocontain": 1,
-    "scripts/extraction-eval/cassette.test.ts::lone-presence": 1,
-    "scripts/extraction-eval/report.test.ts::lone-tocontain": 5,
     "scripts/money-categorization-eval/cassette.test.ts::lone-presence": 1,
     "src/app/api/mcp/route.test.ts::mock-call-only": 1,
     "src/app/api/notifications/route.test.ts::mock-call-only": 2,

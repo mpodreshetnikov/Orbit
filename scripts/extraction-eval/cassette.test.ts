@@ -376,6 +376,7 @@ describe("settled", () => {
 
   it("resolves immediately when nothing is in flight", async () => {
     const cassette = await createCassetteFetch({ dir: await tempDir(), mode: "replay" });
-    await expect(cassette.settled()).resolves.toBeUndefined();
+    // Void settle: the promise must resolve with no value, not hang or reject.
+    expect(await cassette.settled()).toBe(undefined);
   });
 });
