@@ -82,12 +82,14 @@ describe("pickReconciliationSuggestions", () => {
     const result = pick({
       sourceText: `${LAB_TEXT}\nАт к Opisthorchis felineus (описторхоз) IgG отр.`,
     });
-    expect(result.suggestions.map((s) => s.id)).toContain("c-opist");
+    expect(result.suggestions).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "c-opist", kind: "condition" })]),
+    );
   });
 
   it("never suggests a condition that is already resolved", () => {
     const result = pick({ sourceText: "Фолликулит волосистой части головы" });
-    expect(result.suggestions.map((s) => s.id)).not.toContain("c-foll");
+    expect(result.suggestions.filter((s) => s.id === "c-foll")).toEqual([]);
   });
 
   it("names the eight lab checkups the report covers and leaves the ultrasound as merely due", () => {

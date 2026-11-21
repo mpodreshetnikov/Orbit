@@ -233,7 +233,11 @@ describe("observation tools", () => {
     const tool = (await handlers()).get("search_observations")!;
     const result = await tool({ limit: 20, offset: 0 }, CTX);
 
-    expect(result.content[0].text).toContain("O+");
+    expect(result.content[0].text).toMatch(/^- Blood group: O\+ $/m);
+    expect(
+      (result.structuredContent as { observations?: Array<{ value_text?: string }> } | undefined)
+        ?.observations?.[0]?.value_text,
+    ).toBe("O+");
   });
 
   it("returns the analyte series oldest first", async () => {
@@ -296,7 +300,9 @@ describe("condition tools", () => {
     const tool = (await handlers()).get("get_condition")!;
     const result = await tool({ condition_id: "c-1" }, CTX);
 
-    expect(result.content[0].text).toContain("1 record mention(s), 2 linked checkup(s)");
+    expect(result.content[0].text).toBe(
+      "Anaemia (D50.9) — active. 1 record mention(s), 2 linked checkup(s).",
+    );
   });
 
   it("reports an unknown diagnosis", async () => {
