@@ -2335,12 +2335,14 @@ describe("tbank-web pure helpers (T-261116-rul mutation)", () => {
     expect(bare.mapping_drop_counts).toEqual({ invalid_record: 1 });
     expect(bare.mapped_row_count).toBe(2);
     expect(bare.api_operation_count).toBe(0);
-    expect(bare.receipt_enrichment.parse_strategy).toBe("fast");
-    expect(bare.receipt_enrichment.retry_strategy).toBe("shared_budget");
-    expect(bare.receipt_enrichment.base_pause_between_receipts_ms).toBe(300);
-    expect(bare.receipt_enrichment.max_retry_pause_ms).toBe(1500);
-    expect(bare.receipt_enrichment.stopped_after_budget).toBe(false);
-    expect(bare.receipt_enrichment.requested_count).toBe(0);
+    expect(bare.receipt_enrichment).toMatchObject({
+      parse_strategy: "fast",
+      retry_strategy: "shared_budget",
+      base_pause_between_receipts_ms: 300,
+      max_retry_pause_ms: 1500,
+      stopped_after_budget: false,
+      requested_count: 0,
+    });
     expect(bare.preflight_enrichment_skip_count).toBe(0);
 
     const domBare = __test__.summarizeExtractionDiagnostics(
@@ -2358,9 +2360,11 @@ describe("tbank-web pure helpers (T-261116-rul mutation)", () => {
     expect(domBare.extraction_method).toBe("dom");
     expect(domBare.fallback_used).toBe(true);
     expect(domBare.blocked_reason).toBe("blocked-from-extraction");
-    expect(domBare.receipt_enrichment.retry_strategy).toBe("progressive_backoff");
-    expect(domBare.receipt_enrichment.base_pause_between_receipts_ms).toBe(4000);
-    expect(domBare.receipt_enrichment.max_retry_pause_ms).toBe(15000);
+    expect(domBare.receipt_enrichment).toMatchObject({
+      retry_strategy: "progressive_backoff",
+      base_pause_between_receipts_ms: 4000,
+      max_retry_pause_ms: 15000,
+    });
 
     const start = Date.parse("2026-01-01T00:00:00.000Z");
     const end = start + 2 * 24 * 60 * 60 * 1000 - 1;
@@ -2422,28 +2426,28 @@ describe("tbank-web pure helpers (T-261116-rul mutation)", () => {
     expect(withDebug.fallback_used).toBe(false);
     expect(withDebug.fallback_reason).toBe("api_empty");
     expect(withDebug.blocked_reason).toBe("from-debug");
-    expect(withDebug.discovered_endpoints.operations_api).toBe(
-      "https://www.tbank.ru/api/ops?sessionid=<redacted>",
-    );
-    expect(withDebug.discovered_endpoints.operation_detail_api).toBe(
-      "https://www.tbank.ru/api/detail?x=<redacted>",
-    );
+    expect(withDebug.discovered_endpoints).toMatchObject({
+      operations_api: "https://www.tbank.ru/api/ops?sessionid=<redacted>",
+      operation_detail_api: "https://www.tbank.ru/api/detail?x=<redacted>",
+      tranche_offers_api: null,
+    });
     expect(withDebug.range_request_count).toBe(9);
     expect(withDebug.effective_chunk_span_days).toBe(14);
     expect(withDebug.first_operation_posted_at).toBe("2026-01-02T00:00:00.000Z");
     expect(withDebug.last_operation_posted_at).toBe("2026-01-03T00:00:00.000Z");
     expect(withDebug.api_operation_count).toBe(4);
-    expect(withDebug.receipt_enrichment.requested_count).toBe(5);
-    expect(withDebug.receipt_enrichment.success_count).toBe(4);
-    expect(withDebug.receipt_enrichment.rate_limit_response_count).toBe(1);
-    expect(withDebug.receipt_enrichment.rate_limited_count).toBe(1);
-    expect(withDebug.receipt_enrichment.skipped_after_budget_count).toBe(3);
-    expect(withDebug.receipt_enrichment.failed_count).toBe(2);
-    expect(withDebug.receipt_enrichment.retry_attempts_total).toBe(2);
-    expect(withDebug.receipt_enrichment.stopped_after_budget).toBe(true);
-    expect(withDebug.receipt_enrichment.window_cooldown_count).toBe(1);
-    expect(withDebug.receipt_enrichment.window_cooldown_total_ms).toBe(5000);
-    expect(withDebug.discovered_endpoints.tranche_offers_api).toBeNull();
+    expect(withDebug.receipt_enrichment).toMatchObject({
+      requested_count: 5,
+      success_count: 4,
+      rate_limit_response_count: 1,
+      rate_limited_count: 1,
+      skipped_after_budget_count: 3,
+      failed_count: 2,
+      retry_attempts_total: 2,
+      stopped_after_budget: true,
+      window_cooldown_count: 1,
+      window_cooldown_total_ms: 5000,
+    });
     expect(withDebug.preflight_enrichment_skip_count).toBe(1);
     expect(withDebug.fulfilled_skip_count).toBe(2);
     expect(withDebug.out_of_range_skip_count).toBe(3);
@@ -2514,9 +2518,9 @@ describe("tbank-web pure helpers (T-261116-rul mutation)", () => {
       "fast",
     );
     expect(derivedDays.effective_chunk_span_days).toBe(2);
-    expect(derivedDays.discovered_endpoints.tranche_offers_api).toBe(
-      "https://www.tbank.ru/api/tranche?token=<redacted>",
-    );
+    expect(derivedDays.discovered_endpoints).toMatchObject({
+      tranche_offers_api: "https://www.tbank.ru/api/tranche?token=<redacted>",
+    });
   });
 
   it("sanitizes debug URLs and counts rows missing line items", () => {
@@ -3382,7 +3386,9 @@ describe("tbank-web chrome orch helpers (T-261116-rul slice 2)", () => {
   });
 
   it("prepareOperationsTab waits while the operations page is still loading", async () => {
-    let listener: ((id: number, info: { status?: string }) => void) | null = null;
+    type TabUpdatedListener = (id: number, info: { status?: string }) => void;
+    // Box the listener so TS tracks the mutation across the async waitFor boundary.
+    const captured: { current: TabUpdatedListener | null } = { current: null };
     const get = vi
       .fn()
       .mockResolvedValueOnce({
@@ -3401,8 +3407,8 @@ describe("tbank-web chrome orch helpers (T-261116-rul slice 2)", () => {
         get,
         update: vi.fn(),
         onUpdated: {
-          addListener: vi.fn((fn: typeof listener) => {
-            listener = fn;
+          addListener: vi.fn((fn: TabUpdatedListener) => {
+            captured.current = fn;
           }),
           removeListener: vi.fn(),
         },
@@ -3416,9 +3422,10 @@ describe("tbank-web chrome orch helpers (T-261116-rul slice 2)", () => {
       status: "loading",
     } as chrome.tabs.Tab);
     await vi.waitFor(() => {
-      expect(listener).toBeTypeOf("function");
+      if (!captured.current) throw new Error("waiting for onUpdated listener");
     });
-    listener?.(5, { status: "complete" });
+    if (!captured.current) throw new Error("expected onUpdated listener");
+    captured.current(5, { status: "complete" });
     const ready = await pending;
     expect(ready.id).toBe(5);
     expect(ready.status).toBe("complete");
