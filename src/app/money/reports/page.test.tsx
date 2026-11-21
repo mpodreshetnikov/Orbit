@@ -177,22 +177,26 @@ describe("MoneyReportsPage", () => {
     expect(screen.getByTestId("spending-total-expense")).toBeInTheDocument();
   });
 
-  it("shows the three totals with compact comparisons and a forecast line under each", () => {
+  it("shows the three totals with self-evident badges and a forecast line inside each card", () => {
     render(<MoneyReportsPage />);
     const expense = screen.getByTestId("spending-total-expense");
     expect(within(expense).getByText("RUB 118,420")).toBeInTheDocument();
-    expect(within(expense).getByText("▲ 8%")).toHaveClass("text-orange-800");
-    expect(within(expense).getByText("▼ 3%")).toHaveClass("text-teal-800");
+    expect(within(expense).getByText(/▲ 8%.*money\.spendingBadgePrevious/)).toHaveClass(
+      "text-orange-800",
+    );
+    expect(within(expense).getByText(/▼ 3%.*money\.spendingBadgeLastYear/)).toHaveClass(
+      "text-teal-800",
+    );
     expect(within(expense).getByTestId("spending-forecast")).toHaveTextContent(
       /money\.spendingForecastLine/,
     );
-    expect(screen.getByTestId("spending-forecast-income")).toHaveTextContent(
-      /money\.spendingForecastLine/,
-    );
-    expect(screen.getByTestId("spending-forecast-net")).toHaveTextContent(
-      /money\.spendingForecastLine/,
-    );
-    expect(screen.getByText("money.spendingCompareLegend(2025)")).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId("spending-total-income")).getByTestId("spending-forecast-income"),
+    ).toHaveTextContent(/money\.spendingForecastLine/);
+    expect(
+      within(screen.getByTestId("spending-total-net")).getByTestId("spending-forecast-net"),
+    ).toHaveTextContent(/money\.spendingForecastLine/);
+    expect(screen.queryByText("money.spendingCompareLegend(2025)")).not.toBeInTheDocument();
     expect(screen.getByTestId("spending-view-transactions")).toHaveAttribute(
       "href",
       expect.stringContaining("preset=custom"),
@@ -200,7 +204,9 @@ describe("MoneyReportsPage", () => {
 
     const net = screen.getByTestId("spending-total-net");
     expect(within(net).getByText("+RUB 66,580")).toBeInTheDocument();
-    expect(within(net).getByText("▼ 12%")).toHaveClass("text-orange-800");
+    expect(within(net).getByText(/▼ 12%.*money\.spendingBadgePrevious/)).toHaveClass(
+      "text-orange-800",
+    );
   });
 
   it("draws the root categories as a treemap and opens a branch on a click", () => {
@@ -337,20 +343,22 @@ describe("MoneyReportsPage", () => {
     expect(screen.getByText("money.spendingLoadFailed")).toBeInTheDocument();
   });
 
-  it("fits the totals side by side on a phone and lists categories instead of a table", () => {
+  it("fits the totals side by side on a phone with forecast inside each card", () => {
     hookMocks.useIsMobile.mockReturnValue(true);
     render(<MoneyReportsPage />);
     const expense = screen.getByTestId("spending-total-expense");
-    expect(within(expense).getByText("▲ 8%")).toBeInTheDocument();
-    expect(within(expense).queryByTestId("spending-forecast")).not.toBeInTheDocument();
-    expect(screen.getByTestId("spending-forecast")).toHaveTextContent(
+    expect(within(expense).getByText(/▲ 8%.*money\.spendingBadgePrevious/)).toBeInTheDocument();
+    expect(within(expense).getByTestId("spending-forecast")).toHaveTextContent(
       /money\.spendingForecastLine/,
     );
-    expect(screen.getByTestId("spending-forecast-income")).toBeInTheDocument();
-    expect(screen.getByTestId("spending-forecast-net")).toBeInTheDocument();
-    expect(screen.getAllByText("money.spendingCompareLegend(2025)").length).toBeGreaterThanOrEqual(
-      1,
-    );
+    expect(
+      within(screen.getByTestId("spending-total-income")).getByTestId("spending-forecast-income"),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId("spending-total-net")).getByTestId("spending-forecast-net"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("money.spendingCompareLegend(2025)")).not.toBeInTheDocument();
+    expect(screen.getByText("money.spendingPeriodCustom")).toBeInTheDocument();
 
     const food = screen.getByTestId("spending-row-food");
     expect(food).toHaveTextContent("63%");
@@ -362,7 +370,7 @@ describe("MoneyReportsPage", () => {
     expect(lastUrl().get("category")).toBe("food");
   });
 
-  it("shows ×N and new as compact badges with the compare legend once", () => {
+  it("shows ×N with a basis badge and hides the bare «new» chip", () => {
     hookMocks.useIsMobile.mockReturnValue(true);
     hookMocks.useMoneySpendingReport.mockReturnValue({
       data: {
@@ -384,13 +392,11 @@ describe("MoneyReportsPage", () => {
     });
     render(<MoneyReportsPage />);
     const income = screen.getByTestId("spending-total-income");
-    expect(within(income).getByText("0%")).toBeInTheDocument();
-    expect(within(income).getByText("money.spendingChangeNew")).toBeInTheDocument();
+    expect(within(income).getByText(/0%.*money\.spendingBadgePrevious/)).toBeInTheDocument();
+    expect(within(income).queryByText("money.spendingChangeNew")).not.toBeInTheDocument();
     const expense = screen.getByTestId("spending-total-expense");
-    expect(within(expense).getByText("×85")).toBeInTheDocument();
-    expect(screen.getAllByText("money.spendingCompareLegend(2025)").length).toBeGreaterThanOrEqual(
-      1,
-    );
+    expect(within(expense).getByText(/×85.*money\.spendingBadgeLastYear/)).toBeInTheDocument();
+    expect(screen.queryByText("money.spendingCompareLegend(2025)")).not.toBeInTheDocument();
   });
 
   it("does not nest sparkline controls inside the category row button", () => {

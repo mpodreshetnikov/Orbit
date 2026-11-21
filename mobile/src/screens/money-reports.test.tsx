@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
-import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react-native";
 import { Alert } from "react-native";
 import MoneyReportsScreen from "@/screens/money-reports-screen";
 import MoneyScreen from "@/screens/money-screen";
@@ -161,15 +161,22 @@ describe("the money report", () => {
     await fireEvent.press(await screen.findByText("Отчеты"));
     expect(await screen.findByTestId("spending-total-expense")).toHaveTextContent(/40\s000\s₽/);
     expect(screen.getByTestId("spending-total-net")).toHaveTextContent(/\+60\s000\s₽/);
-    expect(screen.getAllByText("▼ 20%").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("▲ 25%").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("▲ 11%").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("0%").length).toBeGreaterThanOrEqual(2); // Income, and the food row.
-    expect(screen.getAllByText("к пред. · к ср. 2025").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/▼ 20%/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/▲ 25%/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/▲ 11%/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/0%/).length).toBeGreaterThanOrEqual(2); // Income, and the food row.
+    expect(screen.queryByText("к пред. · к ср. 2025")).toBeNull();
     expect(screen.getByText("Октябрь 2026 г.")).toBeOnTheScreen();
-    expect(screen.getByTestId("spending-forecast")).toHaveTextContent(/к .*≈.*52\s000/);
-    expect(screen.getByTestId("spending-forecast-income")).toHaveTextContent(/≈.*110\s000/);
-    expect(screen.getByTestId("spending-forecast-net")).toHaveTextContent(/≈.*\+58\s000/);
+    expect(screen.getByText("Период…")).toBeOnTheScreen();
+    expect(
+      within(screen.getByTestId("spending-total-expense")).getByTestId("spending-forecast"),
+    ).toHaveTextContent(/Прогноз на .*≈.*52\s000/);
+    expect(
+      within(screen.getByTestId("spending-total-income")).getByTestId("spending-forecast-income"),
+    ).toHaveTextContent(/Прогноз на .*≈.*110\s000/);
+    expect(
+      within(screen.getByTestId("spending-total-net")).getByTestId("spending-forecast-net"),
+    ).toHaveTextContent(/Прогноз на .*≈.*\+58\s000/);
     expect(screen.queryByText(/^Прогноз расходов/)).toBeNull();
     expect(screen.getByText("Для части операций взят ближайший прошлый курс.")).toBeOnTheScreen();
     expect(screen.getByTestId("spending-treemap")).toBeOnTheScreen();
@@ -182,8 +189,8 @@ describe("the money report", () => {
     expect(screen.getByText("14 операций")).toBeOnTheScreen();
     expect(screen.getByText("1 операция")).toBeOnTheScreen();
     expect(screen.getByText("К")).toBeOnTheScreen(); // The initial of a shop without a logo.
-    expect(screen.getAllByText("▲ 20%").length).toBeGreaterThanOrEqual(2); // food + Пятёрочка
-    expect(screen.getAllByText(/новое/).length).toBeGreaterThanOrEqual(1); // shop/category with no prior
+    expect(screen.getAllByText(/▲ 20%/).length).toBeGreaterThanOrEqual(2); // food + Пятёрочка
+    expect(screen.queryByText(/^новое$/)).toBeNull();
     expect(screen.getByText("Транзакции")).toBeOnTheScreen();
     expect(reportArgs().at(-1)).toEqual({
       p_person_id: PERSON.id,
@@ -448,6 +455,8 @@ describe("the money report", () => {
       forecast: { expense: 80000, income: 50000, net: -30000, days_left: 5 },
     });
     await renderScreens(routes, "/money/reports");
-    expect(await screen.findByTestId("spending-forecast-net")).toHaveTextContent(/≈.*-30\s000/);
+    expect(await screen.findByTestId("spending-forecast-net")).toHaveTextContent(
+      /Прогноз на .*≈.*-30\s000/,
+    );
   });
 });
