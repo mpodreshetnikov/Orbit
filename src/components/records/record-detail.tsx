@@ -7,6 +7,7 @@ import Link from "next/link";
 import { format } from "date-fns";
 import { useDateFnsLocale } from "@/lib/date-locale";
 import { translateOcrFailure } from "@/lib/health/ocr-failure";
+import { isStuckPendingOcrStatus } from "@/lib/medical-record-status";
 import {
   ArrowLeft,
   Calendar,
@@ -22,7 +23,6 @@ import {
   ChevronUp,
   FileText,
   Plus,
-  Loader2,
   FlaskConical,
   ArrowUp,
   ArrowDown,
@@ -106,7 +106,6 @@ import {
   usePersonFindingHistory,
   usePersonConditionRecordHistory,
   usePersonObservationHistory,
-  useBackgroundOCR,
   usePersons,
   useRuleOnProposedClosure,
 } from "@/hooks";
@@ -297,7 +296,6 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
     record?.person_id ?? null,
   );
   const { data: personObservationHistory } = usePersonObservationHistory(record?.person_id ?? null);
-  const { retryOcr } = useBackgroundOCR();
   const { data: persons } = usePersons();
 
   const [showRemoveDialog, setShowRemoveDialog] = useState(false);
@@ -756,50 +754,11 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
   const isOcrReview = record.status === "ocr_review";
   const isOcrFailed = record.status === "ocr_failed";
   const isStructureReview = record.status === "structure_review";
-  const isProcessing = record.status === "ocr_processing" || record.status === "structuring";
+  const isUnprocessedPipeline =
+    isStuckPendingOcrStatus(record.status) || record.status === "structuring" || isOcrFailed;
 
-  // Show OCR failed state: error message and Retry OCR button
-  if (isOcrFailed) {
-    const personName = persons?.find((p) => p.id === record.person_id)?.name ?? record.title ?? "";
-    const hasAttachments = record.attachments.length > 0;
-    const handleRetryOcr = async () => {
-      if (!hasAttachments) {
-        return;
-      }
-      await retryOcr({
-        recordId,
-        personId: record.person_id,
-        personName,
-      });
-      refetch();
-    };
-    return (
-      <div className="space-y-6">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={() => router.back()}>
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
-          <h1 className="text-2xl font-bold tracking-tight">{t("processing.ocrFailed")}</h1>
-        </div>
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-6 space-y-4">
-          <p className="text-sm text-muted-foreground">
-            {/* The column holds a cause code, not a sentence: the server composes in English and
-                does not know the reader's language. */}
-            {translateOcrFailure(record.ocr_error, t)}
-          </p>
-          {!hasAttachments ? (
-            <p className="text-sm text-muted-foreground">{t("records.detail.noAttachments")}</p>
-          ) : null}
-          <Button onClick={handleRetryOcr} disabled={!hasAttachments}>
-            {t("processing.retryOcr")}
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  // Show processing state (use record title from OCR when available)
-  if (isProcessing) {
+  // UI OCR/upload path is gone: show a neutral status instead of eternal "processing" / retry.
+  if (isUnprocessedPipeline) {
     return (
       <div className="space-y-6">
         <div className="flex items-center gap-4">
@@ -808,21 +767,21 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
           </Button>
           <div>
             <h1 className="text-2xl font-bold tracking-tight">
-              {record.title || t("processing.processing")}
+              {record.title || t("records.status.notProcessed")}
             </h1>
-            <p className="text-muted-foreground">
-              {record.status === "ocr_processing"
-                ? t("processing.ocrInProgress")
-                : t("processing.structureInProgress")}
-            </p>
+            <p className="text-muted-foreground">{t("records.status.notProcessedHint")}</p>
           </div>
         </div>
-        <div className="flex flex-col items-center justify-center py-16">
-          <Loader2 className="h-16 w-16 animate-spin text-primary" />
-          <p className="mt-4 text-sm text-muted-foreground">{t("processing.pleaseWait")}</p>
-          <Button variant="outline" className="mt-6" onClick={() => refetch()}>
-            {t("common.refresh")}
-          </Button>
+        <div className="rounded-lg border border-dashed p-6 space-y-3">
+          <p className="text-sm text-muted-foreground">{t("records.status.viaAssistant")}</p>
+          {isOcrFailed && record.ocr_error ? (
+            <p className="text-sm text-muted-foreground">
+              {translateOcrFailure(record.ocr_error, t)}
+            </p>
+          ) : null}
+          {record.attachments.length === 0 ? (
+            <p className="text-sm text-muted-foreground">{t("records.detail.noAttachments")}</p>
+          ) : null}
         </div>
       </div>
     );

@@ -121,7 +121,7 @@ describe("TopNav", () => {
 
     expect(screen.getByText("app.name")).toBeInTheDocument();
     expect(screen.getAllByText("nav.health").length).toBeGreaterThan(0);
-    expect(screen.getByText("nav.medicalRecord")).toBeInTheDocument();
+    expect(screen.queryByText("nav.medicalRecord")).not.toBeInTheDocument();
     expect(screen.getByText("nav.measurement")).toBeInTheDocument();
     expect(screen.getByText("nav.regularMedication")).toBeInTheDocument();
     expect(screen.getByText("nav.oneTimeMedication")).toBeInTheDocument();
