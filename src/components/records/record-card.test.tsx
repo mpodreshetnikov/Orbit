@@ -129,4 +129,43 @@ describe("RecordCard", () => {
     expect(onRestore).toHaveBeenCalledWith(expect.objectContaining({ status: "removed" }));
     expect(onDelete).toHaveBeenCalledWith(expect.objectContaining({ status: "removed" }));
   });
+
+  it("keeps soft-remove for ocr_failed but hides it while stuck pending OCR", async () => {
+    const onRemove = vi.fn();
+    const user = userEvent.setup();
+
+    const { rerender } = render(
+      <RecordCard
+        record={makeRecord({ status: "ocr_failed" })}
+        onView={vi.fn()}
+        onRemove={onRemove}
+      />,
+    );
+
+    expect(screen.getByText("records.status.notProcessed")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "records.actions.remove" }));
+    expect(onRemove).toHaveBeenCalledWith(expect.objectContaining({ status: "ocr_failed" }));
+
+    rerender(
+      <RecordCard
+        record={makeRecord({ status: "ocr_processing" })}
+        onView={vi.fn()}
+        onRemove={onRemove}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "records.actions.remove" }),
+    ).not.toBeInTheDocument();
+
+    rerender(
+      <RecordCard
+        record={makeRecord({ status: "processing" })}
+        onView={vi.fn()}
+        onRemove={onRemove}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "records.actions.remove" }),
+    ).not.toBeInTheDocument();
+  });
 });

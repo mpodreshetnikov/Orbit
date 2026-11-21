@@ -482,6 +482,7 @@ describe("RecordDetail", () => {
       data: baseRecord({
         status: "ocr_failed",
         ocr_error: "ocr failed",
+        ocr_text: "Partial OCR from failed run",
         attachments: [
           {
             id: "attachment-1",
@@ -504,6 +505,9 @@ describe("RecordDetail", () => {
     expect(screen.getByText("records.status.notProcessedHint")).toBeInTheDocument();
     expect(screen.getByText("records.status.viaAssistant")).toBeInTheDocument();
     expect(screen.getByText("ocr failed")).toBeInTheDocument();
+    expect(screen.getByText("attachment-grid")).toBeInTheDocument();
+    expect(screen.getByText(/records.detail.ocrText/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "records.actions.remove" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "processing.retryOcr" })).not.toBeInTheDocument();
   }, 20000);
 
@@ -797,6 +801,19 @@ describe("RecordDetail", () => {
       data: baseRecord({
         title: "",
         status: "ocr_processing",
+        ocr_text: "Legacy OCR text",
+        attachments: [
+          {
+            id: "attachment-1",
+            record_id: "record-1",
+            storage_path: "person-1/record-1/report.pdf",
+            mime_type: "application/pdf",
+            original_filename: "report.pdf",
+            file_size: 1024,
+            sort_order: 0,
+            created_at: "2026-01-01T00:00:00.000Z",
+          },
+        ],
       }),
       isLoading: false,
       error: null,
@@ -804,11 +821,43 @@ describe("RecordDetail", () => {
     });
 
     const { RecordDetail } = await import("./record-detail");
-    render(<RecordDetail recordId="record-1" />);
+    const stuckView = render(<RecordDetail recordId="record-1" />);
 
-    expect(screen.getByText("records.status.notProcessed")).toBeInTheDocument();
+    expect(screen.getAllByText("records.status.notProcessed").length).toBeGreaterThan(0);
     expect(screen.getByText("records.status.notProcessedHint")).toBeInTheDocument();
+    expect(screen.getByText("attachment-grid")).toBeInTheDocument();
+    expect(screen.getByText(/records.detail.ocrText/)).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "records.actions.remove" }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText("processing.pleaseWait")).not.toBeInTheDocument();
+    stuckView.unmount();
+
+    hookMocks.useMedicalRecord.mockReturnValue({
+      data: baseRecord({
+        status: "processing",
+        ocr_text: "Saved from legacy processing",
+        attachments: [
+          {
+            id: "attachment-legacy",
+            record_id: "record-1",
+            storage_path: "person-1/record-1/legacy.pdf",
+            mime_type: "application/pdf",
+            original_filename: "legacy.pdf",
+            file_size: 512,
+            sort_order: 0,
+            created_at: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+      }),
+      isLoading: false,
+      error: null,
+      refetch,
+    });
+    const legacyView = render(<RecordDetail recordId="record-1" />);
+    expect(screen.getByText("attachment-grid")).toBeInTheDocument();
+    expect(screen.getByText(/records.detail.ocrText/)).toBeInTheDocument();
+    legacyView.unmount();
 
     hookMocks.useMedicalRecord.mockReturnValue({
       data: baseRecord({
@@ -820,6 +869,29 @@ describe("RecordDetail", () => {
     });
     render(<RecordDetail recordId="record-1" />);
     expect(screen.getAllByText("records.status.notProcessedHint").length).toBeGreaterThan(0);
+  });
+
+  it("soft-removes ocr_failed records from the unprocessed detail view", async () => {
+    const softDeleteMutation = createMutationMock();
+    softDeleteMutation.mutate = vi.fn((_, options?: { onSuccess?: () => void }) =>
+      options?.onSuccess?.(),
+    );
+    hookMocks.useSoftDeleteRecord.mockReturnValue(softDeleteMutation);
+    hookMocks.useMedicalRecord.mockReturnValue({
+      data: baseRecord({ status: "ocr_failed", ocr_error: "ocr failed" }),
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    const { RecordDetail } = await import("./record-detail");
+    render(<RecordDetail recordId="record-1" />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "records.actions.remove" }));
+    await user.click(screen.getByRole("button", { name: "common.remove" }));
+    expect(softDeleteMutation.mutate).toHaveBeenCalledWith("record-1", expect.any(Object));
+    expect(routerMock.push).toHaveBeenCalledWith("/health");
   });
 
   it("executes finding and condition mutation flows from dialogs/rows", async () => {

@@ -16,7 +16,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { MedicalRecordListItem, RecordType } from "@/types";
-import { isUnprocessedRecordStatus } from "@/lib/medical-record-status";
+import { isStuckPendingOcrStatus, isUnprocessedRecordStatus } from "@/lib/medical-record-status";
 import { cn } from "@/lib/utils";
 
 interface RecordCardProps {
@@ -53,6 +53,8 @@ export function RecordCard({
   const isRemoved = record.status === "removed";
   const isDraft = record.status === "draft";
   const isUnprocessed = isUnprocessedRecordStatus(record.status);
+  // Soft-remove stays for ocr_failed (and active/draft); hide only while still "in pipeline".
+  const hideSoftRemove = isStuckPendingOcrStatus(record.status) || record.status === "structuring";
 
   return (
     <Card
@@ -144,7 +146,7 @@ export function RecordCard({
                 </DropdownMenuItem>
               )}
 
-              {!isRemoved && !isUnprocessed && (
+              {!isRemoved && !hideSoftRemove && (
                 <DropdownMenuItem
                   onClick={() => onRemove(record)}
                   className="text-destructive focus:text-destructive"
