@@ -26,10 +26,7 @@ function formatWhen(value: string | null, locale: string): string | null {
   return date.toLocaleString(locale);
 }
 
-function clientDisplayName(
-  client: McpConnectedClient,
-  unnamed: string,
-): string {
+function clientDisplayName(client: McpConnectedClient, unnamed: string): string {
   return client.clientName?.trim() || unnamed;
 }
 
@@ -165,15 +162,15 @@ export function McpClientsCard() {
           <AlertDialogHeader>
             <AlertDialogTitle>
               {t("revokeConfirmTitle", {
-                name: confirmClient
-                  ? clientDisplayName(confirmClient, t("unnamedClient"))
-                  : "",
+                name: confirmClient ? clientDisplayName(confirmClient, t("unnamedClient")) : "",
               })}
             </AlertDialogTitle>
             <AlertDialogDescription>{t("revokeConfirmDescription")}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={pendingGrantId != null}>{tCommon("cancel")}</AlertDialogCancel>
+            <AlertDialogCancel disabled={pendingGrantId != null}>
+              {tCommon("cancel")}
+            </AlertDialogCancel>
             <AlertDialogAction
               onClick={(event) => {
                 event.preventDefault();
