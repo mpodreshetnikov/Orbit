@@ -3,7 +3,7 @@
 //   2) getTabById / waitForTabLoad — chrome.tabs.get / onUpdated browser-runtime seams
 //   3) Temporary per-function orch disables (prepareOperationsTab, extractOperationsWithRetry,
 //      cancelPageExtraction, runPageExtraction) — covered survivors only; paydown is slice 3
-//      (see orbit-tasks T-261116-rul Progress / new slice-3 task). Map/parse stay under the gate.
+//      (orbit-tasks T-261121-f9o). Map/parse stay under the gate.
 import { registerConnector } from "./registry.js";
 import { isPathUnder } from "../core/page-url.js";
 import { CLOCK_SKEW_ALLOWANCE_MS } from "../core/session-janitor.js";
