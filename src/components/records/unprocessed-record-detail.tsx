@@ -19,11 +19,11 @@ import {
 import { AttachmentGrid } from "./attachment-preview";
 import { useSoftDeleteRecord } from "@/hooks";
 import { translateOcrFailure } from "@/lib/health/ocr-failure";
-import type { MedicalRecord } from "@/types";
+import type { MedicalRecordWithAttachments } from "@/types";
 
 export interface UnprocessedRecordDetailProps {
   recordId: string;
-  record: MedicalRecord;
+  record: MedicalRecordWithAttachments;
 }
 
 /**
