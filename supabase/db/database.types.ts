@@ -3076,6 +3076,7 @@ export type Database = {
           p_category_ids?: string[]
           p_from?: string
           p_include_line_items?: boolean
+          p_include_raw_payload?: boolean
           p_limit?: number
           p_offset?: number
           p_payer_person_id: string
@@ -3106,6 +3107,7 @@ export type Database = {
           line_item_count: number
           line_item_titles: string[]
           line_items: Json
+          mcc: string
           merchant_name: string
           money_cards: Json
           operation_icon_url: string

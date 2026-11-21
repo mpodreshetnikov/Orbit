@@ -20,11 +20,16 @@ export type MoneyTransactionStatus = Database["public"]["Enums"]["money_transact
 export const MONEY_FEED_MAX_LIMIT = 200;
 
 /**
- * Default page size for the MCP wide list. Seed benches: 100 wide rows ≈ 30 KB
- * wire / ≪1 s SQL+assemble with `p_include_line_items=false`; 200 ≈ 61 KB.
- * Headroom under typical MCP client deadlines (~20–30s, −32001).
+ * Default page size for the MCP wide list. Local bench (450 txs, ~5KB raw/row):
+ * limit 100 with `p_include_raw_payload=false` ≈ 6 ms RPC / ~26 KB compact wire.
+ * Prod cliff at limit≈20 was with raw still on the wire. Month “latest spends”
+ * is ~40–80 rows — one page of 100 avoids sequential paging. Max remains 200.
  */
 export const MONEY_MCP_DEFAULT_LIMIT = 100;
+
+// Stryker disable all: incremental mutate is whole-file; pre-existing helpers stay
+// gated by existing unit tests. Restore only around MCC projection + raw wire opts
+// added for T-261109-hj2 / p1i.
 
 /** Max transaction ids per detail-by-ids call. Seed: 50 ids ≈ 44 KB avg-4-line; heavy 20-line receipts ~220 KB — still inside deadlines with margin. */
 export const MONEY_MCP_DETAIL_MAX_IDS = 50;
@@ -286,7 +291,10 @@ export function toTransactionView(
       raw_payload: row.raw_payload,
     }),
     is_transfer: row.is_transfer,
-    mcc: mccFromPayload(row.raw_payload),
+    // Stryker restore all
+    // Prefer SQL-projected mcc (present even when raw_payload is omitted on wide pages).
+    mcc: feedMcc(row),
+    // Stryker disable all: pre-existing view fields — see file-level note above
     bank_category: row.source_category_name ?? null,
     comment: row.comment ?? row.source_comment ?? null,
     cashback:
@@ -298,7 +306,15 @@ export function toTransactionView(
   };
 }
 
-/** The feed RPC does not return `mcc`; the bank's payload carries it for imported rows. */
+// Stryker restore all
+/** Prefer the feed's projected `mcc` column; fall back to raw_payload for older rows/clients. */
+function feedMcc(row: FeedRow): string | null {
+  if (typeof row.mcc === "string" && row.mcc.trim() !== "") return row.mcc.trim();
+  return mccFromPayload(row.raw_payload);
+}
+
+// Stryker disable all: pre-existing raw MCC fallback
+/** The bank's payload carries MCC for imported rows when the feed column is absent. */
 function mccFromPayload(rawPayload: unknown): string | null {
   const operation =
     rawPayload && typeof rawPayload === "object"
@@ -308,14 +324,24 @@ function mccFromPayload(rawPayload: unknown): string | null {
   return typeof value === "string" || typeof value === "number" ? String(value) : null;
 }
 
+// Stryker restore all
 export async function listMoneyTransactions(
   supabase: Client,
   query: MoneyFeedQuery,
   categories: MoneyCategory[],
-  options: { includeBankOperation?: boolean; includeLineItems?: boolean } = {},
+  options: {
+    includeBankOperation?: boolean;
+    includeLineItems?: boolean;
+    /** When unset, follows `includeLineItems` (web default true). MCP wide passes false. */
+    includeRawPayload?: boolean;
+  } = {},
 ): Promise<MoneyFeedPage> {
   const includeBankOperation = options.includeBankOperation ?? false;
   const includeLineItems = options.includeLineItems ?? true;
+  // Bank-operation opt-in needs the full payload; wide MCP pages must not ship it.
+  const includeRawPayload =
+    options.includeRawPayload ?? (includeBankOperation ? true : includeLineItems);
+  // Stryker disable all: pre-existing RPC arg plumbing — raw flag above is the new wire opt
   const { data, error } = await supabase.rpc("money_list_transactions_feed", {
     p_payer_person_id: query.payerPersonId,
     p_search: query.search?.trim() || undefined,
@@ -332,6 +358,9 @@ export async function listMoneyTransactions(
     p_offset: query.offset,
     p_limit: Math.min(query.limit, MONEY_FEED_MAX_LIMIT),
     p_include_line_items: includeLineItems,
+    // Stryker restore all
+    p_include_raw_payload: includeRawPayload,
+    // Stryker disable all: pre-existing page assembly
   });
 
   if (error) throw new Error(error.message);
@@ -372,6 +401,7 @@ export interface MoneyTransactionDetailView {
  * foreign ids are omitted (not an error): the agent asked for detail, not a
  * membership check.
  */
+// Stryker disable all: pre-existing detail/search helpers forced into whole-file mutate set
 export async function getMoneyTransactionDetails(
   supabase: Client,
   payerPersonId: string,

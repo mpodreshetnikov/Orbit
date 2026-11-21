@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createSupabaseStub } from "../health/test-support";
 import {
+  compactTransactionsFromPage,
   getMoneyTransactionDetails,
   listMoneyAccounts,
   listMoneyCategories,
@@ -219,7 +220,7 @@ describe("listMoneyTransactions", () => {
   it("passes the filters to the web feed's RPC and caps the page size", async () => {
     const stub = createSupabaseStub({}, { money_list_transactions_feed: { data: [] } });
 
-    await listMoneyTransactions(
+    const page = await listMoneyTransactions(
       stub.client,
       {
         payerPersonId: "p-1",
@@ -252,6 +253,8 @@ describe("listMoneyTransactions", () => {
         p_include_line_items: true,
       }),
     );
+    expect(page.transactions).toEqual([]);
+    expect(page.total).toBe(0);
   });
 
   it("returns bank, counterparty and line items with their canonical category, and no card number", async () => {
@@ -306,7 +309,7 @@ describe("listMoneyTransactions", () => {
   it("asks the feed to omit line jsonb for a compact MCP page", async () => {
     const stub = createSupabaseStub({}, { money_list_transactions_feed: { data: [] } });
 
-    await listMoneyTransactions(
+    const page = await listMoneyTransactions(
       stub.client,
       { payerPersonId: "p-1", offset: 0, limit: 100 },
       categories,
@@ -315,8 +318,42 @@ describe("listMoneyTransactions", () => {
 
     expect(stub.rpc).toHaveBeenCalledWith(
       "money_list_transactions_feed",
-      expect.objectContaining({ p_include_line_items: false, p_limit: 100 }),
+      expect.objectContaining({
+        p_include_line_items: false,
+        p_include_raw_payload: false,
+        p_limit: 100,
+      }),
     );
+    expect(page.transactions).toEqual([]);
+    expect(page.total).toBe(0);
+  });
+
+  it("keeps raw_payload when the caller asks for the bank operation", async () => {
+    const stub = createSupabaseStub(
+      {},
+      { money_list_transactions_feed: { data: [{ ...feedRow, total_count: 1 }] } },
+    );
+
+    const page = await listMoneyTransactions(
+      stub.client,
+      { payerPersonId: "p-1", offset: 0, limit: 10 },
+      categories,
+      { includeLineItems: false, includeBankOperation: true, includeRawPayload: true },
+    );
+
+    expect(stub.rpc).toHaveBeenCalledWith(
+      "money_list_transactions_feed",
+      expect.objectContaining({
+        p_include_line_items: false,
+        p_include_raw_payload: true,
+        p_limit: 10,
+      }),
+    );
+    expect(page.total).toBe(1);
+    expect(page.transactions[0]?.bank_operation).toEqual({
+      mcc: "5411",
+      merchant: { name: "ВкусВилл" },
+    });
   });
 
   it("surfaces an RPC error", async () => {
@@ -390,7 +427,7 @@ describe("a transaction's edges", () => {
   });
 
   it("reads no MCC and no lines from a row that has neither", async () => {
-    const row = { ...feedRow, raw_payload: null, line_items: null };
+    const row = { ...feedRow, raw_payload: null, line_items: null, mcc: null };
     const stub = createSupabaseStub({}, { money_list_transactions_feed: { data: [row] } });
 
     const [transaction] = (
@@ -399,6 +436,88 @@ describe("a transaction's edges", () => {
 
     expect(transaction.mcc).toBeNull();
     expect(transaction.line_items).toEqual([]);
+  });
+
+  it("keeps merchant/counterparty name and MCC on a wide page with raw_payload omitted", async () => {
+    const row = {
+      ...feedRow,
+      merchant_name: "ВкусВилл",
+      raw_payload: null,
+      line_items: [],
+      line_item_count: 3,
+      category_ids: ["food"],
+      mcc: "5411",
+      total_count: 1,
+    };
+    const stub = createSupabaseStub({}, { money_list_transactions_feed: { data: [row] } });
+
+    const page = await listMoneyTransactions(
+      stub.client,
+      { payerPersonId: "p-1", offset: 0, limit: 10 },
+      categories,
+      { includeLineItems: false, includeRawPayload: false },
+    );
+    const [transaction] = compactTransactionsFromPage(page);
+
+    expect(transaction).toMatchObject({
+      merchant_name: "ВкусВилл",
+      mcc: "5411",
+      counterparty: { direction: "to", name: "ВкусВилл" },
+      line_item_count: 3,
+      category_keys: ["food"],
+    });
+    expect(transaction).not.toHaveProperty("line_items");
+    expect(transaction).not.toHaveProperty("bank_operation");
+  });
+
+  it("trims a projected MCC and ignores whitespace-only projected values", async () => {
+    const padded = {
+      ...feedRow,
+      raw_payload: null,
+      mcc: " 5411 ",
+      total_count: 1,
+    };
+    const blank = {
+      ...feedRow,
+      id: "t-blank-mcc",
+      raw_payload: { operation: { mcc: "5812" } },
+      mcc: "   ",
+      total_count: 1,
+    };
+    const stub = createSupabaseStub(
+      {},
+      { money_list_transactions_feed: { data: [padded, blank] } },
+    );
+
+    const page = await listMoneyTransactions(
+      stub.client,
+      { payerPersonId: "p-1", offset: 0, limit: 10 },
+      categories,
+      { includeLineItems: false, includeRawPayload: true },
+    );
+
+    expect(page.transactions[0]?.mcc).toBe("5411");
+    expect(page.transactions[1]?.mcc).toBe("5812");
+  });
+
+  it("derives p_include_raw_payload from bank operation when unset", async () => {
+    const stub = createSupabaseStub({}, { money_list_transactions_feed: { data: [] } });
+
+    const page = await listMoneyTransactions(
+      stub.client,
+      { payerPersonId: "p-1", offset: 0, limit: 5 },
+      categories,
+      { includeLineItems: false, includeBankOperation: true },
+    );
+    expect(stub.rpc).toHaveBeenCalledWith(
+      "money_list_transactions_feed",
+      expect.objectContaining({
+        p_include_line_items: false,
+        p_include_raw_payload: true,
+      }),
+    );
+    expect(page.total).toBe(0);
+    expect(page.transactions).toEqual([]);
   });
 });
 

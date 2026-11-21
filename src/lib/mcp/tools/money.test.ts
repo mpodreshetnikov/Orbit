@@ -83,7 +83,7 @@ const DEFAULTS = {
   transfers: "all",
   include_bank_payload: false,
   sort: "posted_at_desc",
-  limit: 100,
+  limit: 10,
   offset: 0,
 };
 
@@ -345,7 +345,7 @@ describe("list_money_transactions", () => {
     expect(result.structuredContent).toMatchObject({
       has_more: false,
       next_offset: null,
-      limit: 100,
+      limit: 10,
     });
   });
 
@@ -371,9 +371,18 @@ describe("list_money_transactions", () => {
       unknown,
       unknown,
       unknown,
-      { includeLineItems?: boolean; includeBankOperation?: boolean },
+      {
+        includeLineItems?: boolean;
+        includeBankOperation?: boolean;
+        includeRawPayload?: boolean;
+      },
     ];
-    expect(options).toMatchObject({ includeLineItems: false, includeBankOperation: true });
+    expect(options).toMatchObject({
+      includeLineItems: false,
+      includeBankOperation: true,
+    });
+    // Raw follows includeBankOperation inside listMoneyTransactions when unset.
+    expect(options.includeRawPayload).toBeUndefined();
   });
 
   it("keeps a large page of receipt-heavy rows inside a compact structured payload", async () => {

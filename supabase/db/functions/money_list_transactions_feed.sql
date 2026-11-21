@@ -3,8 +3,11 @@
 -- account/card metadata, and aggregated line items for the UI ledger feed.
 --
 -- p_include_line_items (default true): when false, skip jsonb_agg of full line
--- rows and omit raw_payload. MCP wide list uses this so PostgREST does not ship
--- receipt JSON the agent will discard; the web ledger keeps the default.
+-- rows. MCP wide list uses this so PostgREST does not ship receipt JSON the agent
+-- will discard; the web ledger keeps the default.
+-- p_include_raw_payload (default NULL): when NULL, follows p_include_line_items.
+-- MCP wide passes false so T-Bank operation JSON is not transferred; pass true
+-- with include_bank_payload for the rare full bank record.
 
 DROP FUNCTION IF EXISTS public.money_list_transactions_feed(
   uuid,
@@ -56,6 +59,25 @@ DROP FUNCTION IF EXISTS public.money_list_transactions_feed(
   boolean
 );
 
+DROP FUNCTION IF EXISTS public.money_list_transactions_feed(
+  uuid,
+  text,
+  uuid[],
+  public.money_transaction_type[],
+  public.money_transaction_status[],
+  uuid[],
+  text,
+  text,
+  timestamptz,
+  timestamptz,
+  integer,
+  integer,
+  numeric,
+  numeric,
+  boolean,
+  boolean
+);
+
 CREATE OR REPLACE FUNCTION public.money_list_transactions_feed(
   p_payer_person_id uuid,
   p_search text DEFAULT NULL,
@@ -73,7 +95,8 @@ CREATE OR REPLACE FUNCTION public.money_list_transactions_feed(
   -- 3000 refund alike; p_amount_sign picks the side.
   p_amount_min numeric DEFAULT NULL,
   p_amount_max numeric DEFAULT NULL,
-  p_include_line_items boolean DEFAULT true
+  p_include_line_items boolean DEFAULT true,
+  p_include_raw_payload boolean DEFAULT NULL
 )
 RETURNS TABLE (
   id uuid,
@@ -107,6 +130,8 @@ RETURNS TABLE (
   receipt_enrichment_status text,
   receipt_request_key text,
   raw_payload jsonb,
+  -- MCC projected from raw even when raw_payload is omitted (MCP wide).
+  mcc text,
   line_items jsonb,
   line_item_titles text[],
   line_item_count integer,
@@ -124,6 +149,7 @@ DECLARE
   v_offset integer := GREATEST(COALESCE(p_offset, 0), 0);
   v_limit integer := LEAST(GREATEST(COALESCE(p_limit, 50), 1), 200);
   v_include_line_items boolean := COALESCE(p_include_line_items, true);
+  v_include_raw_payload boolean := COALESCE(p_include_raw_payload, v_include_line_items);
   v_uncategorized_category_id uuid;
 BEGIN
   SELECT category.id
@@ -264,10 +290,16 @@ BEGIN
     pt.source_category_name,
     pt.receipt_enrichment_status,
     pt.receipt_request_key,
-    -- Keep raw_payload even when line jsonb is omitted: counterparty name/channel/bank
-    -- and MCC are derived from it in MCP. Line items were the bulk of the payload; raw
-    -- alone stays well under MCP deadlines on measured seed pages.
-    pt.raw_payload,
+    -- Wide MCP pages omit raw_payload (T-Bank operation JSON dominates wire time on
+    -- prod). Counterparty name falls back to merchant_name; MCC is a separate column.
+    CASE
+      WHEN v_include_raw_payload THEN pt.raw_payload
+      ELSE NULL::jsonb
+    END AS raw_payload,
+    COALESCE(
+      NULLIF(btrim(pt.raw_payload #>> '{operation,mccString}'), ''),
+      NULLIF(btrim(pt.raw_payload #>> '{operation,mcc}'), '')
+    ) AS mcc,
     CASE
       WHEN v_include_line_items THEN COALESCE(line_item_data.line_items, '[]'::jsonb)
       ELSE '[]'::jsonb
@@ -318,6 +350,7 @@ COMMENT ON FUNCTION public.money_list_transactions_feed(
   integer,
   numeric,
   numeric,
+  boolean,
   boolean
 ) IS
-  'Returns a paged money transaction feed with server-side search, filters (amount bounds included), stable ordering, and aggregated line items. Pass p_include_line_items=false for a compact page (count + category ids, no line jsonb / raw_payload).';
+  'Returns a paged money transaction feed with server-side search, filters (amount bounds included), stable ordering, and aggregated line items. Pass p_include_line_items=false for a compact page (count + category ids, no line jsonb). Pass p_include_raw_payload=false to omit bank operation JSON (MCP wide default); NULL follows p_include_line_items.';
