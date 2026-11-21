@@ -59,10 +59,12 @@ describe("useRevokeMcpClient", () => {
 
     const { result } = renderHook(() => useRevokeMcpClient(), { wrapper: createWrapper() });
 
+    let revokeResult: unknown;
     await act(async () => {
-      await result.current.mutateAsync("grant-1");
+      revokeResult = await result.current.mutateAsync("grant-1");
     });
 
+    expect(revokeResult).toBeUndefined();
     expect(fetchMock).toHaveBeenCalledWith("/api/settings/mcp-clients/grant-1", {
       method: "DELETE",
     });

@@ -88,7 +88,7 @@ describe("McpClientsCard", () => {
     });
 
     render(<McpClientsCard />);
-    expect(screen.getByTestId("mcp-clients-empty")).toBeTruthy();
+    expect(screen.getByTestId("mcp-clients-empty")).toHaveTextContent("settings.mcp.empty");
   });
 
   it("asks for confirmation before revoking", async () => {
