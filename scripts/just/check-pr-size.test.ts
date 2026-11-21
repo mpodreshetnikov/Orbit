@@ -530,14 +530,15 @@ describe("base ref resolution", () => {
   );
 
   it("checks against the base it was given", () => {
+    // Match the resolved base whether the verdict is OK (`limit N`) or over-limit.
     expect(resolvedAgainst(runScript([], { PR_SIZE_BASE: "origin/main" }))).toMatch(
-      /against origin\/main, limit \d+/,
+      /against origin\/main, (?:limit \d+|over the limit of \d+)/,
     );
   });
 
   it("treats the zero sha as no baseline rather than an unresolvable ref", () => {
     expect(resolvedAgainst(runScript([], { PR_SIZE_BASE: checkPrSize.ZERO_SHA }))).toMatch(
-      /against origin\/main, limit \d+/,
+      /against origin\/main, (?:limit \d+|over the limit of \d+)/,
     );
   });
 
