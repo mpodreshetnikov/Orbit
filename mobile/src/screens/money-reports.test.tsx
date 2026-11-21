@@ -167,16 +167,17 @@ describe("the money report", () => {
     expect(screen.getAllByText(/0%/).length).toBeGreaterThanOrEqual(2); // Income, and the food row.
     expect(screen.queryByText("к пред. · к ср. 2025")).toBeNull();
     expect(screen.getByText("Октябрь 2026 г.")).toBeOnTheScreen();
-    expect(screen.getByText("Период…")).toBeOnTheScreen();
+    expect(screen.getByLabelText("Период")).toBeOnTheScreen();
+    expect(screen.getByText(/Прогноз на /)).toBeOnTheScreen();
     expect(
       within(screen.getByTestId("spending-total-expense")).getByTestId("spending-forecast"),
-    ).toHaveTextContent(/Прогноз на .*≈.*52\s000/);
+    ).toHaveTextContent(/Прогноз ≈.*52\s000/);
     expect(
       within(screen.getByTestId("spending-total-income")).getByTestId("spending-forecast-income"),
-    ).toHaveTextContent(/Прогноз на .*≈.*110\s000/);
+    ).toHaveTextContent(/Прогноз ≈.*110\s000/);
     expect(
       within(screen.getByTestId("spending-total-net")).getByTestId("spending-forecast-net"),
-    ).toHaveTextContent(/Прогноз на .*≈.*\+58\s000/);
+    ).toHaveTextContent(/Прогноз ≈.*\+58\s000/);
     expect(screen.queryByText(/^Прогноз расходов/)).toBeNull();
     expect(screen.getByText("Для части операций взят ближайший прошлый курс.")).toBeOnTheScreen();
     expect(screen.getByTestId("spending-treemap")).toBeOnTheScreen();
@@ -225,7 +226,7 @@ describe("the money report", () => {
       expect(reportArgs().at(-1)).toMatchObject({ p_start: "2026-09-22", p_end: "2026-10-21" }),
     );
 
-    await fireEvent.press(screen.getByText("Период…"));
+    await fireEvent.press(screen.getByLabelText("Период"));
     await fireEvent(screen.getByTestId("spending-from"), "change", {
       nativeEvent: { timestamp: new Date(2026, 9, 5, 12).getTime() },
     });
@@ -456,7 +457,7 @@ describe("the money report", () => {
     });
     await renderScreens(routes, "/money/reports");
     expect(await screen.findByTestId("spending-forecast-net")).toHaveTextContent(
-      /Прогноз на .*≈.*-30\s000/,
+      /Прогноз ≈.*-30\s000/,
     );
   });
 });
