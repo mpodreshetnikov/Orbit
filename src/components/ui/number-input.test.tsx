@@ -89,11 +89,12 @@ describe("NumberInput", () => {
     const onValueChange = vi.fn();
     render(<NumberInput aria-label="amount" value={1} onValueChange={onValueChange} />);
 
-    const user2 = user;
-    await user2.clear(screen.getByLabelText("amount"));
-    await user2.type(screen.getByLabelText("amount"), "0,5");
+    const input = screen.getByLabelText("amount");
+    await user.clear(input);
+    await user.type(input, "0,5");
 
     expect(onValueChange).toHaveBeenLastCalledWith(0.5, "0.5");
+    expect(input).toHaveValue("0.5");
   });
 
   it("stays empty while focused after clearing — the field is not re-filled", async () => {

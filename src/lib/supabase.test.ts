@@ -110,10 +110,13 @@ describe("createClient browser rpc instrumentation", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const capturedFetch = await setupCapturedFetch();
-    await capturedFetch("https://project.supabase.co/rest/v1/medical_records", { method: "GET" });
+    const response = await capturedFetch("https://project.supabase.co/rest/v1/medical_records", {
+      method: "GET",
+    });
 
     expect(startClientSpanMock).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(response.status).toBe(200);
   });
 
   it("preserves request correlation headers and marks non-ok rpc response as error", async () => {

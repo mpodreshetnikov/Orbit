@@ -78,12 +78,13 @@ describe("fetchEdgeFunctionWithTelemetry", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("bad", { status: 500 })));
     const { fetchEdgeFunctionWithTelemetry } = await import("./edge-function-fetch");
 
-    await fetchEdgeFunctionWithTelemetry(
+    const response = await fetchEdgeFunctionWithTelemetry(
       "https://project.supabase.co/functions/v1/icd-lookup",
       { method: "POST" },
       { component: "test-component" },
     );
 
+    expect(response.status).toBe(500);
     expect(loggerWarnMock).toHaveBeenCalledWith(
       "edge_function_request_failed",
       expect.objectContaining({ status_code: 500 }),
