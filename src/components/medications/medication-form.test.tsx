@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
+  AddOneTimeToExistingPayload,
   CreateMedRegimenInput,
   MedRegimen,
   MedSchedule,
@@ -156,6 +157,18 @@ function makeRegimen(overrides: Partial<MedRegimen> = {}): MedRegimen {
   };
 }
 
+type FormSubmission = CreateMedRegimenInput | UpdateMedRegimenInput | AddOneTimeToExistingPayload;
+
+function collectSubmissions() {
+  const submissions: FormSubmission[] = [];
+  return {
+    submissions,
+    onSubmit(data: FormSubmission) {
+      submissions.push(data);
+    },
+  };
+}
+
 describe("MedicationForm", () => {
   beforeEach(() => {
     hookMocks.useIsMobile.mockReturnValue(false);
@@ -163,7 +176,7 @@ describe("MedicationForm", () => {
   });
 
   it("submits add-one-time payload when an existing regimen is selected", async () => {
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const { submissions, onSubmit } = collectSubmissions();
     const user = userEvent.setup();
 
     hookMocks.useRegimens.mockReturnValue({
@@ -180,6 +193,9 @@ describe("MedicationForm", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Aspirin" }));
+    expect(screen.getByRole("textbox", { name: "medications.namePlaceholder" })).toHaveValue(
+      "Aspirin",
+    );
     fireEvent.change(screen.getByLabelText("medications.scheduledAt"), {
       target: { value: "2026-03-01T10:15" },
     });
@@ -189,19 +205,19 @@ describe("MedicationForm", () => {
 
     await user.click(screen.getByRole("button", { name: "common.add" }));
 
-    await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith({
+    expect(submissions).toEqual([
+      {
         addToRegimenId: "reg-42",
         scheduled_at: new Date("2026-03-01T10:15").toISOString(),
         amount: 3,
         unit: "pill",
         notes: null,
-      });
-    });
+      },
+    ]);
   });
 
   it("creates a new one-time regimen payload when no existing regimen is chosen", async () => {
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const { submissions, onSubmit } = collectSubmissions();
     const user = userEvent.setup();
 
     render(
@@ -225,8 +241,8 @@ describe("MedicationForm", () => {
 
     await user.click(screen.getByRole("button", { name: "common.add" }));
 
-    await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith({
+    expect(submissions).toEqual([
+      {
         person_id: "person-1",
         custom_name: "New Med",
         intake_unit: "pill",
@@ -237,12 +253,12 @@ describe("MedicationForm", () => {
         duration: { type: "endless" },
         inventory: null,
         notes: "once only",
-      });
-    });
+      },
+    ]);
   });
 
   it("submits a fractional one-time dose", async () => {
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const { submissions, onSubmit } = collectSubmissions();
     const user = userEvent.setup();
 
     render(
@@ -266,17 +282,16 @@ describe("MedicationForm", () => {
 
     await user.click(screen.getByRole("button", { name: "common.add" }));
 
-    await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith(
-        expect.objectContaining({
-          dose_definition: { intake: { amount: 0.5, unit: "pill" }, active: [] },
-        }),
-      );
-    });
+    expect(submissions).toEqual([
+      expect.objectContaining({
+        schedule: { mode: "one_off", due_at: new Date("2026-03-01T10:15").toISOString() },
+        dose_definition: { intake: { amount: 0.5, unit: "pill" }, active: [] },
+      }),
+    ]);
   });
 
   it("submits a fractional daily dose entered with a decimal comma", async () => {
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const { submissions, onSubmit } = collectSubmissions();
     const user = userEvent.setup();
 
     render(<MedicationForm mode="create" personId="person-1" onSubmit={onSubmit} />);
@@ -288,14 +303,12 @@ describe("MedicationForm", () => {
 
     await user.click(screen.getByRole("button", { name: "common.add" }));
 
-    await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith(
-        expect.objectContaining({
-          dose_definition: { intake: { amount: 1.5, unit: "pill" }, active: [] },
-          schedule: expect.objectContaining({ mode: "daily_times", amounts: [1.5] }),
-        }),
-      );
-    });
+    expect(submissions).toEqual([
+      expect.objectContaining({
+        dose_definition: { intake: { amount: 1.5, unit: "pill" }, active: [] },
+        schedule: expect.objectContaining({ mode: "daily_times", amounts: [1.5] }),
+      }),
+    ]);
   });
 
   it("blocks submit for regular regimen when for-days duration is invalid", async () => {
@@ -321,7 +334,7 @@ describe("MedicationForm", () => {
   });
 
   it("submits regular interval-hours payload with inventory and custom intake advice", async () => {
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const { submissions, onSubmit } = collectSubmissions();
     const user = userEvent.setup();
 
     render(<MedicationForm mode="create" personId="person-1" onSubmit={onSubmit} />);
@@ -342,6 +355,7 @@ describe("MedicationForm", () => {
     });
 
     await user.click(screen.getByLabelText("medications.inventoryEnabled"));
+    expect(screen.getByRole("checkbox", { name: "medications.inventoryEnabled" })).toBeChecked();
 
     fireEvent.change(screen.getByLabelText(/medications\.inventoryCurrent/), {
       target: { value: "50" },
@@ -356,39 +370,37 @@ describe("MedicationForm", () => {
 
     await user.click(screen.getByRole("button", { name: "common.add" }));
 
-    await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith(
-        expect.objectContaining({
-          person_id: "person-1",
-          custom_name: "Metformin",
-          status: "active",
-          intake_unit: "pill",
-          dose_definition: { intake: { amount: 2, unit: "pill" }, active: [] },
-          intake_advice_type: "custom",
-          intake_advice_text: "After breakfast only",
-          schedule: { mode: "interval_hours", interval: { every: 8 }, amount: 2 },
-          duration: expect.objectContaining({ type: "endless", start_date: expect.any(String) }),
-          inventory: {
-            enabled: true,
-            current_amount: 50,
-            refill_threshold_amount: 10,
-            unit: "pill",
-            auto_decrement_on_taken: true,
-          },
-          notes: "long-term regimen",
-        }),
-      );
-    });
+    expect(submissions).toEqual([
+      expect.objectContaining({
+        person_id: "person-1",
+        custom_name: "Metformin",
+        status: "active",
+        intake_unit: "pill",
+        dose_definition: { intake: { amount: 2, unit: "pill" }, active: [] },
+        intake_advice_type: "custom",
+        intake_advice_text: "After breakfast only",
+        schedule: { mode: "interval_hours", interval: { every: 8 }, amount: 2 },
+        duration: expect.objectContaining({ type: "endless", start_date: expect.any(String) }),
+        inventory: {
+          enabled: true,
+          current_amount: 50,
+          refill_threshold_amount: 10,
+          unit: "pill",
+          auto_decrement_on_taken: true,
+        },
+        notes: "long-term regimen",
+      }),
+    ]);
   });
 
   it("auto-matches regimen by typed one-time name when no explicit selection is made", async () => {
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const { submissions, onSubmit } = collectSubmissions();
     const user = userEvent.setup();
 
     hookMocks.useRegimens.mockReturnValue({
       data: [
         makeRegimen({ id: "reg-42", custom_name: "Aspirin" }),
-        makeRegimen({ id: "reg-99", custom_name: "Other" }),
+        makeRegimen({ id: "reg-99", custom_name: "Aspirin Plus" }),
       ],
     });
 
@@ -409,19 +421,19 @@ describe("MedicationForm", () => {
     });
     await user.click(screen.getByRole("button", { name: "common.add" }));
 
-    await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith({
+    expect(submissions).toEqual([
+      {
         addToRegimenId: "reg-42",
         scheduled_at: new Date("2026-03-03T09:00").toISOString(),
         amount: 1,
         unit: "pill",
         notes: null,
-      });
-    });
+      },
+    ]);
   });
 
   it("submits one-time edit payload", async () => {
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const { submissions, onSubmit } = collectSubmissions();
     const user = userEvent.setup();
 
     render(
@@ -434,18 +446,19 @@ describe("MedicationForm", () => {
           schedule: { mode: "one_off", due_at: "2026-03-04T08:30:00.000Z" } as MedSchedule,
           dose_definition: { intake: { amount: 2, unit: "pill" }, active: [] },
         } as unknown as MedRegimen)}
-        onSubmit={onSubmit as (data: CreateMedRegimenInput | UpdateMedRegimenInput) => void}
+        onSubmit={onSubmit}
       />,
     );
 
+    expect(screen.getByLabelText("medications.oneTimeAmount")).toHaveValue("2");
     fireEvent.change(screen.getByLabelText("medications.scheduledAt"), {
       target: { value: "2026-03-05T07:15" },
     });
 
     await user.click(screen.getByRole("button", { name: "common.save" }));
 
-    await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith({
+    expect(submissions).toEqual([
+      {
         custom_name: "Ibuprofen",
         intake_unit: "pill",
         dose_definition: { intake: { amount: 2, unit: "pill" }, active: [] },
@@ -455,15 +468,15 @@ describe("MedicationForm", () => {
         duration: { type: "endless" },
         inventory: null,
         notes: null,
-      });
-    });
+      },
+    ]);
   });
 
   it("keeps a recorded strength when an unrelated field is edited", async () => {
     // The form once rebuilt `dose_definition` from its own inputs, so opening a
     // course and changing a reminder time emptied the ingredients recorded over
     // the connector. That is real data loss on rows nobody meant to touch.
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const { submissions, onSubmit } = collectSubmissions();
     const user = userEvent.setup();
 
     render(
@@ -478,7 +491,7 @@ describe("MedicationForm", () => {
           },
           schedule: { mode: "daily_times", times: ["09:00"], amounts: [1.5] } as MedSchedule,
         } as unknown as MedRegimen)}
-        onSubmit={onSubmit as (data: CreateMedRegimenInput | UpdateMedRegimenInput) => void}
+        onSubmit={onSubmit}
       />,
     );
 
@@ -488,16 +501,15 @@ describe("MedicationForm", () => {
 
     await user.click(screen.getByRole("button", { name: "common.save" }));
 
-    await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith(
-        expect.objectContaining({
-          dose_definition: expect.objectContaining({
-            intake: { amount: 1.5, unit: "pill" },
-            unit_strength: [{ name: "Сертралин", amount: 100, unit: "milligram" }],
-          }),
+    expect(submissions).toEqual([
+      expect.objectContaining({
+        notes: "по назначению врача",
+        dose_definition: expect.objectContaining({
+          intake: { amount: 1.5, unit: "pill" },
+          unit_strength: [{ name: "Сертралин", amount: 100, unit: "milligram" }],
         }),
-      );
-    });
+      }),
+    ]);
   });
 
   it("carries a per-unit strength across an amount change, and drops a legacy total", async () => {
@@ -505,7 +517,7 @@ describe("MedicationForm", () => {
     // pills; reattaching it to 2 would assert a dose the record never held. The
     // per-unit figure is the one that survives, because it never depended on
     // the amount.
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const { submissions, onSubmit } = collectSubmissions();
     const user = userEvent.setup();
 
     render(
@@ -521,7 +533,7 @@ describe("MedicationForm", () => {
           },
           schedule: { mode: "daily_times", times: ["09:00"], amounts: [1.5] } as MedSchedule,
         } as unknown as MedRegimen)}
-        onSubmit={onSubmit as (data: CreateMedRegimenInput | UpdateMedRegimenInput) => void}
+        onSubmit={onSubmit}
       />,
     );
 
@@ -531,17 +543,16 @@ describe("MedicationForm", () => {
 
     await user.click(screen.getByRole("button", { name: "common.save" }));
 
-    await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith(
-        expect.objectContaining({
-          dose_definition: {
-            intake: { amount: 2, unit: "pill" },
-            active: [],
-            unit_strength: [{ name: "Сертралин", amount: 100, unit: "milligram" }],
-          },
-        }),
-      );
-    });
+    expect(submissions).toEqual([
+      expect.objectContaining({
+        schedule: { mode: "daily_times", times: ["09:00"], amounts: [2] },
+        dose_definition: {
+          intake: { amount: 2, unit: "pill" },
+          active: [],
+          unit_strength: [{ name: "Сертралин", amount: 100, unit: "milligram" }],
+        },
+      }),
+    ]);
   });
 
   it("shows a recorded strength and saves the one typed over it", async () => {
@@ -610,7 +621,7 @@ describe("MedicationForm", () => {
   });
 
   it("records no strength when the field is left empty", async () => {
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const { submissions, onSubmit } = collectSubmissions();
     const user = userEvent.setup();
 
     render(
@@ -621,7 +632,7 @@ describe("MedicationForm", () => {
           dose_definition: { intake: { amount: 1, unit: "pill" }, active: [] },
           schedule: { mode: "daily_times", times: ["09:00"], amounts: [1] } as MedSchedule,
         } as unknown as MedRegimen)}
-        onSubmit={onSubmit as (data: CreateMedRegimenInput | UpdateMedRegimenInput) => void}
+        onSubmit={onSubmit}
       />,
     );
 
@@ -630,17 +641,15 @@ describe("MedicationForm", () => {
     });
     await user.click(screen.getByRole("button", { name: "common.save" }));
 
-    await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith(
-        expect.objectContaining({
-          dose_definition: { intake: { amount: 1, unit: "pill" }, active: [] },
-        }),
-      );
-    });
+    expect(submissions).toEqual([
+      expect.objectContaining({
+        dose_definition: { intake: { amount: 1, unit: "pill" }, active: [] },
+      }),
+    ]);
   });
 
   it("keeps weekly per-slot amounts when an unrelated field is edited", async () => {
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const { submissions, onSubmit } = collectSubmissions();
     const user = userEvent.setup();
 
     render(
@@ -657,7 +666,7 @@ describe("MedicationForm", () => {
             amounts: [0.5, 1.5],
           } as MedSchedule,
         })}
-        onSubmit={onSubmit as (data: CreateMedRegimenInput | UpdateMedRegimenInput) => void}
+        onSubmit={onSubmit}
       />,
     );
 
@@ -667,20 +676,18 @@ describe("MedicationForm", () => {
 
     await user.click(screen.getByRole("button", { name: "common.save" }));
 
-    await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith(
-        expect.objectContaining({
-          notes: "half in the morning",
-          dose_definition: { intake: { amount: 0.5, unit: "pill" }, active: [] },
-          schedule: {
-            mode: "days_of_week",
-            days_of_week: [1, 4],
-            times: ["09:00", "20:00"],
-            amounts: [0.5, 1.5],
-          },
-        }),
-      );
-    });
+    expect(submissions).toEqual([
+      expect.objectContaining({
+        notes: "half in the morning",
+        dose_definition: { intake: { amount: 0.5, unit: "pill" }, active: [] },
+        schedule: {
+          mode: "days_of_week",
+          days_of_week: [1, 4],
+          times: ["09:00", "20:00"],
+          amounts: [0.5, 1.5],
+        },
+      }),
+    ]);
   });
 
   it("edits a weekly per-slot amount and leaves the other slot alone", async () => {
@@ -754,7 +761,7 @@ describe("MedicationForm", () => {
   });
 
   it("keeps daily and interval-hours amounts across an unrelated edit", async () => {
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const { submissions, onSubmit } = collectSubmissions();
     const user = userEvent.setup();
 
     const { unmount } = render(
@@ -769,23 +776,22 @@ describe("MedicationForm", () => {
             amounts: [0.5, 1.5],
           } as MedSchedule,
         })}
-        onSubmit={onSubmit as (data: CreateMedRegimenInput | UpdateMedRegimenInput) => void}
+        onSubmit={onSubmit}
       />,
     );
 
     fireEvent.change(screen.getByLabelText(/medications\.notes/), { target: { value: "note" } });
     await user.click(screen.getByRole("button", { name: "common.save" }));
 
-    await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith(
-        expect.objectContaining({
-          schedule: { mode: "daily_times", times: ["09:00", "20:00"], amounts: [0.5, 1.5] },
-        }),
-      );
-    });
+    expect(submissions).toEqual([
+      expect.objectContaining({
+        notes: "note",
+        schedule: { mode: "daily_times", times: ["09:00", "20:00"], amounts: [0.5, 1.5] },
+      }),
+    ]);
 
     unmount();
-    onSubmit.mockClear();
+    const interval = collectSubmissions();
 
     render(
       <MedicationForm
@@ -795,25 +801,24 @@ describe("MedicationForm", () => {
           dose_definition: { intake: { amount: 1.5, unit: "pill" }, active: [] },
           schedule: { mode: "interval_hours", interval: { every: 6 }, amount: 1.5 } as MedSchedule,
         })}
-        onSubmit={onSubmit as (data: CreateMedRegimenInput | UpdateMedRegimenInput) => void}
+        onSubmit={interval.onSubmit}
       />,
     );
 
     fireEvent.change(screen.getByLabelText(/medications\.notes/), { target: { value: "note" } });
     await user.click(screen.getByRole("button", { name: "common.save" }));
 
-    await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith(
-        expect.objectContaining({
-          dose_definition: { intake: { amount: 1.5, unit: "pill" }, active: [] },
-          schedule: { mode: "interval_hours", interval: { every: 6 }, amount: 1.5 },
-        }),
-      );
-    });
+    expect(interval.submissions).toEqual([
+      expect.objectContaining({
+        notes: "note",
+        dose_definition: { intake: { amount: 1.5, unit: "pill" }, active: [] },
+        schedule: { mode: "interval_hours", interval: { every: 6 }, amount: 1.5 },
+      }),
+    ]);
   });
 
   it("leaves weekly doses alone when the already-selected intake count is clicked", async () => {
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const { submissions, onSubmit } = collectSubmissions();
     const user = userEvent.setup();
 
     render(
@@ -828,27 +833,26 @@ describe("MedicationForm", () => {
             amounts: [0.5, 1.5],
           } as MedSchedule,
         })}
-        onSubmit={onSubmit as (data: CreateMedRegimenInput | UpdateMedRegimenInput) => void}
+        onSubmit={onSubmit}
       />,
     );
 
     await user.click(screen.getByRole("button", { name: "2" }));
+    expect(screen.getAllByLabelText("medications.amountPerIntake")).toHaveLength(2);
     await user.click(screen.getByRole("button", { name: "common.save" }));
 
-    await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith(
-        expect.objectContaining({
-          schedule: expect.objectContaining({
-            times: ["09:00", "20:00"],
-            amounts: [0.5, 1.5],
-          }),
+    expect(submissions).toEqual([
+      expect.objectContaining({
+        schedule: expect.objectContaining({
+          times: ["09:00", "20:00"],
+          amounts: [0.5, 1.5],
         }),
-      );
-    });
+      }),
+    ]);
   });
 
   it("keeps the doses of slots that survive an intake-count change", async () => {
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const { submissions, onSubmit } = collectSubmissions();
     const user = userEvent.setup();
 
     render(
@@ -864,25 +868,24 @@ describe("MedicationForm", () => {
             amounts: [0.5, 1.5],
           } as MedSchedule,
         })}
-        onSubmit={onSubmit as (data: CreateMedRegimenInput | UpdateMedRegimenInput) => void}
+        onSubmit={onSubmit}
       />,
     );
 
     await user.click(screen.getByRole("button", { name: "3" }));
+    expect(screen.getAllByLabelText("medications.amountPerIntake")).toHaveLength(3);
     await user.click(screen.getByRole("button", { name: "common.save" }));
 
-    await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith(
-        expect.objectContaining({
-          schedule: expect.objectContaining({
-            times: ["09:00", "15:00", "20:00"],
-            // Doses follow their own time, not their old position: 09:00 keeps 0.5 and
-            // 20:00 keeps 1.5 even though 15:00 was inserted between them.
-            amounts: [0.5, 0.5, 1.5],
-          }),
+    expect(submissions).toEqual([
+      expect.objectContaining({
+        schedule: expect.objectContaining({
+          times: ["09:00", "15:00", "20:00"],
+          // Doses follow their own time, not their old position: 09:00 keeps 0.5 and
+          // 20:00 keeps 1.5 even though 15:00 was inserted between them.
+          amounts: [0.5, 0.5, 1.5],
         }),
-      );
-    });
+      }),
+    ]);
   });
 
   it("keeps the base dose and slot alignment when only some slots are overridden", async () => {
@@ -977,7 +980,7 @@ describe("MedicationForm", () => {
   });
 
   it("restores the weekly plan when the frequency is switched away and back", async () => {
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const { submissions, onSubmit } = collectSubmissions();
     const user = userEvent.setup();
 
     render(
@@ -992,7 +995,7 @@ describe("MedicationForm", () => {
             amounts: [0.5, 1.5],
           } as MedSchedule,
         })}
-        onSubmit={onSubmit as (data: CreateMedRegimenInput | UpdateMedRegimenInput) => void}
+        onSubmit={onSubmit}
       />,
     );
 
@@ -1001,18 +1004,16 @@ describe("MedicationForm", () => {
 
     await user.click(screen.getByRole("button", { name: "common.save" }));
 
-    await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith(
-        expect.objectContaining({
-          schedule: {
-            mode: "days_of_week",
-            days_of_week: [1, 4],
-            times: ["09:00", "20:00"],
-            amounts: [0.5, 1.5],
-          },
-        }),
-      );
-    });
+    expect(submissions).toEqual([
+      expect.objectContaining({
+        schedule: {
+          mode: "days_of_week",
+          days_of_week: [1, 4],
+          times: ["09:00", "20:00"],
+          amounts: [0.5, 1.5],
+        },
+      }),
+    ]);
   });
 
   it("refuses to save two weekly slots at the same time", async () => {

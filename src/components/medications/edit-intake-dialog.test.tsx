@@ -53,11 +53,15 @@ describe("EditIntakeDialog", () => {
   it("submits edited taken intake with amount and note", async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn().mockResolvedValue(undefined);
-    const onOpenChange = vi.fn();
+    const intake = event();
+    function ControlledDialog() {
+      const [open, setOpen] = React.useState(true);
+      return (
+        <EditIntakeDialog open={open} onOpenChange={setOpen} event={intake} onSubmit={onSubmit} />
+      );
+    }
 
-    render(
-      <EditIntakeDialog open onOpenChange={onOpenChange} event={event()} onSubmit={onSubmit} />,
-    );
+    render(<ControlledDialog />);
 
     fireEvent.change(screen.getByLabelText("medications.editIntakeTime"), {
       target: { value: "2026-02-22T10:15" },
@@ -66,7 +70,7 @@ describe("EditIntakeDialog", () => {
       target: { value: "3" },
     });
     fireEvent.change(screen.getByLabelText("medications.note"), {
-      target: { value: "updated note" },
+      target: { value: "  updated note  " },
     });
 
     await user.click(screen.getByRole("button", { name: "common.save" }));
@@ -78,14 +82,26 @@ describe("EditIntakeDialog", () => {
         note: "updated note",
       });
     });
-    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(
+      screen.queryByRole("heading", { name: "medications.editIntake" }),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps a fractional amount instead of truncating it", async () => {
     const user = userEvent.setup();
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    type Submission = Parameters<React.ComponentProps<typeof EditIntakeDialog>["onSubmit"]>[0];
+    const submissions: Submission[] = [];
 
-    render(<EditIntakeDialog open onOpenChange={vi.fn()} event={event()} onSubmit={onSubmit} />);
+    render(
+      <EditIntakeDialog
+        open
+        onOpenChange={vi.fn()}
+        event={event()}
+        onSubmit={async (submission) => {
+          submissions.push(submission);
+        }}
+      />,
+    );
 
     fireEvent.change(screen.getByLabelText("medications.editIntakeAmount"), {
       target: { value: "0.5" },
@@ -93,9 +109,9 @@ describe("EditIntakeDialog", () => {
 
     await user.click(screen.getByRole("button", { name: "common.save" }));
 
-    await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ amountTaken: 0.5 }));
-    });
+    expect(submissions).toEqual([
+      { takenAt: "2026-02-22T09:10:00.000Z", amountTaken: 0.5, note: "initial" },
+    ]);
   });
 
   it("submits skipped intake without amount", async () => {
@@ -128,16 +144,19 @@ describe("EditIntakeDialog", () => {
     });
   });
 
-  it("does not submit when datetime value is empty", async () => {
-    const user = userEvent.setup();
+  it("does not submit when datetime value is empty", () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
 
     render(<EditIntakeDialog open onOpenChange={vi.fn()} event={event()} onSubmit={onSubmit} />);
 
-    fireEvent.change(screen.getByLabelText("medications.editIntakeTime"), {
-      target: { value: "" },
-    });
-    await user.click(screen.getByRole("button", { name: "common.save" }));
+    const timeInput = screen.getByLabelText("medications.editIntakeTime");
+    fireEvent.change(timeInput, { target: { value: "" } });
+    expect(timeInput).toBeInvalid();
+    // Force the submit event past native validation to check the handler's guard as well.
+    const form = timeInput.closest("form");
+    if (!form) throw new Error("Intake form missing");
+    fireEvent.submit(form);
     expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByRole("heading", { name: "medications.editIntake" })).toBeVisible();
   });
 });

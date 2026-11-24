@@ -403,6 +403,7 @@ describe("MedicationDetailPage", () => {
 
     await user.click(screen.getAllByRole("button", { name: "medications.editIntake" })[0]);
     await user.click(screen.getByRole("button", { name: "submit-edit-intake" }));
+    expect(screen.queryByRole("button", { name: "submit-edit-intake" })).not.toBeInTheDocument();
     await waitFor(() => {
       expect(updateResolutionMutateAsync).toHaveBeenCalledWith({
         doseEventId: "event-skipped",

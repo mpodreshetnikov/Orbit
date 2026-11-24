@@ -234,10 +234,16 @@ describe("MedicationDashboard", () => {
 
     render(<MedicationDashboard />);
 
-    await user.click(screen.getAllByTitle("medications.skipped")[0]);
+    const [firstSkip, secondSkip] = screen.getAllByTitle("medications.skipped");
+    await user.click(firstSkip);
     expect(markSkippedMutate).toHaveBeenCalledWith({ doseEventId: "event-a" }, expect.any(Object));
+    expect(firstSkip).not.toBeInTheDocument();
+    expect(secondSkip).toBeEnabled();
 
-    await user.click(screen.getByRole("button", { name: "medications.confirmAll" }));
+    const confirmAll = screen.getByRole("button", { name: "medications.confirmAll" });
+    await user.click(confirmAll);
+    expect(confirmAll).toBeDisabled();
+    await user.click(confirmAll);
     expect(markTakenMutate).toHaveBeenCalledTimes(2);
     expect(markTakenMutate).toHaveBeenNthCalledWith(
       1,
@@ -292,6 +298,7 @@ describe("MedicationDashboard", () => {
 
     await user.click(screen.getAllByRole("button", { name: "medications.editIntake" }).at(-1)!);
     await user.click(screen.getByRole("button", { name: "submit-edit-intake" }));
+    expect(screen.queryByRole("button", { name: "submit-edit-intake" })).not.toBeInTheDocument();
     await waitFor(() => {
       expect(updateResolutionMutateAsync).toHaveBeenCalledWith({
         doseEventId: "event-oneoff",
@@ -302,7 +309,9 @@ describe("MedicationDashboard", () => {
     });
 
     await user.click(screen.getAllByRole("button", { name: "medications.removeOneTime" })[0]);
+    expect(screen.getByText("medications.removeOneTimeConfirm")).toBeVisible();
     await user.click(screen.getAllByRole("button", { name: "medications.removeOneTime" }).at(-1)!);
+    expect(screen.queryByText("medications.removeOneTimeConfirm")).not.toBeInTheDocument();
     await waitFor(() => {
       expect(deleteRegimenMutateAsync).toHaveBeenCalledWith({
         id: "reg-oneoff",
