@@ -1,7 +1,6 @@
 import React from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { CreateMeasurementInput, UpdateMeasurementInput } from "@/types";
 import { createTestQueryClient, createTestQueryWrapper } from "../../test/utils/web/render";
 import { createQueryBuilder } from "../../test/utils/web/supabase-query";
 
@@ -21,6 +20,10 @@ function renderHookWithQueryClient<T>(hook: () => T) {
     ...renderHook(hook, { wrapper }),
   };
 }
+
+const measurementsKey = ["person-measurements", "p1", "weight"];
+const historyKey = ["single-measurement-history", "p1", "weight"];
+const otherPersonKey = ["person-measurements", "p2", "weight"];
 
 function measurementRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -244,26 +247,33 @@ describe("use-measurements", () => {
 
     const { useCreateMeasurement } = await import("./use-measurements");
     const { result, queryClient } = renderHookWithQueryClient(() => useCreateMeasurement());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    queryClient.setQueryData(measurementsKey, []);
+    queryClient.setQueryData(historyKey, { history: [] });
+    queryClient.setQueryData(otherPersonKey, []);
+    const measuredAt = "2026-11-24T08:00:00.000Z";
 
     await act(async () => {
-      await result.current.mutateAsync({
-        person_id: "p1",
-        catalog_id: "cat-1",
-        value: 80,
-      } as CreateMeasurementInput);
+      expect(
+        await result.current.mutateAsync({
+          person_id: "p1",
+          catalog_id: "cat-1",
+          value: 80,
+          measured_at: measuredAt,
+        }),
+      ).toEqual(created);
     });
 
-    expect(builder.insert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        person_id: "p1",
-        catalog_id: "cat-1",
-        created_by_user_id: "user-1",
-      }),
-    );
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["person-measurements", "p1"],
+    expect(builder.insert).toHaveBeenCalledWith({
+      person_id: "p1",
+      catalog_id: "cat-1",
+      value: 80,
+      measured_at: measuredAt,
+      notes: null,
+      created_by_user_id: "user-1",
     });
+    expect(queryClient.getQueryState(measurementsKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(historyKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherPersonKey)?.isInvalidated).toBe(false);
   });
 
   it("updates measurement and invalidates queries", async () => {
@@ -280,23 +290,26 @@ describe("use-measurements", () => {
 
     const { useUpdateMeasurement } = await import("./use-measurements");
     const { result, queryClient } = renderHookWithQueryClient(() => useUpdateMeasurement());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const previous = { ...updated, value: 80 };
+    queryClient.setQueryData(measurementsKey, []);
+    queryClient.setQueryData(historyKey, { history: [previous] });
+    queryClient.setQueryData(otherPersonKey, []);
 
     await act(async () => {
-      await result.current.mutateAsync({
-        id: "m-1",
-        personId: "p1",
-        updates: { value: 79 },
-      } as { id: string; personId: string; updates: UpdateMeasurementInput });
+      expect(
+        await result.current.mutateAsync({
+          id: "m-1",
+          personId: "p1",
+          updates: { value: 79 },
+        }),
+      ).toEqual(updated);
     });
 
     expect(builder.update).toHaveBeenCalledWith({ value: 79 });
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["person-measurements", "p1"],
-    });
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["single-measurement-history", "p1"],
-    });
+    expect(builder.eq).toHaveBeenCalledWith("id", "m-1");
+    expect(queryClient.getQueryState(measurementsKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(historyKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherPersonKey)?.isInvalidated).toBe(false);
   });
 
   it("deletes measurement and invalidates queries", async () => {
@@ -307,7 +320,9 @@ describe("use-measurements", () => {
 
     const { useDeleteMeasurement } = await import("./use-measurements");
     const { result, queryClient } = renderHookWithQueryClient(() => useDeleteMeasurement());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    queryClient.setQueryData(measurementsKey, []);
+    queryClient.setQueryData(historyKey, { history: [{ id: "m-1", value: 80 }] });
+    queryClient.setQueryData(otherPersonKey, []);
 
     await act(async () => {
       await result.current.mutateAsync({
@@ -318,8 +333,8 @@ describe("use-measurements", () => {
 
     expect(builder.delete).toHaveBeenCalled();
     expect(builder.eq).toHaveBeenCalledWith("id", "m-1");
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["person-measurements", "p1"],
-    });
+    expect(queryClient.getQueryState(measurementsKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(historyKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherPersonKey)?.isInvalidated).toBe(false);
   });
 });

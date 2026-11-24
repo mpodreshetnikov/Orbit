@@ -50,14 +50,15 @@ describe("use-record-extraction-issues", () => {
     expect(eqMock).toHaveBeenCalledWith("record_id", "record-1");
   });
 
-  it("does not query without a record", async () => {
+  it("stays idle without a record", async () => {
     const { client, fromMock } = createSupabaseMock({ data: [] });
     createClientMock.mockReturnValue(client);
 
     const { useRecordExtractionIssues } = await import("./use-record-extraction-issues");
-    renderHookWithQueryClient(() => useRecordExtractionIssues(null));
+    const { result } = renderHookWithQueryClient(() => useRecordExtractionIssues(null));
 
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(result.current.fetchStatus).toBe("idle");
+    expect(result.current.data).toBeUndefined();
     expect(fromMock).not.toHaveBeenCalled();
   });
 
