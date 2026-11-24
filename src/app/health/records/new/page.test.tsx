@@ -1,80 +1,47 @@
 ﻿import React from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import NewRecordPage from "./page";
+import * as page from "./page";
 
-let selectedPersonIdState: string | null = "person-1";
-const routerMock = {
-  push: vi.fn(),
-  replace: vi.fn(),
-  refresh: vi.fn(),
-  prefetch: vi.fn().mockResolvedValue(undefined),
-};
-
-const usePersonsMock = vi.fn();
+const navigation = vi.hoisted(() => ({ router: { replace: vi.fn(), push: vi.fn() } }));
 
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => routerMock,
+  useRouter: () => navigation.router,
 }));
 
-vi.mock("@/stores/ui-store", () => ({
-  useUIStore: (selector: (state: { selectedPersonId: string | null }) => unknown) =>
-    selector({ selectedPersonId: selectedPersonIdState }),
-}));
+const NewRecordPage = page.default;
 
-vi.mock("@/hooks", () => ({
-  usePersons: (...args: unknown[]) => usePersonsMock(...args),
-}));
-
-vi.mock("@/components/records", () => ({
-  AddRecordWizard: ({ personId, personName }: { personId: string; personName: string }) => (
-    <div>
-      add-record-wizard:{personId}:{personName}
-    </div>
-  ),
-}));
-
-describe("new record page", () => {
+describe("NewRecordPage", () => {
   beforeEach(() => {
-    selectedPersonIdState = "person-1";
-    routerMock.push.mockReset();
-    usePersonsMock.mockReset();
+    navigation.router = { replace: vi.fn(), push: vi.fn() };
   });
 
-  it("renders loading state", () => {
-    usePersonsMock.mockReturnValue({ data: undefined, isLoading: true });
-    render(<NewRecordPage />);
-    expect(screen.getByText("common.loading")).toBeInTheDocument();
+  it("only exposes the page component to Next.js", () => {
+    expect(Object.keys(page)).toEqual(["default"]);
   });
 
-  it("shows empty state and redirects when no selected person exists", async () => {
-    selectedPersonIdState = "person-missing";
-    usePersonsMock.mockReturnValue({
-      data: [{ id: "person-1", name: "Alex" }],
-      isLoading: false,
-    });
+  it("replaces the bookmarked route when the navigation context changes", () => {
+    const { rerender } = render(<NewRecordPage />);
+    expect(screen.getByText("records.uploadRemoved.title")).toBeInTheDocument();
+    expect(screen.getByText("records.uploadRemoved.body")).toBeInTheDocument();
+    expect(navigation.router.replace).toHaveBeenCalledWith("/health");
 
-    render(<NewRecordPage />);
-    expect(screen.getByText("person.noPerson")).toBeInTheDocument();
-    expect(screen.getByText("person.selectPrompt")).toBeInTheDocument();
-    await waitFor(() => expect(routerMock.push).toHaveBeenCalledWith("/health"));
+    navigation.router = { replace: vi.fn(), push: vi.fn() };
+    rerender(<NewRecordPage />);
+    expect(navigation.router.replace).toHaveBeenCalledWith("/health");
   });
 
-  it("renders add-record wizard for selected person", () => {
-    selectedPersonIdState = "person-1";
-    usePersonsMock.mockReturnValue({
-      data: [
-        { id: "person-1", name: "Alex" },
-        { id: "person-2", name: "Luna" },
-      ],
-      isLoading: false,
-    });
-
+  it("lets a reader manually return to health from the fallback message", async () => {
     render(<NewRecordPage />);
-    expect(screen.getByText("add-record-wizard:person-1:Alex")).toBeInTheDocument();
+    const back = screen.getByRole("button", { name: "records.uploadRemoved.back" });
+    expect(back).toBeEnabled();
+    expect(navigation.router.push).not.toHaveBeenCalled();
+    await userEvent.setup().click(back);
+    expect(navigation.router.push).toHaveBeenCalledWith("/health");
   });
 });
