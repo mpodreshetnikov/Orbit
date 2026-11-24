@@ -45,12 +45,12 @@ function baseRecord(overrides: Partial<MedicalRecordListItem> = {}): MedicalReco
     id: "record-1",
     person_id: "person-1",
     created_by_user_id: "user-1",
+    record_type: "lab",
+    record_date: "2026-01-01",
     title: "CBC",
     notes: null,
     status: "active",
     removed_at: null,
-    record_type: "lab",
-    record_date: "2026-01-01",
     created_at: "2026-01-01T00:00:00.000Z",
     updated_at: "2026-01-01T00:00:00.000Z",
     ocr_text: null,
@@ -64,7 +64,18 @@ function baseRecord(overrides: Partial<MedicalRecordListItem> = {}): MedicalReco
   };
 }
 
-describe("RecordsList Decision B", () => {
+function recordQuery(
+  data: MedicalRecordListItem[] | undefined,
+  { isLoading = false, error = null }: { isLoading?: boolean; error?: Error | null } = {},
+) {
+  return { data, isLoading, error };
+}
+
+function openActions(user: ReturnType<typeof userEvent.setup>) {
+  return user.click(screen.getByRole("button", { name: "common.actions" }));
+}
+
+describe("RecordsList", () => {
   beforeEach(() => {
     searchParamsState = new URLSearchParams();
     routerMock.push.mockReset();
@@ -76,11 +87,7 @@ describe("RecordsList Decision B", () => {
     hookMocks.useRestoreRecord.mockReturnValue({ mutate: vi.fn() });
     hookMocks.useHardDeleteRecord.mockReturnValue({ mutate: vi.fn() });
     hookMocks.useUpdateMedicalRecord.mockReturnValue({ mutate: vi.fn() });
-    hookMocks.useMedicalRecords.mockReturnValue({
-      data: [],
-      isLoading: false,
-      error: null,
-    });
+    hookMocks.useMedicalRecords.mockReturnValue(recordQuery([]));
   });
 
   it("has no upload CTA and uses not-processed tab copy", () => {
@@ -92,11 +99,7 @@ describe("RecordsList Decision B", () => {
 
   it("opens an existing record from the active list", async () => {
     const user = userEvent.setup();
-    hookMocks.useMedicalRecords.mockReturnValue({
-      data: [baseRecord()],
-      isLoading: false,
-      error: null,
-    });
+    hookMocks.useMedicalRecords.mockReturnValue(recordQuery([baseRecord()]));
     render(<RecordsList personId="person-1" personName="Ada" />);
     expect(screen.queryByText("health.addRecord")).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "health.noRecords" })).not.toBeInTheDocument();
@@ -105,22 +108,32 @@ describe("RecordsList Decision B", () => {
   });
 
   it.each([
-    ["active", "active", "health.noRecords", "file-text"],
-    ["draft", "drafts", "records.noDrafts", "file-stack"],
-    ["processing", "notProcessed", "records.noNotProcessed", "circle-slash"],
-    ["removed", "removed", "common.noResults", "file-text"],
-  ])("selects the %s tab and identifies its empty state", (tab, label, title, icon) => {
+    ["active", "active", "health.noRecords", "health.noRecordsViaAssistant", null],
+    ["draft", "drafts", "records.noDrafts", "records.noDraftsDescription", "file-stack"],
+    [
+      "processing",
+      "notProcessed",
+      "records.noNotProcessed",
+      "records.noNotProcessedDescription",
+      "circle-slash",
+    ],
+    ["removed", "removed", "common.noResults", "common.noResults", null],
+  ])("selects the %s tab and identifies its empty state", (tab, label, title, body, tabIcon) => {
     searchParamsState = new URLSearchParams(`tab=${tab}`);
     render(<RecordsList personId="person-1" personName="Ada" />);
 
     const selected = screen.getByRole("button", { name: `records.statusFilter.${label}` });
     expect(selected).toHaveClass("bg-secondary");
+    expect(selected.classList.contains("gap-1")).toBe(Boolean(tabIcon));
+    if (tabIcon) expect(selected.querySelector("svg")).toHaveClass(`lucide-${tabIcon}`);
+    else expect(selected.querySelector("svg")).toBeNull();
     for (const other of screen.getAllByRole("button", { name: /^records.statusFilter\./ })) {
       if (other !== selected) expect(other).not.toHaveClass("bg-secondary");
     }
     const empty = screen.getByRole("heading", { name: title }).parentElement;
     expect(empty?.querySelectorAll("svg")).toHaveLength(1);
-    expect(empty?.querySelector("svg")).toHaveClass(`lucide-${icon}`);
+    expect(empty?.querySelector("svg")).toHaveClass(`lucide-${tabIcon ?? "file-text"}`);
+    expect(empty?.querySelector("p")).toHaveTextContent(body);
     expect(screen.queryByRole("list")).not.toBeInTheDocument();
   });
 
@@ -161,7 +174,7 @@ describe("RecordsList Decision B", () => {
           : personId === "person-2" && status === "processing"
             ? [baseRecord({ title: "Lin OCR", status: "ocr_processing" })]
             : undefined;
-      return { data, isLoading: false, error: null };
+      return recordQuery(data);
     });
     const { rerender } = render(<RecordsList personId="person-1" personName="Ada" />);
     const drafts = () => screen.getByRole("button", { name: /records.statusFilter.drafts/ });
@@ -193,16 +206,19 @@ describe("RecordsList Decision B", () => {
     expect(screen.queryByRole("heading", { name: /Ada/ })).not.toBeInTheDocument();
     expect(drafts()).not.toHaveClass("text-primary");
     expect(unprocessed()).not.toHaveClass("text-primary");
+
+    hookMocks.useMedicalRecords.mockReturnValue(recordQuery([baseRecord()]));
+    rerender(<RecordsList personId="person-2" personName="Lin" />);
+    expect(within(unprocessed()).getByText("1")).toBeVisible();
+    expect(unprocessed()).not.toHaveClass("text-primary");
   });
 
   it("debounces search and never displays results for a superseded query", () => {
     vi.useFakeTimers();
     try {
-      hookMocks.useMedicalRecords.mockImplementation((filters?: MedicalRecordFilters) => ({
-        data: filters?.status === "active" && filters.search === "CBC" ? [baseRecord()] : [],
-        isLoading: false,
-        error: null,
-      }));
+      hookMocks.useMedicalRecords.mockImplementation((filters?: MedicalRecordFilters) =>
+        recordQuery(filters?.status === "active" && filters.search === "CBC" ? [baseRecord()] : []),
+      );
       render(<RecordsList personId="person-1" personName="Ada" />);
       const search = screen.getByRole("textbox");
       expect(screen.queryByRole("button", { name: "records.clearSearch" })).not.toBeInTheDocument();
@@ -229,11 +245,9 @@ describe("RecordsList Decision B", () => {
   });
 
   it("queries only the selected record type and resets the filter", async () => {
-    hookMocks.useMedicalRecords.mockImplementation((filters?: MedicalRecordFilters) => ({
-      data: filters?.status === "active" && !filters.record_type ? [baseRecord()] : [],
-      isLoading: false,
-      error: null,
-    }));
+    hookMocks.useMedicalRecords.mockImplementation((filters?: MedicalRecordFilters) =>
+      recordQuery(filters?.status === "active" && !filters.record_type ? [baseRecord()] : []),
+    );
     render(<RecordsList personId="person-1" personName="Ada" />);
     const user = userEvent.setup();
 
@@ -252,41 +266,30 @@ describe("RecordsList Decision B", () => {
   });
 
   it.each([
-    { data: undefined, isLoading: false, error: null, message: null },
-    { data: [baseRecord()], isLoading: true, error: null, message: null },
-    { data: [], isLoading: true, error: null, message: null },
-    {
-      data: [baseRecord()],
-      isLoading: false,
-      error: new Error("Records unavailable"),
-      message: "Records unavailable",
-    },
-    {
-      data: [],
-      isLoading: false,
-      error: new Error("Records unavailable"),
-      message: "Records unavailable",
-    },
-  ])("keeps results and empty state hidden while the query is unavailable ($#)", (query) => {
-    hookMocks.useMedicalRecords.mockReturnValue(query);
-    render(<RecordsList personId="person-1" personName="Ada" />);
+    { data: undefined, isLoading: false },
+    { data: [baseRecord()], isLoading: true },
+    { data: [], isLoading: true },
+    { data: [baseRecord()], error: new Error("Records unavailable") },
+    { data: [], error: new Error("Records unavailable") },
+  ])(
+    "keeps results and empty state hidden while the query is unavailable ($#)",
+    ({ data, ...state }) => {
+      hookMocks.useMedicalRecords.mockReturnValue(recordQuery(data, state));
+      render(<RecordsList personId="person-1" personName="Ada" />);
 
-    expect(screen.queryByRole("list")).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "health.noRecords" })).not.toBeInTheDocument();
-    if (query.message) expect(screen.getByText(query.message)).toBeVisible();
-  });
+      expect(screen.queryByRole("list")).not.toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "health.noRecords" })).not.toBeInTheDocument();
+      if (state.error) expect(screen.getByText(state.error.message)).toBeVisible();
+    },
+  );
 
   it("shows loading placeholders until records arrive", () => {
-    hookMocks.useMedicalRecords.mockReturnValue({ data: undefined, isLoading: true, error: null });
+    hookMocks.useMedicalRecords.mockReturnValue(recordQuery(undefined, { isLoading: true }));
     const { container, rerender } = render(<RecordsList personId="person-1" personName="Ada" />);
 
     expect(container.querySelectorAll(".animate-pulse")).toHaveLength(6);
 
-    hookMocks.useMedicalRecords.mockReturnValue({
-      data: [baseRecord()],
-      isLoading: false,
-      error: null,
-    });
+    hookMocks.useMedicalRecords.mockReturnValue(recordQuery([baseRecord()]));
     rerender(<RecordsList personId="person-1" personName="Ada" />);
 
     expect(container.querySelectorAll(".animate-pulse")).toHaveLength(0);
@@ -320,14 +323,10 @@ describe("RecordsList Decision B", () => {
     async ({ tab, status, action, hook, payload }) => {
       const mutate = vi.fn();
       hook.mockReturnValue({ mutate });
-      hookMocks.useMedicalRecords.mockReturnValue({
-        data: [baseRecord({ status })],
-        isLoading: false,
-        error: null,
-      });
+      hookMocks.useMedicalRecords.mockReturnValue(recordQuery([baseRecord({ status })]));
       const user = userEvent.setup();
       const { rerender } = render(<RecordsList personId="person-1" personName="Ada" />);
-      await user.click(screen.getByRole("button", { name: "common.actions" }));
+      await openActions(user);
       expect(
         screen.queryByRole("menuitem", { name: `records.actions.${action}` }),
       ).not.toBeInTheDocument();
@@ -335,7 +334,7 @@ describe("RecordsList Decision B", () => {
 
       searchParamsState = new URLSearchParams(`tab=${tab}`);
       rerender(<RecordsList personId="person-1" personName="Ada" />);
-      await user.click(screen.getByRole("button", { name: "common.actions" }));
+      await openActions(user);
       await user.click(screen.getByRole("menuitem", { name: `records.actions.${action}` }));
 
       expect(mutate).toHaveBeenCalledExactlyOnceWith(payload);
@@ -347,13 +346,9 @@ describe("RecordsList Decision B", () => {
     const user = userEvent.setup();
     const mutate = vi.fn();
     hookMocks.useSoftDeleteRecord.mockReturnValue({ mutate, isPending: false });
-    hookMocks.useMedicalRecords.mockReturnValue({
-      data: [baseRecord()],
-      isLoading: false,
-      error: null,
-    });
+    hookMocks.useMedicalRecords.mockReturnValue(recordQuery([baseRecord()]));
     render(<RecordsList personId="person-1" personName="Ada" />);
-    await user.click(screen.getByRole("button", { name: "common.actions" }));
+    await openActions(user);
     await user.click(screen.getByRole("menuitem", { name: "records.actions.remove" }));
     const confirmRemove = screen.getByRole("button", { name: "common.remove" });
     expect(confirmRemove).toBeVisible();
@@ -363,7 +358,7 @@ describe("RecordsList Decision B", () => {
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     expect(mutate).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole("button", { name: "common.actions" }));
+    await openActions(user);
     await user.click(screen.getByRole("menuitem", { name: "records.actions.remove" }));
     await user.click(screen.getByRole("button", { name: "common.remove" }));
 

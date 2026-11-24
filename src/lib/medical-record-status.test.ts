@@ -11,9 +11,6 @@ import {
 describe("medical-record-status", () => {
   it("treats ocr_processing and legacy processing as stuck pending OCR", () => {
     expect(STUCK_PENDING_OCR_STATUSES).toEqual(["ocr_processing", "processing"]);
-    expect(STUCK_PENDING_OCR_STATUSES).toHaveLength(2);
-    expect(STUCK_PENDING_OCR_STATUSES[0]).toBe("ocr_processing");
-    expect(STUCK_PENDING_OCR_STATUSES[1]).toBe("processing");
     expect(isStuckPendingOcrStatus("ocr_processing")).toBe(true);
     expect(isStuckPendingOcrStatus("processing")).toBe(true);
     expect(isStuckPendingOcrStatus("structuring")).toBe(false);
@@ -27,7 +24,6 @@ describe("medical-record-status", () => {
       "processing",
       "ocr_failed",
     ]);
-    expect(UNPROCESSED_RECORD_STATUSES).toHaveLength(4);
     expect(isUnprocessedRecordStatus("ocr_failed")).toBe(true);
     expect(isUnprocessedRecordStatus("draft")).toBe(false);
     expect(isUnprocessedPipelineStatus("structuring")).toBe(true);

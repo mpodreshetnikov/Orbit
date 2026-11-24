@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { CircleSlash, FileStack, FileText, Search, X } from "lucide-react";
+import { CircleSlash, FileStack, FileText, Search, X, type LucideIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -37,18 +37,14 @@ import type { MedicalRecordListItem, RecordType } from "@/types";
 import { RECORD_TYPES } from "@/types";
 import { cn } from "@/lib/utils";
 import {
+  TAB_VALUES,
   countOrZero,
-  emptyBodyKey,
-  emptyIconKind,
-  emptyTitleKey,
+  emptyStateCopy,
   hasActiveFilters,
   recordTypeFilterParam,
   searchFilterParam,
-  showCountBadge,
   sideFilterPersonId,
-  tabButtonVariant,
   tabFromSearchParams,
-  tabNeedsAccent,
   type StatusFilter,
 } from "./records-list-helpers";
 
@@ -57,9 +53,13 @@ interface RecordsListProps {
   personName: string;
 }
 
-/**
- * Records list without in-app medical upload (Decision B / MCP-only ingest).
- */
+const TABS: Record<StatusFilter, { label: string; icon?: LucideIcon }> = {
+  active: { label: "records.statusFilter.active" },
+  draft: { label: "records.statusFilter.drafts", icon: FileStack },
+  processing: { label: "records.statusFilter.notProcessed", icon: CircleSlash },
+  removed: { label: "records.statusFilter.removed" },
+};
+
 export function RecordsList({ personId, personName }: RecordsListProps) {
   const t = useTranslations();
   const router = useRouter();
@@ -67,7 +67,6 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
   const searchParams = useSearchParams();
   const statusFilter = tabFromSearchParams(searchParams);
   const isDraftTab = statusFilter === "draft";
-  const isProcessingTab = statusFilter === "processing";
   const isRemovedTab = statusFilter === "removed";
 
   const setTabInUrl = (tab: StatusFilter) => {
@@ -97,39 +96,34 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
   const hardDeleteMutation = useHardDeleteRecord();
   const updateMutation = useUpdateMedicalRecord();
 
-  const filters = useMemo(
-    () => ({
-      person_id: personId,
-      record_type: recordTypeFilterParam(typeFilter),
-      status: statusFilter as never,
-      search: searchFilterParam(debouncedSearch),
-    }),
-    [personId, typeFilter, statusFilter, debouncedSearch],
-  );
-
-  const draftsFilters = useMemo(
-    () => ({
-      person_id: sideFilterPersonId(statusFilter, "draft", personId),
-      status: "draft" as never,
-    }),
-    [personId, statusFilter],
-  );
-  const processingFilters = useMemo(
-    () => ({
-      person_id: sideFilterPersonId(statusFilter, "processing", personId),
-      status: "processing" as never,
-    }),
-    [personId, statusFilter],
-  );
-
-  const { data: records, isLoading, error } = useMedicalRecords(filters);
-  const { data: drafts } = useMedicalRecords(draftsFilters);
-  const { data: processingRecords } = useMedicalRecords(processingFilters);
-  const draftsCount = countOrZero(drafts);
-  const processingCount = countOrZero(processingRecords);
+  const {
+    data: records,
+    isLoading,
+    error,
+  } = useMedicalRecords({
+    person_id: personId,
+    record_type: recordTypeFilterParam(typeFilter),
+    status: statusFilter,
+    search: searchFilterParam(debouncedSearch),
+  });
+  const { data: drafts } = useMedicalRecords({
+    person_id: sideFilterPersonId(statusFilter, "draft", personId),
+    status: "draft",
+  });
+  const { data: processingRecords } = useMedicalRecords({
+    person_id: sideFilterPersonId(statusFilter, "processing", personId),
+    status: "processing",
+  });
+  const tabCounts = {
+    active: 0,
+    draft: countOrZero(drafts),
+    processing: countOrZero(processingRecords),
+    removed: 0,
+  };
   const filtersActive = hasActiveFilters(searchQuery, typeFilter, statusFilter);
-
-  const iconKind = emptyIconKind(statusFilter);
+  const emptyCopy = emptyStateCopy(statusFilter, filtersActive);
+  const EmptyIcon = TABS[statusFilter].icon ?? FileText;
+  const hasLoadedRecords = !isLoading && error === null && records !== undefined;
 
   return (
     <div className="space-y-4 min-w-0 overflow-x-hidden">
@@ -138,56 +132,29 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
       </h1>
 
       <div className="flex items-center gap-2 border-b pb-3 overflow-x-auto">
-        <Button
-          variant={tabButtonVariant(statusFilter === "active")}
-          size="sm"
-          onClick={() => setTabInUrl("active")}
-          className="shrink-0"
-        >
-          {t("records.statusFilter.active")}
-        </Button>
-        <Button
-          variant={tabButtonVariant(isDraftTab)}
-          size="sm"
-          onClick={() => setTabInUrl("draft")}
-          className={cn(
-            "shrink-0 gap-1",
-            tabNeedsAccent(draftsCount, isDraftTab) && "text-primary",
-          )}
-        >
-          <FileStack className="h-4 w-4" />
-          {t("records.statusFilter.drafts")}
-          {showCountBadge(draftsCount) ? (
-            <Badge variant="secondary" className="h-5 px-1.5 text-xs">
-              {draftsCount}
-            </Badge>
-          ) : null}
-        </Button>
-        <Button
-          variant={tabButtonVariant(isProcessingTab)}
-          size="sm"
-          onClick={() => setTabInUrl("processing")}
-          className={cn(
-            "shrink-0 gap-1",
-            tabNeedsAccent(processingCount, isProcessingTab) && "text-primary",
-          )}
-        >
-          <CircleSlash className="h-4 w-4" />
-          {t("records.statusFilter.notProcessed")}
-          {showCountBadge(processingCount) ? (
-            <Badge variant="secondary" className="h-5 px-1.5 text-xs">
-              {processingCount}
-            </Badge>
-          ) : null}
-        </Button>
-        <Button
-          variant={tabButtonVariant(isRemovedTab)}
-          size="sm"
-          onClick={() => setTabInUrl("removed")}
-          className="shrink-0"
-        >
-          {t("records.statusFilter.removed")}
-        </Button>
+        {TAB_VALUES.map((tab) => {
+          const { label, icon: Icon } = TABS[tab];
+          const selected = statusFilter === tab;
+          const count = tabCounts[tab];
+          const showCount = count > 0;
+          return (
+            <Button
+              key={tab}
+              variant={selected ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => setTabInUrl(tab)}
+              className={cn("shrink-0", Icon && "gap-1", showCount && !selected && "text-primary")}
+            >
+              {Icon ? <Icon className="h-4 w-4" /> : null}
+              {t(label)}
+              {showCount ? (
+                <Badge variant="secondary" className="h-5 px-1.5 text-xs">
+                  {count}
+                </Badge>
+              ) : null}
+            </Button>
+          );
+        })}
       </div>
 
       <div className="flex flex-col sm:flex-row gap-3">
@@ -259,7 +226,7 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
         </div>
       ) : null}
 
-      {!isLoading && error === null && records !== undefined && records.length > 0 ? (
+      {hasLoadedRecords && records.length > 0 ? (
         <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 min-w-0">
           {records.map((record) => (
             <li key={record.id} className="min-w-0">
@@ -285,23 +252,11 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
         </ul>
       ) : null}
 
-      {!isLoading && error === null && records !== undefined && records.length === 0 ? (
+      {hasLoadedRecords && records.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-lg border border-dashed p-12 text-center">
-          {iconKind === "draft" ? (
-            <FileStack className="h-12 w-12 text-muted-foreground/50" />
-          ) : null}
-          {iconKind === "notProcessed" ? (
-            <CircleSlash className="h-12 w-12 text-muted-foreground/50" />
-          ) : null}
-          {iconKind === "default" ? (
-            <FileText className="h-12 w-12 text-muted-foreground/50" />
-          ) : null}
-          <h3 className="mt-4 text-lg font-semibold">
-            {t(emptyTitleKey(statusFilter, filtersActive))}
-          </h3>
-          <p className="mt-2 text-sm text-muted-foreground">
-            {t(emptyBodyKey(statusFilter, filtersActive))}
-          </p>
+          <EmptyIcon className="h-12 w-12 text-muted-foreground/50" />
+          <h3 className="mt-4 text-lg font-semibold">{t(emptyCopy.title)}</h3>
+          <p className="mt-2 text-sm text-muted-foreground">{t(emptyCopy.body)}</p>
         </div>
       ) : null}
 

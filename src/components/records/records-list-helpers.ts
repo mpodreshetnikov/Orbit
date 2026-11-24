@@ -23,19 +23,6 @@ export function countOrZero(items: { length: number } | null | undefined): numbe
   return items.length;
 }
 
-export function tabButtonVariant(selected: boolean): "secondary" | "ghost" {
-  return selected ? "secondary" : "ghost";
-}
-
-/** Accent when the tab has items and is not the selected tab. */
-export function tabNeedsAccent(count: number, selected: boolean): boolean {
-  return count > 0 && !selected;
-}
-
-export function showCountBadge(count: number): boolean {
-  return count > 0;
-}
-
 export function hasActiveFilters(
   searchQuery: string,
   typeFilter: RecordType | "all",
@@ -50,40 +37,17 @@ export function hasActiveFilters(
   return statusFilter !== "active";
 }
 
-export function emptyTitleKey(statusFilter: StatusFilter, filtersActive: boolean): string {
+export function emptyStateCopy(statusFilter: StatusFilter, filtersActive: boolean) {
   if (!filtersActive) {
-    return "health.noRecords";
+    return { title: "health.noRecords", body: "health.noRecordsViaAssistant" };
   }
   if (statusFilter === "draft") {
-    return "records.noDrafts";
+    return { title: "records.noDrafts", body: "records.noDraftsDescription" };
   }
   if (statusFilter === "processing") {
-    return "records.noNotProcessed";
+    return { title: "records.noNotProcessed", body: "records.noNotProcessedDescription" };
   }
-  return "common.noResults";
-}
-
-export function emptyBodyKey(statusFilter: StatusFilter, filtersActive: boolean): string {
-  if (!filtersActive) {
-    return "health.noRecordsViaAssistant";
-  }
-  if (statusFilter === "draft") {
-    return "records.noDraftsDescription";
-  }
-  if (statusFilter === "processing") {
-    return "records.noNotProcessedDescription";
-  }
-  return "common.noResults";
-}
-
-export function emptyIconKind(statusFilter: StatusFilter): "draft" | "notProcessed" | "default" {
-  if (statusFilter === "draft") {
-    return "draft";
-  }
-  if (statusFilter === "processing") {
-    return "notProcessed";
-  }
-  return "default";
+  return { title: "common.noResults", body: "common.noResults" };
 }
 
 export function recordTypeFilterParam(typeFilter: RecordType | "all"): RecordType | undefined {

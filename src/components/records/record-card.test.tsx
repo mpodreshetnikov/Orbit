@@ -38,6 +38,10 @@ function makeRecord(overrides: Partial<MedicalRecordListItem> = {}): MedicalReco
   };
 }
 
+function openActions(user: ReturnType<typeof userEvent.setup>) {
+  return user.click(screen.getByRole("button", { name: "common.actions" }));
+}
+
 describe("RecordCard", () => {
   it("handles active-record actions and card click", async () => {
     const onView = vi.fn();
@@ -63,10 +67,10 @@ describe("RecordCard", () => {
     await user.click(screen.getByText("CBC Report"));
     expect(onView).toHaveBeenCalledTimes(1);
 
-    await user.click(screen.getByRole("button", { name: "common.actions" }));
+    await openActions(user);
     expect(onView).toHaveBeenCalledTimes(1);
     await user.click(screen.getByRole("menuitem", { name: "records.actions.view" }));
-    await user.click(screen.getByRole("button", { name: "common.actions" }));
+    await openActions(user);
     await user.click(screen.getByRole("menuitem", { name: "records.actions.remove" }));
 
     expect(onView.mock.calls).toEqual([[makeRecord()], [makeRecord()]]);
@@ -112,18 +116,14 @@ describe("RecordCard", () => {
         onDelete={provideActions ? vi.fn() : undefined}
       />,
     );
-    await userEvent.setup().click(screen.getByRole("button", { name: "common.actions" }));
+    await openActions(userEvent.setup());
 
     const menu = within(screen.getByRole("menu"));
-    expect(
-      menu.queryByRole("menuitem", { name: "records.actions.activate" }),
-    ).not.toBeInTheDocument();
-    expect(
-      menu.queryByRole("menuitem", { name: "records.actions.restore" }),
-    ).not.toBeInTheDocument();
-    expect(
-      menu.queryByRole("menuitem", { name: "records.actions.delete" }),
-    ).not.toBeInTheDocument();
+    for (const action of ["activate", "restore", "delete"]) {
+      expect(
+        menu.queryByRole("menuitem", { name: `records.actions.${action}` }),
+      ).not.toBeInTheDocument();
+    }
   });
 
   it("handles draft and removed state actions", async () => {
@@ -142,7 +142,7 @@ describe("RecordCard", () => {
     );
 
     expect(screen.getByText("records.status.draft")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "common.actions" }));
+    await openActions(user);
     await user.click(screen.getByRole("menuitem", { name: "records.actions.activate" }));
     expect(onActivate).toHaveBeenCalledWith(expect.objectContaining({ status: "draft" }));
 
@@ -157,53 +157,30 @@ describe("RecordCard", () => {
     );
 
     expect(screen.getByText("records.status.removed")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "common.actions" }));
+    await openActions(user);
     await user.click(screen.getByRole("menuitem", { name: "records.actions.restore" }));
-    await user.click(screen.getByRole("button", { name: "common.actions" }));
+    await openActions(user);
     await user.click(screen.getByRole("menuitem", { name: "records.actions.delete" }));
 
     expect(onRestore).toHaveBeenCalledWith(expect.objectContaining({ status: "removed" }));
     expect(onDelete).toHaveBeenCalledWith(expect.objectContaining({ status: "removed" }));
   });
 
-  it("keeps soft-remove for ocr_failed but hides it while stuck pending OCR", async () => {
+  it("keeps soft-remove for ocr_failed", async () => {
     const onRemove = vi.fn();
     const user = userEvent.setup();
-
-    const { rerender } = render(
-      <RecordCard
-        record={makeRecord({ status: "ocr_failed" })}
-        onView={vi.fn()}
-        onRemove={onRemove}
-      />,
-    );
+    const record = makeRecord({ status: "ocr_failed" });
+    render(<RecordCard record={record} onView={vi.fn()} onRemove={onRemove} />);
 
     expect(screen.getByText("records.status.notProcessed")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "common.actions" }));
+    await openActions(user);
     await user.click(screen.getByRole("menuitem", { name: "records.actions.remove" }));
-    expect(onRemove).toHaveBeenCalledWith(expect.objectContaining({ status: "ocr_failed" }));
+    expect(onRemove).toHaveBeenCalledExactlyOnceWith(record);
+  });
 
-    rerender(
-      <RecordCard
-        record={makeRecord({ status: "ocr_processing" })}
-        onView={vi.fn()}
-        onRemove={onRemove}
-      />,
-    );
-    await user.click(screen.getByRole("button", { name: "common.actions" }));
-    expect(
-      screen.queryByRole("menuitem", { name: "records.actions.remove" }),
-    ).not.toBeInTheDocument();
-    await user.keyboard("{Escape}");
-
-    rerender(
-      <RecordCard
-        record={makeRecord({ status: "processing" })}
-        onView={vi.fn()}
-        onRemove={onRemove}
-      />,
-    );
-    await user.click(screen.getByRole("button", { name: "common.actions" }));
+  it.each(["ocr_processing", "processing"] as const)("hides soft-remove for %s", async (status) => {
+    render(<RecordCard record={makeRecord({ status })} onView={vi.fn()} onRemove={vi.fn()} />);
+    await openActions(userEvent.setup());
     expect(
       screen.queryByRole("menuitem", { name: "records.actions.remove" }),
     ).not.toBeInTheDocument();

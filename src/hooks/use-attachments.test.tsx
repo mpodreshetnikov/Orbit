@@ -35,6 +35,19 @@ function makeAttachment(overrides: Partial<RecordAttachment> = {}): RecordAttach
   };
 }
 
+function mockSignedUrls(prefix = "") {
+  const createSignedUrl = vi.fn(async (path: string) => ({
+    data: { signedUrl: `https://signed.test/${prefix}${path}` },
+    error: null,
+  }));
+  createClientMock.mockReturnValue({ storage: { from: () => ({ createSignedUrl }) } });
+  return createSignedUrl;
+}
+
+function cachedUrlOptions(ageMinutes: number) {
+  return { updatedAt: Date.now() - ageMinutes * 60_000 };
+}
+
 describe("use-attachments", () => {
   beforeEach(() => {
     createClientMock.mockReset();
@@ -145,11 +158,7 @@ describe("use-attachments", () => {
     const a = makeAttachment({ id: "att-a", storage_path: "a.png" });
     const b = makeAttachment({ id: "att-b", storage_path: "b.png" });
     const c = makeAttachment({ id: "att-c", storage_path: "c.png" });
-    const createSignedUrl = vi.fn(async (path: string) => ({
-      data: { signedUrl: `https://signed.test/${path}` },
-      error: null,
-    }));
-    createClientMock.mockReturnValue({ storage: { from: () => ({ createSignedUrl }) } });
+    const createSignedUrl = mockSignedUrls();
     const wrapper = createTestQueryWrapper(createTestQueryClient());
     const { result, rerender } = renderHook(({ files }) => useAttachmentUrls(files), {
       initialProps: { files: [b, a] },
@@ -177,18 +186,18 @@ describe("use-attachments", () => {
 
   it("uses cached URLs for each attachment and refreshes them before they expire", async () => {
     const { useAttachmentUrl } = await import("./use-attachments");
-    const createSignedUrl = vi.fn(async (path: string) => ({
-      data: { signedUrl: `https://signed.test/fresh/${path}` },
-      error: null,
-    }));
-    createClientMock.mockReturnValue({ storage: { from: () => ({ createSignedUrl }) } });
+    const createSignedUrl = mockSignedUrls("fresh/");
     const client = createTestQueryClient();
-    client.setQueryData(["attachment-url", "a.png"], "https://signed.test/cached/a.png", {
-      updatedAt: Date.now() - 49 * 60_000,
-    });
-    client.setQueryData(["attachment-url", "b.png"], "https://signed.test/cached/b.png", {
-      updatedAt: Date.now() - 51 * 60_000,
-    });
+    client.setQueryData(
+      ["attachment-url", "a.png"],
+      "https://signed.test/cached/a.png",
+      cachedUrlOptions(49),
+    );
+    client.setQueryData(
+      ["attachment-url", "b.png"],
+      "https://signed.test/cached/b.png",
+      cachedUrlOptions(51),
+    );
     const { result, rerender } = renderHook(({ path }) => useAttachmentUrl(path), {
       initialProps: { path: "a.png" },
       wrapper: createTestQueryWrapper(client),
@@ -206,25 +215,17 @@ describe("use-attachments", () => {
     const { useAttachmentUrls } = await import("./use-attachments");
     const first = makeAttachment({ id: "att-a", storage_path: "a.png" });
     const second = makeAttachment({ id: "att-b", storage_path: "b.png" });
-    const createSignedUrl = vi.fn(async (path: string) => ({
-      data: { signedUrl: `https://signed.test/fresh/${path}` },
-      error: null,
-    }));
-    createClientMock.mockReturnValue({ storage: { from: () => ({ createSignedUrl }) } });
+    const createSignedUrl = mockSignedUrls("fresh/");
     const client = createTestQueryClient();
     client.setQueryData(
       ["attachment-urls", ["att-a"]],
       { "att-a": "https://signed.test/cached/a.png" },
-      {
-        updatedAt: Date.now() - 49 * 60_000,
-      },
+      cachedUrlOptions(49),
     );
     client.setQueryData(
       ["attachment-urls", ["att-b"]],
       { "att-b": "https://signed.test/cached/b.png" },
-      {
-        updatedAt: Date.now() - 51 * 60_000,
-      },
+      cachedUrlOptions(51),
     );
     const { result, rerender } = renderHook(({ files }) => useAttachmentUrls(files), {
       initialProps: { files: [first] },
