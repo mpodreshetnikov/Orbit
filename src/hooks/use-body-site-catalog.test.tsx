@@ -12,6 +12,9 @@ vi.mock("@/lib/supabase", () => ({
   createClient: createClientMock,
 }));
 
+const catalogKey = ["body-site-catalog"];
+const otherCatalogKey = ["finding-type-catalog"];
+
 function renderHookWithQueryClient<T>(hook: () => T) {
   const queryClient = createTestQueryClient();
   const wrapper = createTestQueryWrapper(queryClient);
@@ -66,14 +69,16 @@ describe("use-body-site-catalog", () => {
 
     const { useCreateBodySite } = await import("./use-body-site-catalog");
     const { result, queryClient } = renderHookWithQueryClient(() => useCreateBodySite());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    queryClient.setQueryData(catalogKey, []);
+    queryClient.setQueryData(otherCatalogKey, []);
 
     await act(async () => {
-      await result.current.mutateAsync({
+      const row = await result.current.mutateAsync({
         site_code: "lung",
         name_ru: "Легкое",
         name_en: "Lung",
       });
+      expect(row).toEqual(created);
     });
 
     expect(builder.insert).toHaveBeenCalledWith(
@@ -82,7 +87,8 @@ describe("use-body-site-catalog", () => {
         name_en: "Lung",
       }),
     );
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["body-site-catalog"] });
+    expect(queryClient.getQueryState(catalogKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherCatalogKey)?.isInvalidated).toBe(false);
   });
 
   it("updates body site and invalidates list", async () => {
@@ -94,18 +100,21 @@ describe("use-body-site-catalog", () => {
 
     const { useUpdateBodySite } = await import("./use-body-site-catalog");
     const { result, queryClient } = renderHookWithQueryClient(() => useUpdateBodySite());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    queryClient.setQueryData(catalogKey, [{ ...updated, name_ru: "Легкое" }]);
+    queryClient.setQueryData(otherCatalogKey, []);
 
     await act(async () => {
-      await result.current.mutateAsync({
+      const row = await result.current.mutateAsync({
         id: "site-1",
         updates: { name_ru: "Левое легкое" },
       });
+      expect(row).toEqual(updated);
     });
 
     expect(builder.update).toHaveBeenCalledWith({ name_ru: "Левое легкое" });
     expect(builder.eq).toHaveBeenCalledWith("id", "site-1");
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["body-site-catalog"] });
+    expect(queryClient.getQueryState(catalogKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherCatalogKey)?.isInvalidated).toBe(false);
   });
 
   it("deletes body site and invalidates list", async () => {
@@ -116,7 +125,8 @@ describe("use-body-site-catalog", () => {
 
     const { useDeleteBodySite } = await import("./use-body-site-catalog");
     const { result, queryClient } = renderHookWithQueryClient(() => useDeleteBodySite());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    queryClient.setQueryData(catalogKey, [{ id: "site-1", site_code: "lung" }]);
+    queryClient.setQueryData(otherCatalogKey, []);
 
     await act(async () => {
       await result.current.mutateAsync("site-1");
@@ -124,6 +134,7 @@ describe("use-body-site-catalog", () => {
 
     expect(builder.delete).toHaveBeenCalled();
     expect(builder.eq).toHaveBeenCalledWith("id", "site-1");
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["body-site-catalog"] });
+    expect(queryClient.getQueryState(catalogKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherCatalogKey)?.isInvalidated).toBe(false);
   });
 });

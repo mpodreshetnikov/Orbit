@@ -12,6 +12,9 @@ vi.mock("@/lib/supabase", () => ({
   createClient: createClientMock,
 }));
 
+const catalogKey = ["finding-type-catalog"];
+const otherCatalogKey = ["body-site-catalog"];
+
 function renderHookWithQueryClient<T>(hook: () => T) {
   const queryClient = createTestQueryClient();
   const wrapper = createTestQueryWrapper(queryClient);
@@ -66,14 +69,16 @@ describe("use-finding-type-catalog", () => {
 
     const { useCreateFindingType } = await import("./use-finding-type-catalog");
     const { result, queryClient } = renderHookWithQueryClient(() => useCreateFindingType());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    queryClient.setQueryData(catalogKey, []);
+    queryClient.setQueryData(otherCatalogKey, []);
 
     await act(async () => {
-      await result.current.mutateAsync({
+      const row = await result.current.mutateAsync({
         finding_code: "nodule",
         name_ru: "Узел",
         name_en: "Nodule",
       });
+      expect(row).toEqual(created);
     });
 
     expect(builder.insert).toHaveBeenCalledWith(
@@ -82,7 +87,8 @@ describe("use-finding-type-catalog", () => {
         name_en: "Nodule",
       }),
     );
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["finding-type-catalog"] });
+    expect(queryClient.getQueryState(catalogKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherCatalogKey)?.isInvalidated).toBe(false);
   });
 
   it("updates finding type and invalidates list", async () => {
@@ -94,18 +100,21 @@ describe("use-finding-type-catalog", () => {
 
     const { useUpdateFindingType } = await import("./use-finding-type-catalog");
     const { result, queryClient } = renderHookWithQueryClient(() => useUpdateFindingType());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    queryClient.setQueryData(catalogKey, [{ ...updated, name_ru: "Узел" }]);
+    queryClient.setQueryData(otherCatalogKey, []);
 
     await act(async () => {
-      await result.current.mutateAsync({
+      const row = await result.current.mutateAsync({
         id: "ft-1",
         updates: { name_ru: "Узелок" },
       });
+      expect(row).toEqual(updated);
     });
 
     expect(builder.update).toHaveBeenCalledWith({ name_ru: "Узелок" });
     expect(builder.eq).toHaveBeenCalledWith("id", "ft-1");
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["finding-type-catalog"] });
+    expect(queryClient.getQueryState(catalogKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherCatalogKey)?.isInvalidated).toBe(false);
   });
 
   it("deletes finding type and invalidates list", async () => {
@@ -116,7 +125,8 @@ describe("use-finding-type-catalog", () => {
 
     const { useDeleteFindingType } = await import("./use-finding-type-catalog");
     const { result, queryClient } = renderHookWithQueryClient(() => useDeleteFindingType());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    queryClient.setQueryData(catalogKey, [{ id: "ft-1", finding_code: "nodule" }]);
+    queryClient.setQueryData(otherCatalogKey, []);
 
     await act(async () => {
       await result.current.mutateAsync("ft-1");
@@ -124,6 +134,7 @@ describe("use-finding-type-catalog", () => {
 
     expect(builder.delete).toHaveBeenCalled();
     expect(builder.eq).toHaveBeenCalledWith("id", "ft-1");
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["finding-type-catalog"] });
+    expect(queryClient.getQueryState(catalogKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherCatalogKey)?.isInvalidated).toBe(false);
   });
 });
