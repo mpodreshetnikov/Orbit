@@ -230,8 +230,6 @@ jobs:
           MIGRATION_ORDER_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || github.event.before }}
           PR_SIZE_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || github.event.before }}
           PR_SIZE_BRANCH: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
-          # Smell baseline may only shrink vs PR base (or previous main commit on push).
-          SMELL_BASELINE_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || github.event.before }}
         run: just quality
       # Inside this job rather than beside it. `docs/QUALITY.md` records that `main protection`
       # requires `Quality Gates`, `Secret Scan` and `CodeQL` and nothing else, so a separate job

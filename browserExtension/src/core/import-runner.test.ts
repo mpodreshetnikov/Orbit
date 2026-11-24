@@ -378,7 +378,7 @@ describe("import-runner", () => {
       .mockResolvedValueOnce({ ok: true });
     const broadcastToAppTabs = vi.fn().mockResolvedValue(undefined);
 
-    await runImportSession(
+    const result = await runImportSession(
       {
         source: "tbank_web",
         function_url: "https://example.com/fn",
@@ -419,6 +419,7 @@ describe("import-runner", () => {
         parsed_transactions_count: 9,
       }),
     );
+    expect(result).toMatchObject({ batch_id: "batch-2", inserted: 1 });
   });
 
   it("does not force windowFrom to now when session has no last_imported_at", async () => {
@@ -437,7 +438,7 @@ describe("import-runner", () => {
       .mockResolvedValueOnce({ batch_id: "batch-2", inserted: 1, skipped: 0, error_count: 0 })
       .mockResolvedValueOnce({ ok: true });
 
-    await runImportSession(
+    const result = await runImportSession(
       {
         source: "tbank_web",
         function_url: "https://example.com/fn",
@@ -460,6 +461,12 @@ describe("import-runner", () => {
         windowFrom: undefined,
       }),
     );
+    expect(callEdge.mock.calls[0]?.[2]).toMatchObject({
+      action: "preview_rows",
+      window_from: null,
+      parsed_through_at: "2026-02-19T00:00:00.000Z",
+    });
+    expect(result).toMatchObject({ batch_id: "batch-2", inserted: 1 });
   });
 
   it("prefers resolved session window over last_imported_at fallback", async () => {
