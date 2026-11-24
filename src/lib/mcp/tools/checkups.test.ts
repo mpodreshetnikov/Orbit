@@ -203,8 +203,12 @@ describe("mark_checkup_done", () => {
   it("keeps an explicit done_at even when local today differs from UTC", async () => {
     vi.setSystemTime(new Date("2026-06-14T18:00:00Z"));
     regen.readTimezonePreference.mockResolvedValue("Asia/Krasnoyarsk");
+    checkups.markCheckupDone.mockResolvedValueOnce({
+      checkup: { ...ITEM, next_due_at: "2026-12-14" },
+      completion: { id: "done-1", done_at: "2026-06-14" },
+    });
 
-    await (await handlers()).get("mark_checkup_done")!(
+    const result = await (await handlers()).get("mark_checkup_done")!(
       { checkup_id: ITEM.id, done_at: "2026-06-14", confirm: true },
       ctx(),
     );
@@ -213,6 +217,10 @@ describe("mark_checkup_done", () => {
       expect.anything(),
       expect.objectContaining({ doneAt: "2026-06-14" }),
     );
+    expect(result.structuredContent).toMatchObject({
+      completion: { id: "done-1", done_at: "2026-06-14" },
+      checkup: { id: ITEM.id, next_due_at: "2026-12-14" },
+    });
   });
 });
 
@@ -376,11 +384,19 @@ describe("mark_checkup_done guards", () => {
   });
 
   it("falls back to UTC when no preference is saved", async () => {
+    vi.setSystemTime(new Date("2026-06-15T23:30:00Z"));
     regen.readTimezonePreference.mockResolvedValue(null);
-    await (await handlers()).get("mark_checkup_done")!({ checkup_id: ITEM.id }, ctx());
+    const result = await (await handlers()).get("mark_checkup_done")!(
+      { checkup_id: ITEM.id },
+      ctx(),
+    );
+
     expect(checkups.markCheckupDone).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ doneAt: "2026-06-15" }),
+    );
+    expect(result.content[0].text).toBe(
+      'Marked "Blood panel" done on 2026-06-15. Next due: 2026-12-15 (active).',
     );
   });
 

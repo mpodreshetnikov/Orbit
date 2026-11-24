@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-11-24T19:38:14.208Z",
-  "total": 95,
+  "generated_at": "2026-11-24T20:16:40.522Z",
+  "total": 67,
   "counts": {
     "browserExtension/src/core/content-bridge.test.ts::mock-call-only": 10,
     "browserExtension/src/core/import-runner.test.ts::mock-call-only": 2,
@@ -26,13 +26,6 @@
     "src/components/money/transaction-form.test.tsx::mock-call-only": 5,
     "src/components/records/ocr-review-step.test.tsx::mock-call-only": 1,
     "src/components/records/structure-review-step.test.tsx::mock-call-only": 3,
-    "src/lib/mcp/health/medications.test.ts::mock-call-only": 2,
-    "src/lib/mcp/health/records.test.ts::mock-call-only": 3,
-    "src/lib/mcp/tools/checkups.test.ts::mock-call-only": 2,
-    "src/lib/mcp/tools/documents.test.ts::mock-call-only": 1,
-    "src/lib/mcp/tools/medications.test.ts::lone-tocontain": 14,
-    "src/lib/mcp/tools/medications.test.ts::mock-call-only": 4,
-    "src/lib/mcp/tools/records.test.ts::mock-call-only": 2,
     "src/lib/medications/regenerate-dose-events.test.ts::mock-call-only": 3
   }
 }

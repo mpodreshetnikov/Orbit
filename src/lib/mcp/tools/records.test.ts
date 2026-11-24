@@ -96,15 +96,20 @@ describe("search_medical_records", () => {
   });
 
   it("scopes to a person when one is named", async () => {
-    records.searchMedicalRecords.mockResolvedValue([]);
+    const panel = { id: "r-1", title: "Blood panel", person_id: "p-1", record_type: "lab" };
+    records.searchMedicalRecords.mockResolvedValueOnce([panel]);
 
     const tool = (await handlers()).get("search_medical_records")!;
-    await tool({ person_name: "Maria", limit: 20, offset: 0, include_incomplete: false }, CTX);
+    const result = await tool(
+      { person_name: "Maria", limit: 20, offset: 0, include_incomplete: false },
+      CTX,
+    );
 
     expect(records.searchMedicalRecords).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ personId: "p-1" }),
     );
+    expect(result.structuredContent).toStrictEqual({ records: [panel], limit: 20, offset: 0 });
   });
 
   it("asks which person is meant rather than guessing", async () => {
@@ -126,20 +131,25 @@ describe("search_medical_records", () => {
   });
 
   it("widens to in-progress documents only when asked", async () => {
-    records.searchMedicalRecords.mockResolvedValue([]);
+    const draft = { id: "r-draft", title: "Pending scan", status: "draft" };
+    const approved = { id: "r-approved", title: "Blood panel", status: "active" };
+    records.searchMedicalRecords.mockResolvedValueOnce([draft, approved]);
+    records.searchMedicalRecords.mockResolvedValueOnce([approved]);
     const tool = (await handlers()).get("search_medical_records")!;
 
-    await tool({ limit: 20, offset: 0, include_incomplete: true }, CTX);
+    const widened = await tool({ limit: 20, offset: 0, include_incomplete: true }, CTX);
     expect(records.searchMedicalRecords).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ statuses: records.ALL_RECORD_STATUSES }),
+      expect.objectContaining({ statuses: ["draft", "active"] }),
     );
+    expect(widened.structuredContent?.records).toStrictEqual([draft, approved]);
 
-    await tool({ limit: 20, offset: 0, include_incomplete: false }, CTX);
+    const approvedOnly = await tool({ limit: 20, offset: 0, include_incomplete: false }, CTX);
     expect(records.searchMedicalRecords).toHaveBeenLastCalledWith(
       expect.anything(),
       expect.objectContaining({ statuses: undefined }),
     );
+    expect(approvedOnly.structuredContent?.records).toStrictEqual([approved]);
   });
 
   it("says so plainly when nothing matches", async () => {
