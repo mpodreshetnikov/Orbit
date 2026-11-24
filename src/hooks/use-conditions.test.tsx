@@ -165,6 +165,13 @@ describe("use-conditions", () => {
     const createHook = renderHookWithQueryClient(() => useCreateCondition());
     const updateHook = renderHookWithQueryClient(() => useUpdateCondition());
     const deleteHook = renderHookWithQueryClient(() => useDeleteCondition());
+    const listKey = ["conditions", "person", "person-1", "with-history"];
+    const detailKey = ["condition", "cond-1"];
+    const otherListKey = ["conditions", "person", "person-2", "with-history"];
+    createHook.queryClient.setQueryData(listKey, []);
+    updateHook.queryClient.setQueryData(detailKey, conditionRow());
+    deleteHook.queryClient.setQueryData(listKey, [conditionRow()]);
+    deleteHook.queryClient.setQueryData(otherListKey, []);
 
     await act(async () => {
       await createHook.result.current.mutateAsync({
@@ -182,9 +189,17 @@ describe("use-conditions", () => {
       });
     });
 
-    expect(builder.insert).toHaveBeenCalled();
+    expect(builder.insert).toHaveBeenCalledWith({
+      person_id: "person-1",
+      name: "Asthma",
+      current_status: "active",
+    });
     expect(builder.update).toHaveBeenCalledWith({ name: "Asthma Updated" });
     expect(builder.update).toHaveBeenCalledWith({ deleted_at: expect.any(String) });
+    expect(createHook.queryClient.getQueryState(listKey)?.isInvalidated).toBe(true);
+    expect(updateHook.queryClient.getQueryState(detailKey)?.isInvalidated).toBe(true);
+    expect(deleteHook.queryClient.getQueryState(listKey)?.isInvalidated).toBe(true);
+    expect(deleteHook.queryClient.getQueryState(otherListKey)?.isInvalidated).toBe(false);
   });
 
   it("updates condition record with status recompute and icd update", async () => {
@@ -212,7 +227,11 @@ describe("use-conditions", () => {
     });
 
     const { useUpdateConditionRecord } = await import("./use-conditions");
-    const { result } = renderHookWithQueryClient(() => useUpdateConditionRecord());
+    const { result, queryClient } = renderHookWithQueryClient(() => useUpdateConditionRecord());
+    const detailKey = ["condition", "cond-1"];
+    const linksKey = ["condition-records", "record", "record-1"];
+    queryClient.setQueryData(detailKey, conditionRow());
+    queryClient.setQueryData(linksKey, [{ id: "cr-1", status_in_record: "active" }]);
 
     await act(async () => {
       await result.current.mutateAsync({
@@ -230,6 +249,8 @@ describe("use-conditions", () => {
       code: "J45",
       icd_name_en: "Asthma",
     });
+    expect(queryClient.getQueryState(detailKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(linksKey)?.isInvalidated).toBe(true);
   });
 
   it("recomputes on verification alone, so an approved closure reaches the condition", async () => {
@@ -257,7 +278,9 @@ describe("use-conditions", () => {
     });
 
     const { useUpdateConditionRecord } = await import("./use-conditions");
-    const { result } = renderHookWithQueryClient(() => useUpdateConditionRecord());
+    const { result, queryClient } = renderHookWithQueryClient(() => useUpdateConditionRecord());
+    const detailKey = ["condition", "cond-1"];
+    queryClient.setQueryData(detailKey, conditionRow());
 
     await act(async () => {
       await result.current.mutateAsync({
@@ -274,12 +297,25 @@ describe("use-conditions", () => {
       is_user_verified: true,
       review_decision: "confirmed",
     });
+    expect(conditionsBuilder.eq).toHaveBeenCalledWith("id", "cond-1");
+    expect(queryClient.getQueryState(detailKey)?.isInvalidated).toBe(true);
   });
 
   it("keeps a decision the caller stated rather than overwriting it", async () => {
+    const mention = {
+      id: "cr-1",
+      record_id: "record-1",
+      condition_id: "cond-1",
+      is_user_verified: false,
+      review_decision: "pending",
+    };
     const conditionRecordsBuilder = createQueryBuilder({
-      data: { id: "cr-1", record_id: "record-1", condition_id: "cond-1" },
+      data: mention,
       error: null,
+    });
+    conditionRecordsBuilder.update.mockImplementation((updates) => {
+      Object.assign(mention, updates);
+      return conditionRecordsBuilder;
     });
     vi.mocked(conditionRecordsBuilder.maybeSingle).mockResolvedValue({
       data: { status_in_record: "active" },
@@ -297,15 +333,15 @@ describe("use-conditions", () => {
     const { result } = renderHookWithQueryClient(() => useUpdateConditionRecord());
 
     await act(async () => {
-      await result.current.mutateAsync({
+      const updated = await result.current.mutateAsync({
         id: "cr-1",
         updates: { is_user_verified: true, review_decision: "dismissed" },
       });
-    });
-
-    expect(conditionRecordsBuilder.update).toHaveBeenCalledWith({
-      is_user_verified: true,
-      review_decision: "dismissed",
+      expect(updated).toMatchObject({
+        id: "cr-1",
+        is_user_verified: true,
+        review_decision: "dismissed",
+      });
     });
   });
 
@@ -365,17 +401,24 @@ describe("use-conditions", () => {
     });
 
     const { useDeleteConditionRecord } = await import("./use-conditions");
-    const { result } = renderHookWithQueryClient(() => useDeleteConditionRecord());
+    const { result, queryClient } = renderHookWithQueryClient(() => useDeleteConditionRecord());
+    const detailKey = ["condition", "cond-1"];
+    const linksKey = ["condition-records", "record", "record-1"];
+    queryClient.setQueryData(detailKey, conditionRow({ current_status: "resolved" }));
+    queryClient.setQueryData(linksKey, [{ id: "cr-1" }]);
 
     await act(async () => {
-      await result.current.mutateAsync({
+      const removed = await result.current.mutateAsync({
         id: "cr-1",
         recordId: "record-1",
       });
+      expect(removed).toEqual({ conditionId: "cond-1" });
     });
 
     expect(conditionRecordsBuilder.delete).toHaveBeenCalled();
     expect(conditionsBuilder.update).toHaveBeenCalledWith({ current_status: "active" });
+    expect(queryClient.getQueryState(detailKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(linksKey)?.isInvalidated).toBe(true);
   });
 
   it("creates condition+record and links existing condition", async () => {
@@ -425,30 +468,64 @@ describe("use-conditions", () => {
       await import("./use-conditions");
     const createWithRecord = renderHookWithQueryClient(() => useCreateConditionWithRecord());
     const linkHook = renderHookWithQueryClient(() => useLinkConditionToRecord());
+    const linksKey = ["condition-records", "record", "record-1"];
+    const detailKey = ["condition", "cond-1"];
+    createWithRecord.queryClient.setQueryData(linksKey, []);
+    linkHook.queryClient.setQueryData(detailKey, conditionRow());
 
     await act(async () => {
-      await createWithRecord.result.current.mutateAsync({
+      const created = await createWithRecord.result.current.mutateAsync({
         person_id: "person-1",
         record_id: "record-1",
         name: "Asthma",
         status: "active",
       });
-      await linkHook.result.current.mutateAsync({
+      expect(created).toMatchObject({
+        condition: { id: "cond-1", name: "Asthma" },
+        record_id: "record-1",
+      });
+      const linked = await linkHook.result.current.mutateAsync({
         condition_id: "cond-1",
         record_id: "record-1",
         status_in_record: "resolved",
         code: "J45",
         icd_name_en: "Asthma",
       });
+      expect(linked).toMatchObject({
+        id: "cr-link",
+        record_id: "record-1",
+        condition_id: "cond-1",
+      });
     });
 
     expect(conditionsBuilder.insert).toHaveBeenCalled();
-    expect(conditionRecordsBuilder.insert).toHaveBeenCalled();
+    expect(conditionRecordsBuilder.insert).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        condition_id: "cond-1",
+        record_id: "record-1",
+        status_in_record: "active",
+        is_user_verified: true,
+        review_decision: "confirmed",
+      }),
+    );
+    expect(conditionRecordsBuilder.insert).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        condition_id: "cond-1",
+        record_id: "record-1",
+        status_in_record: "resolved",
+        is_user_verified: true,
+        review_decision: "confirmed",
+      }),
+    );
     expect(conditionsBuilder.update).toHaveBeenCalledWith({
       current_status: "resolved",
       code: "J45",
       icd_name_en: "Asthma",
     });
+    expect(createWithRecord.queryClient.getQueryState(linksKey)?.isInvalidated).toBe(true);
+    expect(linkHook.queryClient.getQueryState(detailKey)?.isInvalidated).toBe(true);
   });
 
   it("loads record conditions via rpc and returns rpc errors", async () => {
@@ -537,7 +614,9 @@ describe("use-conditions", () => {
     });
 
     const { useUpdateConditionRecord } = await import("./use-conditions");
-    const { result } = renderHookWithQueryClient(() => useUpdateConditionRecord());
+    const { result, queryClient } = renderHookWithQueryClient(() => useUpdateConditionRecord());
+    const detailKey = ["condition", "cond-1"];
+    queryClient.setQueryData(detailKey, conditionRow({ code: "J45" }));
 
     await act(async () => {
       await result.current.mutateAsync({
@@ -553,6 +632,8 @@ describe("use-conditions", () => {
       code: "J44",
       icd_name_en: null,
     });
+    expect(conditionRecordsBuilder.maybeSingle).not.toHaveBeenCalled();
+    expect(queryClient.getQueryState(detailKey)?.isInvalidated).toBe(true);
   });
 
   it("handles delete condition-record fallback path when original row is missing", async () => {
@@ -572,18 +653,25 @@ describe("use-conditions", () => {
     createClientMock.mockReturnValue({ from: fromMock });
 
     const { useDeleteConditionRecord } = await import("./use-conditions");
-    const { result } = renderHookWithQueryClient(() => useDeleteConditionRecord());
+    const { result, queryClient } = renderHookWithQueryClient(() => useDeleteConditionRecord());
+    const linksKey = ["condition-records", "record", "record-1"];
+    const detailKey = ["condition", "cond-1"];
+    queryClient.setQueryData(linksKey, [{ id: "cr-1" }]);
+    queryClient.setQueryData(detailKey, conditionRow());
 
     await act(async () => {
-      await result.current.mutateAsync({
+      const removed = await result.current.mutateAsync({
         id: "cr-1",
         recordId: "record-1",
       });
+      expect(removed).toEqual({ conditionId: null });
     });
 
     expect(selectSingle).toHaveBeenCalled();
     expect(deleteFn).toHaveBeenCalled();
     expect(deleteEq).toHaveBeenCalledWith("id", "cr-1");
+    expect(queryClient.getQueryState(linksKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(detailKey)?.isInvalidated).toBe(false);
   });
 
   it("throws when fallback delete fails", async () => {
@@ -649,18 +737,32 @@ describe("use-conditions", () => {
     });
 
     const { useLinkConditionToRecord } = await import("./use-conditions");
-    const { result } = renderHookWithQueryClient(() => useLinkConditionToRecord());
+    const { result, queryClient } = renderHookWithQueryClient(() => useLinkConditionToRecord());
+    const linksKey = ["condition-records", "record", "record-old"];
+    queryClient.setQueryData(linksKey, []);
 
     await act(async () => {
-      await result.current.mutateAsync({
+      const linked = await result.current.mutateAsync({
         condition_id: "cond-1",
         record_id: "record-old",
         status_in_record: "resolved",
       });
+      expect(linked).toMatchObject({
+        id: "cr-link-2",
+        record_id: "record-old",
+        condition_id: "cond-1",
+      });
     });
 
     expect(conditionsBuilder.update).not.toHaveBeenCalled();
-    expect(conditionRecordsBuilder.insert).toHaveBeenCalled();
+    expect(conditionRecordsBuilder.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        condition_id: "cond-1",
+        record_id: "record-old",
+        status_in_record: "resolved",
+      }),
+    );
+    expect(queryClient.getQueryState(linksKey)?.isInvalidated).toBe(true);
   });
 
   it("does not let a suppressed closure outrank a manual link by date", async () => {
@@ -865,13 +967,25 @@ describe("verifying a lab-driven closure", () => {
 
   /** The row the guard reads, plus the observations the record holds. */
   function stubFor(mention: Record<string, unknown>, observations: Record<string, unknown>[]) {
-    const conditionRecordsBuilder = createQueryBuilder({
-      data: { id: "cr-1", record_id: "record-1", condition_id: "cond-1" },
-      error: null,
+    const row = {
+      id: "cr-1",
+      record_id: "record-1",
+      condition_id: "cond-1",
+      is_user_verified: false,
+      review_decision: "pending",
+      ...mention,
+    };
+    const conditionRecordsBuilder = createQueryBuilder({ data: row, error: null });
+    conditionRecordsBuilder.update.mockImplementation((updates) => {
+      const write = createQueryBuilder({ data: null, error: null });
+      write.eq.mockImplementation((column, value) => {
+        if (column === "id" && value === row.id) Object.assign(row, updates);
+        return write;
+      });
+      return write;
     });
-    vi.mocked(conditionRecordsBuilder.single).mockResolvedValue({ data: mention, error: null });
     vi.mocked(conditionRecordsBuilder.maybeSingle).mockResolvedValue({
-      data: { status_in_record: "resolved" },
+      data: { status_in_record: mention.status_in_record },
       error: null,
     });
     const observationsBuilder = createQueryBuilder({ data: observations, error: null });
@@ -884,7 +998,7 @@ describe("verifying a lab-driven closure", () => {
         return conditionsBuilder;
       }),
     });
-    return { conditionRecordsBuilder, observationsBuilder, conditionsBuilder };
+    return { conditionRecordsBuilder, observationsBuilder };
   }
 
   const closure = {
@@ -942,25 +1056,29 @@ describe("verifying a lab-driven closure", () => {
   });
 
   it("verifies when the evidence still stands", async () => {
-    const { conditionRecordsBuilder } = stubFor(closure, [observation()]);
+    stubFor(closure, [observation()]);
 
     const { useUpdateConditionRecord } = await import("./use-conditions");
     const { result } = renderHookWithQueryClient(() => useUpdateConditionRecord());
 
     await act(async () => {
-      await result.current.mutateAsync({ id: "cr-1", updates: { is_user_verified: true } });
-    });
-
-    expect(conditionRecordsBuilder.update).toHaveBeenCalledWith({
-      is_user_verified: true,
-      review_decision: "confirmed",
+      const verified = await result.current.mutateAsync({
+        id: "cr-1",
+        updates: { is_user_verified: true },
+      });
+      expect(verified).toMatchObject({
+        id: "cr-1",
+        status_in_record: "resolved",
+        is_user_verified: true,
+        review_decision: "confirmed",
+      });
     });
   });
 
   it("does not read observations for a mention that cites none", async () => {
     // Ordinary mentions must not pay for the guard, and an unverifiable-by-construction row is
     // not the thing it protects.
-    const { observationsBuilder, conditionRecordsBuilder } = stubFor(
+    const { observationsBuilder } = stubFor(
       { status_in_record: "active", supporting_obs_code: null, record_id: "record-1" },
       [],
     );
@@ -969,28 +1087,35 @@ describe("verifying a lab-driven closure", () => {
     const { result } = renderHookWithQueryClient(() => useUpdateConditionRecord());
 
     await act(async () => {
-      await result.current.mutateAsync({ id: "cr-1", updates: { is_user_verified: true } });
+      const verified = await result.current.mutateAsync({
+        id: "cr-1",
+        updates: { is_user_verified: true },
+      });
+      expect(verified).toMatchObject({ id: "cr-1", is_user_verified: true });
     });
 
     expect(observationsBuilder.select).not.toHaveBeenCalled();
-    expect(conditionRecordsBuilder.update).toHaveBeenCalled();
   });
 
   it("does not run at all when nothing is being verified", async () => {
     // A dismissal writes no verification, so it must not be made to justify one.
-    const { conditionRecordsBuilder, observationsBuilder } = stubFor(closure, []);
+    const { observationsBuilder } = stubFor(closure, []);
 
     const { useUpdateConditionRecord } = await import("./use-conditions");
     const { result } = renderHookWithQueryClient(() => useUpdateConditionRecord());
 
     await act(async () => {
-      await result.current.mutateAsync({
+      const dismissed = await result.current.mutateAsync({
         id: "cr-1",
         updates: { review_decision: "dismissed" },
+      });
+      expect(dismissed).toMatchObject({
+        id: "cr-1",
+        is_user_verified: false,
+        review_decision: "dismissed",
       });
     });
 
     expect(observationsBuilder.select).not.toHaveBeenCalled();
-    expect(conditionRecordsBuilder.update).toHaveBeenCalledWith({ review_decision: "dismissed" });
   });
 });
