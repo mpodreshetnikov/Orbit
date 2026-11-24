@@ -67,10 +67,19 @@ export function Icon({
 }
 
 /** `Card`: a bordered, rounded surface. */
-export function Card({ children, style }: { children: ReactNode; style?: StyleProp<ViewStyle> }) {
+export function Card({
+  children,
+  style,
+  testID,
+}: {
+  children: ReactNode;
+  style?: StyleProp<ViewStyle>;
+  testID?: string;
+}) {
   const palette = usePalette();
   return (
     <View
+      testID={testID}
       style={[
         {
           backgroundColor: palette.card,

@@ -66,7 +66,7 @@ jobs:
           # Enforced when a claim marker + reachable registry are present (dual-repo CI).
           # Without them the step is a no-op success (claim/authorship gates still apply).
           if [[ -n "${ORBIT_TASKS_ROOT:-}" || -e docs/tasks || -d ../orbit-tasks/docs/tasks ]]; then
-            node scripts/just/spec-approve.cjs --check-claimed
+            node scripts/just/spec-approve-gate.cjs --check-claimed
           else
             echo "spec-approve: registry not in this job — skipped (local pre-push still enforces)"
           fi

@@ -1,7 +1,8 @@
 import React from "react";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { SpendingCategory, SpendingReport } from "@/types/money-spending-report";
+import type { SpendingCategory } from "@/types/money-spending-report";
+import type { SpendingReport } from "@/types/money-spending-report-ux";
 import MoneyReportsPage from "./page";
 
 const hookMocks = vi.hoisted(() => ({
@@ -33,6 +34,9 @@ vi.mock("@/stores/ui-store", () => ({
 vi.mock("@/hooks", () => ({
   useIsMobile: (...args: unknown[]) => hookMocks.useIsMobile(...args),
   useMoneyAccounts: (...args: unknown[]) => hookMocks.useMoneyAccounts(...args),
+}));
+
+vi.mock("@/hooks/use-money-spending-report", () => ({
   useMoneySpendingReport: (...args: unknown[]) => hookMocks.useMoneySpendingReport(...args),
 }));
 
@@ -78,8 +82,10 @@ const REPORT: SpendingReport = {
     start: "2026-10-01",
     end: "2026-10-31",
     days: 31,
+    compare_days: 31,
     previous_start: "2026-08-31",
     previous_end: "2026-09-30",
+    previous_compare_end: "2026-09-30",
     last_year: 2025,
   },
   currency: "RUB",
@@ -94,7 +100,7 @@ const REPORT: SpendingReport = {
     last_year_expense: 122082,
     last_year_net: 52446,
   },
-  forecast: { expense: 131000, days_left: 3 },
+  forecast: { expense: 131000, income: 185000, net: 54000, days_left: 3 },
   categories: [
     category({
       id: "food",
@@ -120,6 +126,7 @@ const REPORT: SpendingReport = {
       logo_url: null,
       base_color: "#b91c1c",
       expense: 11240,
+      previous_expense: 9800,
       transaction_count: 14,
     },
   ],
@@ -164,27 +171,43 @@ describe("MoneyReportsPage", () => {
       currency: "RUB",
       accountIds: ["acc-1"],
       categoryId: "food",
+      brandId: null,
+      merchantName: null,
     });
     expect(screen.getByTestId("spending-total-expense")).toBeInTheDocument();
   });
 
-  it("shows the three totals with their comparisons and the forecast", () => {
+  it("shows the three totals with self-evident badges and a forecast line inside each card", () => {
     render(<MoneyReportsPage />);
     const expense = screen.getByTestId("spending-total-expense");
     expect(within(expense).getByText("RUB 118,420")).toBeInTheDocument();
-    expect(within(expense).getByText(/▲ 8% money.spendingVsPrevious/)).toHaveClass(
+    expect(within(expense).getByText(/▲ 8%.*money\.spendingBadgePrevious/)).toHaveClass(
       "text-orange-800",
     );
-    expect(within(expense).getByText(/▼ 3% money.spendingVsLastYear\(2025\)/)).toHaveClass(
+    expect(within(expense).getByText(/▼ 3%.*money\.spendingBadgeLastYear/)).toHaveClass(
       "text-teal-800",
     );
-    const forecast = within(expense).getByTestId("spending-forecast");
-    expect(forecast).toHaveTextContent("≈ RUB 131,000");
-    expect(forecast).toHaveTextContent("money.spendingForecastDaysLeft(3)");
+    expect(within(expense).getByTestId("spending-forecast")).toHaveTextContent(
+      /money\.spendingForecastLine/,
+    );
+    expect(
+      within(screen.getByTestId("spending-total-income")).getByTestId("spending-forecast-income"),
+    ).toHaveTextContent(/money\.spendingForecastLine/);
+    expect(
+      within(screen.getByTestId("spending-total-net")).getByTestId("spending-forecast-net"),
+    ).toHaveTextContent(/money\.spendingForecastLine/);
+    expect(screen.queryByText(/money\.spendingForecastDate/)).not.toBeInTheDocument();
+    expect(screen.queryByText("money.spendingCompareLegend(2025)")).not.toBeInTheDocument();
+    expect(screen.getByTestId("spending-view-transactions")).toHaveAttribute(
+      "href",
+      expect.stringContaining("preset=custom"),
+    );
 
     const net = screen.getByTestId("spending-total-net");
     expect(within(net).getByText("+RUB 66,580")).toBeInTheDocument();
-    expect(within(net).getByText(/▼ 12% money.spendingVsPrevious/)).toHaveClass("text-orange-800");
+    expect(within(net).getByText(/▼ 12%.*money\.spendingBadgePrevious/)).toHaveClass(
+      "text-orange-800",
+    );
   });
 
   it("draws the root categories as a treemap and opens a branch on a click", () => {
@@ -297,10 +320,14 @@ describe("MoneyReportsPage", () => {
 
   it("shows the days and the merchants", () => {
     render(<MoneyReportsPage />);
-    expect(screen.getByTestId("spending-days").children).toHaveLength(2);
+    expect(within(screen.getByTestId("spending-days")).getAllByRole("button")).toHaveLength(2);
+    expect(screen.getByTestId("spending-days-axis")).toBeInTheDocument();
     const merchants = screen.getByTestId("spending-merchants");
     expect(merchants).toHaveTextContent("Pyaterochka");
     expect(merchants).toHaveTextContent("money.spendingMerchantCount(14)");
+    fireEvent.click(within(merchants).getByRole("button", { name: /Pyaterochka/ }));
+    expect(lastUrl().get("merchant")).toBe("Pyaterochka");
+    expect(lastUrl().get("brand")).toBe("b1");
   });
 
   it("says when rates are missing, and when the report failed", () => {
@@ -317,13 +344,23 @@ describe("MoneyReportsPage", () => {
     expect(screen.getByText("money.spendingLoadFailed")).toBeInTheDocument();
   });
 
-  it("fits the totals side by side on a phone and lists categories instead of a table", () => {
+  it("fits the totals side by side on a phone with short forecast and date above", () => {
     hookMocks.useIsMobile.mockReturnValue(true);
     render(<MoneyReportsPage />);
     const expense = screen.getByTestId("spending-total-expense");
-    expect(within(expense).getByText(/▲ 8% money.spendingVsPreviousShort/)).toBeInTheDocument();
-    expect(within(expense).queryByTestId("spending-forecast")).not.toBeInTheDocument();
-    expect(screen.getByTestId("spending-forecast")).toHaveTextContent("≈ RUB 131,000");
+    expect(within(expense).getByText(/▲ 8%.*money\.spendingBadgePrevious/)).toBeInTheDocument();
+    expect(screen.getByText(/money\.spendingForecastDate/)).toBeInTheDocument();
+    expect(within(expense).getByTestId("spending-forecast")).toHaveTextContent(
+      /money\.spendingForecastShort/,
+    );
+    expect(
+      within(screen.getByTestId("spending-total-income")).getByTestId("spending-forecast-income"),
+    ).toHaveTextContent(/money\.spendingForecastShort/);
+    expect(
+      within(screen.getByTestId("spending-total-net")).getByTestId("spending-forecast-net"),
+    ).toHaveTextContent(/money\.spendingForecastShort/);
+    expect(screen.queryByText("money.spendingCompareLegend(2025)")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "money.spendingPeriodCustom" })).toBeInTheDocument();
 
     const food = screen.getByTestId("spending-row-food");
     expect(food).toHaveTextContent("63%");
@@ -333,6 +370,44 @@ describe("MoneyReportsPage", () => {
       within(food).getByRole("button", { name: "money.spendingFilterByCategory(Food)" }),
     );
     expect(lastUrl().get("category")).toBe("food");
+  });
+
+  it("shows ×N with a basis badge and hides the bare «new» chip", () => {
+    hookMocks.useIsMobile.mockReturnValue(true);
+    hookMocks.useMoneySpendingReport.mockReturnValue({
+      data: {
+        ...REPORT,
+        totals: {
+          ...REPORT.totals,
+          income: 180000,
+          previous_income: 180000,
+          last_year_income: 0,
+          expense: 130059,
+          previous_expense: 95500,
+          last_year_expense: 1534,
+          net: 49941,
+          previous_net: 84500,
+          last_year_net: 1534,
+        },
+      },
+      isError: false,
+    });
+    render(<MoneyReportsPage />);
+    const income = screen.getByTestId("spending-total-income");
+    expect(within(income).getByText(/0%.*money\.spendingBadgePrevious/)).toBeInTheDocument();
+    expect(within(income).queryByText("money.spendingChangeNew")).not.toBeInTheDocument();
+    const expense = screen.getByTestId("spending-total-expense");
+    expect(within(expense).getByText(/×85.*money\.spendingBadgeLastYear/)).toBeInTheDocument();
+    expect(screen.queryByText("money.spendingCompareLegend(2025)")).not.toBeInTheDocument();
+  });
+
+  it("does not nest sparkline controls inside the category row button", () => {
+    hookMocks.useIsMobile.mockReturnValue(true);
+    render(<MoneyReportsPage />);
+    const food = screen.getByTestId("spending-row-food");
+    const expand = within(food).getByRole("button", { name: "money.spendingExpand(Food)" });
+    expect(within(expand).queryAllByRole("button")).toHaveLength(0);
+    expect(within(food).getByTestId("spending-sparkline")).toBeInTheDocument();
   });
 
   it("says so when the period has nothing in it", () => {

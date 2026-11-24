@@ -1,8 +1,9 @@
--- Function: money_get_spending_report(uuid, date, date, char(3), uuid[], uuid, date)
+-- Function: money_get_spending_report(uuid, date, date, char(3), uuid[], uuid, date, uuid, text)
 -- The money report (T-261028-yhm): where the money of a period went, for any period, narrowed to
--- some accounts and to one category's branch, against the period just before it and against last
--- year's average, with twelve months of history per category, the days, the top merchants, and a
--- forecast of the period's spending while the period is still running.
+-- some accounts, to one category's branch, and optionally to one merchant, against the period just
+-- before it and against last year's average, with twelve months of history per category, the days,
+-- the top merchants, and a forecast of the period's spending and income while the period is still
+-- running.
 --
 -- Counting follows money_get_budget_report: the payer's posted and pending transactions, transfers
 -- to oneself left out by alias, line items carry the category, a transaction without live line
@@ -11,12 +12,15 @@
 --
 -- Expenses come back as positive amounts spent, income as positive amounts received, net as their
 -- signed difference. "Last year" is the calendar year before the period starts; its average is the
--- year's total scaled to the period's length in days, so a month compares with an average month.
--- The forecast covers spending only: the period's spending so far plus, for every day still to
--- come, what that weekday cost on average over the twelve weeks before today. Income arrives in a
--- few large payments that a weekday average would smear across the month, so it is not forecast.
+-- year's total scaled to the comparison day-count. A calendar-month selection compares against the
+-- previous calendar month; while still running, only the elapsed day-count (e.g. Nov 1–16 vs
+-- Oct 1–16), not the whole prior month. Non-month ranges keep an equal-length previous window.
+-- The forecast covers spending and income: each is the amount so far plus, for every day still to
+-- come, what that weekday averaged over the twelve weeks before today. Forecast net is income
+-- forecast minus expense forecast.
 
 DROP FUNCTION IF EXISTS public.money_get_spending_report(uuid, date, date, char(3), uuid[], uuid, date);
+DROP FUNCTION IF EXISTS public.money_get_spending_report(uuid, date, date, char(3), uuid[], uuid, date, uuid, text);
 
 CREATE OR REPLACE FUNCTION public.money_get_spending_report(
   p_person_id uuid,
@@ -25,7 +29,9 @@ CREATE OR REPLACE FUNCTION public.money_get_spending_report(
   p_report_currency char(3) DEFAULT 'RUB',
   p_account_ids uuid[] DEFAULT NULL,
   p_category_id uuid DEFAULT NULL,
-  p_today date DEFAULT NULL
+  p_today date DEFAULT NULL,
+  p_brand_id uuid DEFAULT NULL,
+  p_merchant_name text DEFAULT NULL
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -37,8 +43,10 @@ DECLARE
   v_currency char(3) := upper(COALESCE(NULLIF(btrim(p_report_currency::text), ''), 'RUB'));
   v_today date := COALESCE(p_today, current_date);
   v_days integer;
+  v_compare_days integer;
   v_previous_start date;
   v_previous_end date;
+  v_previous_compare_end date;
   v_last_year integer;
   v_last_year_start date;
   v_last_year_end date;
@@ -47,6 +55,7 @@ DECLARE
   v_forecast_from date;
   v_forecast_history_start date;
   v_window_start date;
+  v_merchant_name text := NULLIF(btrim(COALESCE(p_merchant_name, '')), '');
   v_uncategorized_category_id uuid;
   v_result jsonb;
 BEGIN
@@ -62,7 +71,21 @@ BEGIN
 
   v_days := p_end - p_start + 1;
   v_previous_end := p_start - 1;
-  v_previous_start := p_start - v_days;
+  -- Calendar month (1st → last day): previous is the prior calendar month so incomplete
+  -- Nov 1–16 compares Oct 1–16. Other ranges keep an equal-length window ending yesterday.
+  IF p_start = date_trunc('month', p_start)::date
+     AND p_end = (date_trunc('month', p_start) + interval '1 month - 1 day')::date THEN
+    v_previous_start := (date_trunc('month', p_start) - interval '1 month')::date;
+  ELSE
+    v_previous_start := p_start - v_days;
+  END IF;
+  -- Incomplete period: vs previous / vs last-year average use only the elapsed day-count.
+  IF v_today >= p_start AND v_today < p_end THEN
+    v_compare_days := v_today - p_start + 1;
+  ELSE
+    v_compare_days := v_days;
+  END IF;
+  v_previous_compare_end := LEAST(v_previous_start + v_compare_days - 1, v_previous_end);
   v_last_year := extract(year FROM p_start)::integer - 1;
   v_last_year_start := make_date(v_last_year, 1, 1);
   v_last_year_end := make_date(v_last_year, 12, 31);
@@ -135,6 +158,17 @@ BEGIN
       AND tx.posted_at < ((p_end + 1)::text || ' 00:00:00+00')::timestamptz
       AND tx.status IN ('posted', 'pending')
       AND (p_account_ids IS NULL OR tx.account_id = ANY (p_account_ids))
+      AND (
+        p_brand_id IS NULL
+        OR tx.brand_id = p_brand_id
+      )
+      AND (
+        v_merchant_name IS NULL
+        OR (
+          p_brand_id IS NULL
+          AND lower(COALESCE(NULLIF(btrim(tx.merchant_name), ''), '')) = lower(v_merchant_name)
+        )
+      )
       AND NOT (
         tx.is_transfer
         AND EXISTS (
@@ -219,7 +253,7 @@ BEGIN
       GREATEST(converted.amount, 0) AS income,
       GREATEST(-converted.amount, 0) AS expense,
       converted.posted_date BETWEEN p_start AND p_end AS in_period,
-      converted.posted_date BETWEEN v_previous_start AND v_previous_end AS in_previous,
+      converted.posted_date BETWEEN v_previous_start AND v_previous_compare_end AS in_previous,
       converted.posted_date BETWEEN v_last_year_start AND v_last_year_end AS in_last_year
     FROM converted
     WHERE converted.amount IS NOT NULL
@@ -230,28 +264,33 @@ BEGIN
       COALESCE(sum(expense) FILTER (WHERE in_period), 0) AS expense,
       COALESCE(sum(income) FILTER (WHERE in_previous), 0) AS previous_income,
       COALESCE(sum(expense) FILTER (WHERE in_previous), 0) AS previous_expense,
-      COALESCE(sum(income) FILTER (WHERE in_last_year), 0) * v_days / v_last_year_days AS last_year_income,
-      COALESCE(sum(expense) FILTER (WHERE in_last_year), 0) * v_days / v_last_year_days AS last_year_expense,
+      COALESCE(sum(income) FILTER (WHERE in_last_year), 0) * v_compare_days / v_last_year_days AS last_year_income,
+      COALESCE(sum(expense) FILTER (WHERE in_last_year), 0) * v_compare_days / v_last_year_days AS last_year_expense,
       COALESCE(sum(expense) FILTER (WHERE posted_date BETWEEN p_start AND LEAST(v_today, p_end)), 0)
-        AS expense_to_date
+        AS expense_to_date,
+      COALESCE(sum(income) FILTER (WHERE posted_date BETWEEN p_start AND LEAST(v_today, p_end)), 0)
+        AS income_to_date
     FROM measured
   ),
   weekday_history AS (
     SELECT
       extract(isodow FROM day_series.day)::integer AS weekday,
-      COALESCE(sum(measured.expense), 0) AS expense
+      COALESCE(sum(measured.expense), 0) AS expense,
+      COALESCE(sum(measured.income), 0) AS income
     FROM generate_series(v_forecast_history_start, v_today - 1, interval '1 day') AS day_series(day)
     LEFT JOIN measured
       ON measured.posted_date = day_series.day::date
     GROUP BY day_series.day
   ),
   weekday_average AS (
-    SELECT weekday, avg(expense) AS expense
+    SELECT weekday, avg(expense) AS expense, avg(income) AS income
     FROM weekday_history
     GROUP BY weekday
   ),
   forecast AS (
-    SELECT COALESCE(sum(average.expense), 0) AS remaining_expense
+    SELECT
+      COALESCE(sum(average.expense), 0) AS remaining_expense,
+      COALESCE(sum(average.income), 0) AS remaining_income
     FROM generate_series(v_forecast_from, p_end, interval '1 day') AS day_series(day)
     JOIN weekday_average AS average
       ON average.weekday = extract(isodow FROM day_series.day)::integer
@@ -263,9 +302,9 @@ BEGIN
       COALESCE(sum(measured.expense) FILTER (WHERE measured.in_period), 0) AS expense,
       COALESCE(sum(measured.income) FILTER (WHERE measured.in_previous), 0) AS previous_income,
       COALESCE(sum(measured.expense) FILTER (WHERE measured.in_previous), 0) AS previous_expense,
-      COALESCE(sum(measured.income) FILTER (WHERE measured.in_last_year), 0) * v_days / v_last_year_days
+      COALESCE(sum(measured.income) FILTER (WHERE measured.in_last_year), 0) * v_compare_days / v_last_year_days
         AS last_year_income,
-      COALESCE(sum(measured.expense) FILTER (WHERE measured.in_last_year), 0) * v_days / v_last_year_days
+      COALESCE(sum(measured.expense) FILTER (WHERE measured.in_last_year), 0) * v_compare_days / v_last_year_days
         AS last_year_expense
     FROM measured
     JOIN category_ancestors AS ancestors
@@ -367,12 +406,16 @@ BEGIN
       measured.brand_id,
       CASE WHEN measured.brand_id IS NULL THEN lower(measured.merchant_name) END AS merchant_key,
       min(measured.merchant_name) AS merchant_name,
-      sum(measured.expense) AS expense,
-      count(DISTINCT measured.transaction_id) AS transaction_count
+      sum(measured.expense) FILTER (WHERE measured.in_period) AS expense,
+      sum(measured.expense) FILTER (WHERE measured.in_previous) AS previous_expense,
+      count(DISTINCT measured.transaction_id) FILTER (WHERE measured.in_period AND measured.expense > 0)
+        AS transaction_count
     FROM measured
-    WHERE measured.in_period
-      AND measured.expense > 0
-      AND (measured.brand_id IS NOT NULL OR measured.merchant_name IS NOT NULL)
+    WHERE (measured.brand_id IS NOT NULL OR measured.merchant_name IS NOT NULL)
+      AND (
+        (measured.in_period AND measured.expense > 0)
+        OR (measured.in_previous AND measured.expense > 0)
+      )
     GROUP BY measured.brand_id, CASE WHEN measured.brand_id IS NULL THEN lower(measured.merchant_name) END
   ),
   merchants_json AS (
@@ -383,18 +426,20 @@ BEGIN
           'name', COALESCE(brand.name, top.merchant_name),
           'logo_url', brand.logo_url,
           'base_color', brand.base_color,
-          'expense', top.expense,
-          'transaction_count', top.transaction_count
+          'expense', COALESCE(top.expense, 0),
+          'previous_expense', COALESCE(top.previous_expense, 0),
+          'transaction_count', COALESCE(top.transaction_count, 0)
         )
-        ORDER BY top.expense DESC, COALESCE(brand.name, top.merchant_name)
+        ORDER BY COALESCE(top.expense, 0) DESC, COALESCE(brand.name, top.merchant_name)
       ),
       '[]'::jsonb
     ) AS payload
     FROM (
       SELECT *
       FROM merchant_totals
+      WHERE COALESCE(expense, 0) > 0
       ORDER BY expense DESC, merchant_name
-      LIMIT 10
+      LIMIT 50
     ) AS top
     LEFT JOIN public.money_transaction_brands AS brand
       ON brand.id = top.brand_id
@@ -426,8 +471,10 @@ BEGIN
       'start', p_start,
       'end', p_end,
       'days', v_days,
+      'compare_days', v_compare_days,
       'previous_start', v_previous_start,
       'previous_end', v_previous_end,
+      'previous_compare_end', v_previous_compare_end,
       'last_year', v_last_year
     ),
     'currency', v_currency,
@@ -445,6 +492,9 @@ BEGIN
     'forecast', CASE
       WHEN v_today >= p_start AND v_today < p_end THEN jsonb_build_object(
         'expense', totals.expense_to_date + forecast.remaining_expense,
+        'income', totals.income_to_date + forecast.remaining_income,
+        'net', (totals.income_to_date + forecast.remaining_income)
+          - (totals.expense_to_date + forecast.remaining_expense),
         'days_left', p_end - v_today
       )
       ELSE NULL
@@ -466,5 +516,5 @@ BEGIN
 END;
 $$;
 
-COMMENT ON FUNCTION public.money_get_spending_report(uuid, date, date, char(3), uuid[], uuid, date) IS
-  'The money report for any period: totals against the previous period and last year''s average, a spending forecast, categories with twelve months of history, days, top merchants, and FX status.';
+COMMENT ON FUNCTION public.money_get_spending_report(uuid, date, date, char(3), uuid[], uuid, date, uuid, text) IS
+  'The money report for any period: totals against the previous period and last year''s average (elapsed day-count while incomplete), spending and income forecast, categories with twelve months of history, days, top merchants with previous, optional merchant filter, and FX status.';
