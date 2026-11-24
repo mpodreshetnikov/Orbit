@@ -304,6 +304,8 @@ describe("MoneyCategoriesPage", () => {
 
     expect(toastMock.error).toHaveBeenCalledWith("money.validationCategoryRequired");
     expect(createMutateAsync).not.toHaveBeenCalled();
+    expect(screen.getByRole("heading", { name: "money.addCategory" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "common.save" })).toBeEnabled();
   });
 
   it("creates a root custom category within the selected canonical branch", async () => {
@@ -339,6 +341,7 @@ describe("MoneyCategoriesPage", () => {
         name_ru: "Metro RU",
         slug: "metro",
       });
+      expect(screen.queryByRole("heading", { name: "money.addCategory" })).toBeNull();
     });
   });
 
@@ -383,6 +386,7 @@ describe("MoneyCategoriesPage", () => {
         name_ru: "Child RU",
         slug: "child",
       });
+      expect(screen.queryByRole("heading", { name: "money.addCategory" })).toBeNull();
     });
   });
 
@@ -522,6 +526,9 @@ describe("MoneyCategoriesPage", () => {
 
     expect(toastMock.error).toHaveBeenCalledWith("money.cannotDeleteCategory");
     expect(deleteMutateAsync).not.toHaveBeenCalled();
+    expect(screen.queryByText("money.deleteCategoryConfirm")).toBeNull();
+    expect(screen.getByText("Root")).toBeVisible();
+    expect(screen.getByText("Child")).toBeVisible();
   });
 
   it("deletes a leaf category after confirmation", async () => {
@@ -554,6 +561,7 @@ describe("MoneyCategoriesPage", () => {
 
     await waitFor(() => {
       expect(deleteMutateAsync).toHaveBeenCalledWith("child");
+      expect(screen.queryByText("money.deleteCategoryConfirm")).toBeNull();
     });
   });
 });

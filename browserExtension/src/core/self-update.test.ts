@@ -384,7 +384,9 @@ describe("createSelfUpdater", () => {
   it("shares one check between overlapping callers", async () => {
     const fetchLatest = vi.fn(async () => RELEASE);
     const { updater } = setup({ fetchLatest });
-    await Promise.all([updater.check("alarm"), updater.check("manual")]);
+    const [alarm, manual] = await Promise.all([updater.check("alarm"), updater.check("manual")]);
+    expect(alarm).toMatchObject({ latest_version: "0.1.24", error: null });
+    expect(manual).toEqual(alarm);
     expect(fetchLatest).toHaveBeenCalledOnce();
   });
 });
@@ -403,8 +405,10 @@ describe("createSelfUpdater, where the browser installs updates", () => {
   }
 
   it("reloads into the update the browser downloaded once nothing imports", async () => {
-    const { updater, reload, sendNative } = browserSetup();
+    const { updater, reload, sendNative, pending, registry } = browserSetup();
     await updater.onBrowserUpdateAvailable("0.1.24");
+    expect(pending()).toBe("0.1.24");
+    expect(registry.isHeldForUpdate()).toBe(true);
     expect(reload).toHaveBeenCalledOnce();
     expect(sendNative).not.toHaveBeenCalled();
   });
@@ -428,11 +432,14 @@ describe("createSelfUpdater, where the browser installs updates", () => {
 
     // The event page was ended while it waited; a new one only has the stored version.
     const stored = first.pending();
-    const { updater, reload } = setup({
+    expect(stored).toBe("0.1.24");
+    const { updater, reload, registry } = setup({
       browserManaged: true,
       pendingStore: { get: async () => stored, set: async () => undefined },
     });
     await updater.onImportsSettled();
+    expect(updater.status()).toMatchObject({ phase: "reload_pending", latest_version: "0.1.24" });
+    expect(registry.isHeldForUpdate()).toBe(true);
     expect(reload).toHaveBeenCalledOnce();
   });
 
