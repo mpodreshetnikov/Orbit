@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import connector, { __test__ } from "./tbank-web.js";
 
 describe("tbank-web connector", () => {
@@ -3364,7 +3364,7 @@ describe("tbank-web chrome orch helpers (T-261116-rul slice 2)", () => {
         status: "complete",
       } as chrome.tabs.Tab),
     ).rejects.toThrow(
-      /T-Bank session is not authorized[\s\S]*"tab_url":"https:\/\/www\.tbank\.ru\/auth\/login\/"/,
+      /T-Bank session is not authorized[\s\S]*"tab_url":"https:\/\/www\.tbank\.ru\/auth\/login\/"[\s\S]*"tab_status":"complete"/,
     );
 
     const get = vi.fn().mockResolvedValue({
@@ -3380,7 +3380,7 @@ describe("tbank-web chrome orch helpers (T-261116-rul slice 2)", () => {
         status: "complete",
       } as chrome.tabs.Tab),
     ).rejects.toThrow(
-      /did not stay on the operations page[\s\S]*"tab_url":"https:\/\/www\.tbank\.ru\/mybank\/cards\/"/,
+      /did not stay on the operations page[\s\S]*"tab_url":"https:\/\/www\.tbank\.ru\/mybank\/cards\/"[\s\S]*"tab_status":"complete"/,
     );
     expect(update).toHaveBeenCalledWith(1, { url: "https://www.tbank.ru/mybank/operations/" });
   });
@@ -3445,7 +3445,7 @@ describe("tbank-web chrome orch helpers (T-261116-rul slice 2)", () => {
         status: "complete",
       } as chrome.tabs.Tab),
     ).rejects.toThrow(
-      /T-Bank session is not authorized[\s\S]*"tab_url":"https:\/\/www\.tbank\.ru\/auth\/login\/"/,
+      /T-Bank session is not authorized[\s\S]*"tab_url":"https:\/\/www\.tbank\.ru\/auth\/login\/"[\s\S]*"tab_status":"complete"/,
     );
   });
 
@@ -3521,4 +3521,398 @@ describe("tbank-web chrome orch helpers (T-261116-rul slice 2)", () => {
     expect(extraction.method).toBe("api");
     expect(executeScript).toHaveBeenCalledTimes(2);
   });
+});
+
+describe("tbank-web extraction orchestration", () => {
+  const operationsUrl = "https://www.tbank.ru/mybank/operations/";
+  const readyTab = { id: 17, url: operationsUrl, status: "complete" } as const;
+  const args = {
+    windowFromIso: "2026-02-01T00:00:00.000Z",
+    windowToIso: "2026-02-28T00:00:00.000Z",
+    sessionId: "synthetic-session",
+    sourceId: "tbank_web",
+    payerPersonId: "synthetic-person",
+    parseStrategy: "full",
+  } as const;
+  const extraction = {
+    method: "api",
+    operation_records: [],
+    window_to: args.windowToIso,
+    parsed_through_at: args.windowFromIso,
+    parsed_transactions_count: 0,
+  };
+
+  function event<Args extends unknown[]>() {
+    const listeners = new Set<(...args: Args) => void>();
+    return {
+      addListener: (listener: (...args: Args) => void) => listeners.add(listener),
+      removeListener: (listener: (...args: Args) => void) => listeners.delete(listener),
+      emit: (...args: Args) => {
+        for (const listener of listeners) listener(...args);
+      },
+      get listenerCount() {
+        return listeners.size;
+      },
+    };
+  }
+
+  function browser(executeScript = vi.fn(), get = vi.fn().mockResolvedValue(readyTab)) {
+    const onMessage = event<[unknown, { tab?: { id?: number } }?]>();
+    const onRemoved = event<[number]>();
+    const onUpdated = event<[number, { status?: string; url?: string }]>();
+    const runtime = { onMessage };
+    const tabs = { get, update: vi.fn(), onRemoved, onUpdated };
+    vi.stubGlobal("chrome", { runtime, tabs, scripting: { executeScript } });
+    return { runtime, tabs, onMessage, onRemoved, onUpdated };
+  }
+
+  function retry(deadline = Date.now() + 120_000) {
+    return __test__.extractOperationsWithRetry(
+      readyTab.id,
+      args.windowFromIso,
+      args.windowToIso,
+      args.sessionId,
+      args.sourceId,
+      args.payerPersonId,
+      args.parseStrategy,
+      deadline,
+    );
+  }
+
+  function failedExtraction(pending: Promise<unknown>) {
+    return pending.then(
+      () => {
+        throw new Error("Expected extraction to fail");
+      },
+      (error: Error) => {
+        const [message, diagnostics] = error.message.split(" diagnostics=");
+        return { message, diagnostics: JSON.parse(diagnostics) as unknown };
+      },
+    );
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("navigates on the mirror and waits for its completed operations tab", async () => {
+    const initialTab = { id: 17, status: "complete", url: "https://www.tbank-online.com/mybank/" };
+    let tab: chrome.tabs.Tab = initialTab as chrome.tabs.Tab;
+    const { tabs } = browser(
+      vi.fn(),
+      vi.fn(async () => tab),
+    );
+    tabs.update.mockImplementation(async (id: number, { url }: { url: string }) => {
+      if (id === initialTab.id) tab = { ...tab, url };
+    });
+
+    await expect(__test__.prepareOperationsTab(tab)).resolves.toEqual({
+      ...initialTab,
+      url: "https://www.tbank-online.com/mybank/operations/",
+    });
+  });
+
+  it("waits for the selected tab to finish loading and detaches the load listener", async () => {
+    vi.useFakeTimers();
+    const loadingTab = { ...readyTab, status: "loading" } as const;
+    const get = vi.fn().mockResolvedValueOnce(loadingTab).mockResolvedValue(readyTab);
+    const { onUpdated } = browser(vi.fn(), get);
+    const pending = __test__.prepareOperationsTab(loadingTab as chrome.tabs.Tab);
+    await vi.advanceTimersByTimeAsync(0);
+    onUpdated.emit(readyTab.id + 1, { status: "complete" });
+    onUpdated.emit(readyTab.id, { status: "loading" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onUpdated.listenerCount).toBe(1);
+
+    onUpdated.emit(readyTab.id, { status: "complete" });
+    await expect(pending).resolves.toEqual(readyTab);
+    expect(onUpdated.listenerCount).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("falls back to the original operations tab if the refreshed tab disappears", async () => {
+    vi.useFakeTimers();
+    const loadingTab = { ...readyTab, status: "loading" } as const;
+    const get = vi
+      .fn()
+      .mockResolvedValueOnce(loadingTab)
+      .mockRejectedValueOnce(new Error("Synthetic tab disappeared"));
+    const { onUpdated } = browser(vi.fn(), get);
+    const pending = __test__.prepareOperationsTab(loadingTab as chrome.tabs.Tab);
+    await vi.advanceTimersByTimeAsync(0);
+    onUpdated.emit(readyTab.id, { status: "complete" });
+    await expect(pending).resolves.toEqual(loadingTab);
+  });
+
+  it("times out a still-loading operations tab after thirty seconds and detaches its listener", async () => {
+    vi.useFakeTimers();
+    const loadingTab = { ...readyTab, status: "loading" } as const;
+    const { onUpdated } = browser(vi.fn(), vi.fn().mockResolvedValue(loadingTab));
+    const result = expect(
+      __test__.prepareOperationsTab(loadingTab as chrome.tabs.Tab),
+    ).rejects.toThrow("Page load timeout");
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(onUpdated.listenerCount).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await result;
+    expect(onUpdated.listenerCount).toBe(0);
+  });
+
+  it("records both failed attempts and the final tab in extraction diagnostics", async () => {
+    const redirectedUrl = "https://www.tbank.ru/mybank/cards/";
+    const executeScript = vi.fn().mockResolvedValueOnce([]).mockRejectedValueOnce("page gone");
+    const get = vi
+      .fn()
+      .mockResolvedValueOnce(readyTab)
+      .mockResolvedValueOnce(readyTab)
+      .mockResolvedValueOnce({ id: readyTab.id })
+      .mockResolvedValueOnce({ id: readyTab.id, url: redirectedUrl, status: "loading" });
+    browser(executeScript, get);
+
+    await expect(failedExtraction(retry())).resolves.toEqual({
+      message: "Unable to extract operations from current page.",
+      diagnostics: {
+        tab_url: redirectedUrl,
+        tab_status: "loading",
+        execute_script_attempts: [
+          { attempt: 1, result_count: 0, tab_url: operationsUrl, tab_status: "complete" },
+          { attempt: 2, error_message: "page gone", tab_url: null, tab_status: null },
+        ],
+      },
+    });
+  });
+
+  it("records null tab diagnostics when lookups fail during both attempts", async () => {
+    const executeScript = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce(new Error("gone"));
+    const get = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Tab lookup failed"))
+      .mockResolvedValueOnce(readyTab)
+      .mockResolvedValue(undefined);
+    browser(executeScript, get);
+
+    await expect(failedExtraction(retry())).resolves.toEqual({
+      message: "Unable to extract operations from current page.",
+      diagnostics: {
+        tab_url: null,
+        tab_status: null,
+        execute_script_attempts: [
+          { attempt: 1, result_count: 0, tab_url: null, tab_status: null },
+          { attempt: 2, error_message: "gone", tab_url: null, tab_status: null },
+        ],
+      },
+    });
+  });
+
+  it("preserves the failed attempt when the tab redirects to login before retrying", async () => {
+    const loginTab = {
+      id: readyTab.id,
+      url: "https://www.tbank.ru/auth/login/",
+    };
+    const executeScript = vi.fn().mockRejectedValueOnce(new Error("Document replaced"));
+    const get = vi.fn().mockResolvedValueOnce(readyTab).mockResolvedValue(loginTab);
+    browser(executeScript, get);
+
+    await expect(failedExtraction(retry())).resolves.toEqual({
+      message: "T-Bank session is not authorized. Sign in and retry import.",
+      diagnostics: {
+        tab_url: loginTab.url,
+        tab_status: null,
+        execute_script_attempts: [
+          {
+            attempt: 1,
+            error_message: "Document replaced",
+            tab_url: operationsUrl,
+            tab_status: "complete",
+          },
+        ],
+      },
+    });
+  });
+
+  it("still extracts from a known tab id when the tab lookup API is absent", async () => {
+    const { tabs } = browser(vi.fn().mockResolvedValue([{ result: extraction }]));
+    Reflect.deleteProperty(tabs, "get");
+    await expect(retry()).resolves.toEqual(extraction);
+  });
+
+  it("retries with the same extraction inputs after five seconds of a stalled reload", async () => {
+    vi.useFakeTimers();
+    const startedAt = Date.now();
+    const attempts: unknown[] = [];
+    const executeScript = vi.fn(async ({ target, args: [input] }) => {
+      attempts.push({ target, input, elapsed: Date.now() - startedAt });
+      return attempts.length === 1 ? [] : [{ result: extraction }];
+    });
+    const get = vi
+      .fn()
+      .mockResolvedValueOnce(readyTab)
+      .mockResolvedValueOnce({ ...readyTab, status: "loading" })
+      .mockResolvedValue(readyTab);
+    const { tabs, onUpdated } = browser(executeScript, get);
+    Reflect.deleteProperty(tabs, "onRemoved");
+    const result = expect(retry()).resolves.toEqual(extraction);
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(attempts).toEqual([{ target: { tabId: readyTab.id }, input: args, elapsed: 0 }]);
+    await vi.advanceTimersByTimeAsync(1);
+    await result;
+    expect(attempts).toEqual([
+      { target: { tabId: readyTab.id }, input: args, elapsed: 0 },
+      { target: { tabId: readyTab.id }, input: args, elapsed: 5_000 },
+    ]);
+    expect(onUpdated.listenerCount).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("accepts only the matching extraction report and clears all listeners and the deadline", async () => {
+    vi.useFakeTimers();
+    const executeScript = vi.fn(async ({ args: [input] }) => [
+      { result: { started: true, report_token: input.reportToken } },
+    ]);
+    const { onMessage, onRemoved, onUpdated } = browser(executeScript);
+    const pending = __test__.runPageExtraction(readyTab.id, args, Date.now() + 120_000);
+    const token = executeScript.mock.calls[0]?.[0].args[0].reportToken;
+    const report = {
+      type: "MONEY_IMPORT_PAGE_EXTRACTION",
+      report_token: token,
+      ok: true,
+      result: extraction,
+    };
+    onMessage.emit(null, {});
+    onMessage.emit({ ...report, type: "UNRELATED", result: null }, { tab: readyTab });
+    onMessage.emit({ ...report, report_token: "stale-token", result: null }, { tab: readyTab });
+    onMessage.emit({ ...report, result: null }, { tab: { id: readyTab.id + 1 } });
+    onRemoved.emit(readyTab.id + 1);
+    onUpdated.emit(readyTab.id + 1, { status: "loading" });
+    onUpdated.emit(readyTab.id, { url: `${operationsUrl}v8/` });
+    onMessage.emit(report, {});
+    onMessage.emit(report);
+
+    await expect(pending).resolves.toEqual(extraction);
+    expect(executeScript).toHaveBeenCalledOnce();
+    expect([onMessage.listenerCount, onRemoved.listenerCount, onUpdated.listenerCount]).toEqual([
+      0, 0, 0,
+    ]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each(["runtime", "onMessage", "tabs", "onRemoved", "onUpdated"] as const)(
+    "uses a synchronous extraction result when Chrome lacks %s",
+    async (missing) => {
+      const executeScript = vi.fn(async ({ args: [input] }) => [
+        { result: input.reportToken ? undefined : extraction },
+      ]);
+      const { runtime, tabs, onMessage, onRemoved, onUpdated } = browser(executeScript);
+      const owner = missing === "onMessage" ? runtime : missing.startsWith("on") ? tabs : chrome;
+      Reflect.deleteProperty(owner, missing);
+      await expect(
+        __test__.runPageExtraction(readyTab.id, args, Date.now() + 120_000),
+      ).resolves.toEqual(extraction);
+      expect([onMessage.listenerCount, onRemoved.listenerCount, onUpdated.listenerCount]).toEqual([
+        0, 0, 0,
+      ]);
+    },
+  );
+
+  it.each([{ response: undefined }, { response: [undefined] }, { response: [{ result: null }] }])(
+    "interprets an empty injection response $response as no extraction",
+    async ({ response }) => {
+      const { onMessage, onRemoved, onUpdated } = browser(vi.fn().mockResolvedValue(response));
+      await expect(
+        __test__.runPageExtraction(readyTab.id, args, Date.now() + 120_000),
+      ).resolves.toBeUndefined();
+      expect([onMessage.listenerCount, onRemoved.listenerCount, onUpdated.listenerCount]).toEqual([
+        0, 0, 0,
+      ]);
+    },
+  );
+
+  it("returns no extraction when a page acknowledges a start without a report channel", async () => {
+    vi.useFakeTimers();
+    const { runtime } = browser(
+      vi.fn().mockResolvedValue([{ result: { started: true, report_token: "synthetic-token" } }]),
+    );
+    Reflect.deleteProperty(runtime, "onMessage");
+    const pending = __test__.runPageExtraction(readyTab.id, args, Date.now() + 120_000);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vi.getTimerCount()).toBe(0);
+    await expect(pending).resolves.toBeUndefined();
+  });
+
+  it.each([
+    ["synthetic page failure", "synthetic page failure"],
+    ["", "T-Bank extraction failed in the page"],
+    [42, "T-Bank extraction failed in the page"],
+  ])("rejects a failed page report with error_message %j", async (errorMessage, expected) => {
+    const executeScript = vi.fn(async ({ args: [input] }) => [
+      { result: { started: true, report_token: input.reportToken } },
+    ]);
+    const { onMessage, onRemoved, onUpdated } = browser(executeScript);
+    const pending = __test__.runPageExtraction(readyTab.id, args, Date.now() + 120_000);
+    const token = executeScript.mock.calls[0]?.[0].args[0].reportToken;
+    onMessage.emit(
+      {
+        type: "MONEY_IMPORT_PAGE_EXTRACTION",
+        report_token: token,
+        ok: false,
+        error_message: errorMessage,
+      },
+      { tab: readyTab },
+    );
+
+    await expect(pending).rejects.toThrow(expected);
+    expect([onMessage.listenerCount, onRemoved.listenerCount, onUpdated.listenerCount]).toEqual([
+      0, 0, 0,
+    ]);
+  });
+
+  it.each([readyTab, null])(
+    "expires at the deadline, cancels the page token and stops retrying with tab %j",
+    async (tab) => {
+      vi.useFakeTimers();
+      const cancelled = new Set(["another-import"]);
+      vi.stubGlobal("__orbitMoneyImportCancelled", cancelled);
+      let reportToken = "";
+      const executeScript = vi.fn(async ({ target, func, args: [input] }) => {
+        if (typeof input === "string") {
+          if (target.tabId === readyTab.id) func(input);
+          throw new Error("Synthetic page disappeared during cancellation");
+        }
+        reportToken = input.reportToken;
+        return [{ result: { started: true, report_token: reportToken } }];
+      });
+      const { onMessage, onRemoved, onUpdated } = browser(
+        executeScript,
+        vi.fn().mockResolvedValue(tab),
+      );
+      const deadline = Date.now() + 120_000;
+      const result = expect(failedExtraction(retry(deadline))).resolves.toEqual({
+        message: "T-Bank extraction did not report back before its session ended.",
+        diagnostics: {
+          tab_url: tab?.url ?? null,
+          tab_status: tab?.status ?? null,
+          execute_script_attempts: [
+            {
+              attempt: 1,
+              error_message: "T-Bank extraction did not report back before its session ended",
+              tab_url: tab?.url ?? null,
+              tab_status: tab?.status ?? null,
+            },
+          ],
+        },
+      });
+      await vi.advanceTimersByTimeAsync(119_999);
+      expect(cancelled).toEqual(new Set(["another-import"]));
+      await vi.advanceTimersByTimeAsync(1);
+      await result;
+      expect(cancelled).toEqual(new Set(["another-import", reportToken]));
+      expect([onMessage.listenerCount, onRemoved.listenerCount, onUpdated.listenerCount]).toEqual([
+        0, 0, 0,
+      ]);
+    },
+  );
 });

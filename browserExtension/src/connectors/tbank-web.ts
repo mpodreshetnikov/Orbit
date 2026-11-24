@@ -856,8 +856,6 @@ function detectBlockedReasonFromTabUrl(tabUrl: unknown): string | null {
   return detectBlockedReasonFromPageState(tabUrl, "");
 }
 
-// Stryker disable all: temporary — 3 covered survivors (tab update/load seams). Paydown: slice 3
-// on T-261116-rul (meaningful chrome.tabs mocks / oracles). Not the whole orch region.
 async function prepareOperationsTab(tab: chrome.tabs.Tab): Promise<chrome.tabs.Tab> {
   if (typeof tab.id !== "number") {
     throw new Error("No active tab. Open T-Bank in a tab first.");
@@ -906,10 +904,7 @@ async function prepareOperationsTab(tab: chrome.tabs.Tab): Promise<chrome.tabs.T
 
   return currentTab;
 }
-// Stryker restore all
 
-// Stryker disable all: temporary — 31 covered survivors (retry / tab reload / diagnostics).
-// Paydown: slice 3 on T-261116-rul. Not whole orch band.
 async function extractOperationsWithRetry(
   tabId: number,
   windowFromIso: string,
@@ -924,13 +919,15 @@ async function extractOperationsWithRetry(
 
   for (let attempt = 1; attempt <= EXTRACTION_ATTEMPTS; attempt += 1) {
     const currentTab = await getTabById(tabId);
-    const blockedReason = detectBlockedReasonFromTabUrl(currentTab?.url);
-    if (blockedReason) {
-      throw formatDiagnosticError(blockedReason, {
-        tab_url: currentTab?.url ?? null,
-        tab_status: currentTab?.status ?? null,
-        execute_script_attempts: attemptDetails,
-      });
+    if (currentTab) {
+      const blockedReason = detectBlockedReasonFromTabUrl(currentTab.url);
+      if (blockedReason) {
+        throw formatDiagnosticError(blockedReason, {
+          tab_url: currentTab.url ?? null,
+          tab_status: currentTab.status ?? null,
+          execute_script_attempts: attemptDetails,
+        });
+      }
     }
 
     try {
@@ -968,7 +965,11 @@ async function extractOperationsWithRetry(
     }
 
     if (attempt < EXTRACTION_ATTEMPTS) {
-      await waitForTabLoad(tabId, 5000).catch(() => null);
+      try {
+        await waitForTabLoad(tabId, 5000);
+      } catch {
+        // A stalled load still gets the remaining extraction attempt.
+      }
     }
   }
 
@@ -979,7 +980,6 @@ async function extractOperationsWithRetry(
     execute_script_attempts: attemptDetails,
   });
 }
-// Stryker restore all
 
 /**
  * How long the page may take to report: until the session it works for is over, which is when
@@ -995,8 +995,6 @@ function resolveExtractionDeadlineMs(session: Record<string, unknown> | undefine
 }
 
 /** Marks the token in the page, where the parse checks it at every pause. */
-// Stryker disable all: temporary — 1 covered survivor (executeScript cancel seam). Paydown: slice 3
-// on T-261116-rul. Not whole orch band.
 async function cancelPageExtraction(tabId: number, reportToken: string): Promise<void> {
   try {
     await chrome.scripting.executeScript({
@@ -1011,7 +1009,6 @@ async function cancelPageExtraction(tabId: number, reportToken: string): Promise
     // The page is gone, and its task with it.
   }
 }
-// Stryker restore all
 
 function isPageExtractionStart(value: unknown): value is PageExtractionStart {
   const candidate = asObject(value);
@@ -1034,8 +1031,6 @@ function isPageExtractionStart(value: unknown): value is PageExtractionStart {
  * extractor that answers within the call -- a test double, an older page -- is taken at its
  * word. Resolves undefined when the page answered nothing, as before.
  */
-// Stryker disable all: temporary — 36 covered survivors (runtime message/tab/load wait seams).
-// Paydown: slice 3 on T-261116-rul. Not whole orch band.
 async function runPageExtraction(
   tabId: number,
   args: {
@@ -1048,31 +1043,23 @@ async function runPageExtraction(
   },
   deadlineMs: number,
 ): Promise<PageExtraction | undefined> {
-  const runtime = globalThis.chrome?.runtime;
-  const tabs = globalThis.chrome?.tabs;
   // Absent in a test double or an older browser: then the call is awaited, as before.
-  const messageEvents = runtime?.onMessage ?? null;
-  const tabEvents = tabs?.onRemoved ?? null;
-  const loadEvents = tabs?.onUpdated ?? null;
-  const reportToken =
+  const messageEvents = chrome.runtime?.onMessage;
+  const tabEvents = chrome.tabs?.onRemoved;
+  const loadEvents = chrome.tabs?.onUpdated;
+  const reporting =
     messageEvents && tabEvents && loadEvents
-      ? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+      ? { messageEvents, tabEvents, loadEvents, token: `${Date.now()}-${Math.random()}` }
       : null;
+  const reportToken = reporting?.token;
 
-  let settled = false;
-  let resolveReport: (extraction: PageExtraction) => void = () => undefined;
-  let rejectReport: (error: Error) => void = () => undefined;
+  let resolveReport!: (extraction: PageExtraction) => void;
+  let rejectReport!: (error: Error) => void;
   const reported = new Promise<PageExtraction>((resolve, reject) => {
-    resolveReport = (extraction) => {
-      settled = true;
-      resolve(extraction);
-    };
-    rejectReport = (error) => {
-      settled = true;
-      reject(error);
-    };
+    resolveReport = resolve;
+    rejectReport = reject;
   });
-  // A report that arrives after the timeout won the race must not surface as unhandled.
+  // The tab can send a failure before executeScript returns its acknowledgement.
   void reported.catch(() => undefined);
 
   const onMessage = (message: unknown, sender: chrome.runtime.MessageSender) => {
@@ -1103,31 +1090,30 @@ async function runPageExtraction(
     if (updatedTabId !== tabId || changeInfo.status !== "loading") return;
     rejectReport(new Error("T-Bank tab navigated before the extraction finished"));
   };
-  if (reportToken && messageEvents && tabEvents && loadEvents) {
-    messageEvents.addListener(onMessage);
-    tabEvents.addListener(onRemoved);
-    loadEvents.addListener(onUpdated);
+  if (reporting) {
+    reporting.messageEvents.addListener(onMessage);
+    reporting.tabEvents.addListener(onRemoved);
+    reporting.loadEvents.addListener(onUpdated);
   }
 
-  let timer: ReturnType<typeof setTimeout> | null = null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   let timedOut = false;
   try {
     const injected = await chrome.scripting.executeScript({
       target: { tabId },
       func: extractOperationsInPage,
-      args: [reportToken ? { ...args, reportToken } : args],
+      args: [reporting ? { ...args, reportToken: reporting.token } : args],
     });
     const first = injected?.[0]?.result as PageExtraction | PageExtractionStart | undefined;
     if (!first) return undefined;
     if (!isPageExtractionStart(first)) return first;
-    if (!reportToken) return undefined;
+    if (!reporting) return undefined;
 
     const timeoutMs = Math.max(60_000, deadlineMs - Date.now());
     return await Promise.race([
       reported,
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
-          if (settled) return;
           timedOut = true;
           reject(
             new ExtractionDeadlineError(
@@ -1138,18 +1124,16 @@ async function runPageExtraction(
       }),
     ]);
   } finally {
-    if (timer !== null) clearTimeout(timer);
-    // Nobody is listening any more; the page's task is told so, or it would fetch on to the
-    // end of the window for a report that is thrown away.
-    if (timedOut && reportToken) await cancelPageExtraction(tabId, reportToken);
-    if (reportToken && messageEvents && tabEvents && loadEvents) {
-      messageEvents.removeListener(onMessage);
-      tabEvents.removeListener(onRemoved);
-      loadEvents.removeListener(onUpdated);
+    clearTimeout(timer);
+    if (reporting) {
+      // Stop the page from continuing to fetch for a report the worker no longer needs.
+      if (timedOut) await cancelPageExtraction(tabId, reporting.token);
+      reporting.messageEvents.removeListener(onMessage);
+      reporting.tabEvents.removeListener(onRemoved);
+      reporting.loadEvents.removeListener(onUpdated);
     }
   }
 }
-// Stryker restore all
 
 /**
  * The page's own resource timeline holds whatever the page loaded, third-party requests
@@ -1181,8 +1165,8 @@ function findLatestResourceUrlByPath(
   return null;
 }
 
-// Stryker disable all: serialized via Function(fn.toString()) for in-page dry-run; instrumentation
-// breaks that self-contained extractor. Map/parse/enrichment above and helpers below stay gated.
+// Stryker disable all: Chrome serializes this function for execution in the page. Instrumentation
+// references module-scoped helpers that are unavailable there and in the serialization contract test.
 function extractOperationsInPage(input: {
   windowFromIso?: string;
   windowToIso?: string | null;
@@ -2705,21 +2689,14 @@ function isOperationsPageUrl(url: unknown): boolean {
   }
 }
 
-// Stryker disable all: chrome.tabs.get / onUpdated are browser-runtime seams. Covered paths
-// are exercised via connector mocks in tbank-web.test.ts; mutating these wrappers yields
-// equivalent survivors (null vs throw, listener timing). Keep this band narrow — only the
-// two tab helpers — not map/parse/enrichment. Paydown with orch disables: slice 3
-// (T-261116-rul / ORB-169).
 async function getTabById(tabId: number): Promise<chrome.tabs.Tab | null> {
-  if (typeof chrome.tabs.get !== "function") {
-    return null;
-  }
-
+  let tab: chrome.tabs.Tab | undefined;
   try {
-    return (await chrome.tabs.get(tabId)) ?? null;
+    tab = await chrome.tabs.get(tabId);
   } catch {
-    return null;
+    // Missing or closed tabs are handled by the caller.
   }
+  return tab ?? null;
 }
 
 async function waitForTabLoad(tabId: number, timeoutMs = 30000): Promise<chrome.tabs.Tab | null> {
@@ -2746,7 +2723,6 @@ async function waitForTabLoad(tabId: number, timeoutMs = 30000): Promise<chrome.
     chrome.tabs.onUpdated.addListener(onUpdated);
   });
 }
-// Stryker restore all
 
 function toIsoString(value: unknown): string | null {
   // Stryker disable next-line MethodExpression: !value vs !value.trim() both reject whitespace-only
