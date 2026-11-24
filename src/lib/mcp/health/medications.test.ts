@@ -929,9 +929,13 @@ describe("logDose", () => {
   });
 
   it("routes a skip to the skip RPC and passes a trimmed note", async () => {
-    const stub = stubFor();
+    const saved = doseEvent({ status: "skipped", note: "felt sick" });
+    const stub = createSupabaseStub({
+      med_regimens: [{ data: regimen() }],
+      med_dose_events: [{ data: [] }, { data: doseEvent() }, { data: saved }],
+    });
 
-    await logDose(stub.client, {
+    const result = await logDose(stub.client, {
       regimenId: "r-1",
       at: "2026-06-15T08:00:00.000Z",
       status: "skipped",
@@ -942,12 +946,18 @@ describe("logDose", () => {
       p_dose_event_id: "d-1",
       p_note: "felt sick",
     });
+    expect(result.dose).toMatchObject({ id: "d-1", status: "skipped", note: "felt sick" });
   });
 
   it("omits a blank note rather than clearing one", async () => {
-    const stub = stubFor();
+    const planned = doseEvent({ note: "with food" });
+    const saved = { ...planned, status: "taken", taken_at: "2026-06-15T08:00:00Z" };
+    const stub = createSupabaseStub({
+      med_regimens: [{ data: regimen() }],
+      med_dose_events: [{ data: [planned] }, { data: saved }],
+    });
 
-    await logDose(stub.client, {
+    const result = await logDose(stub.client, {
       regimenId: "r-1",
       at: "2026-06-15T08:00:00.000Z",
       status: "taken",
@@ -955,6 +965,11 @@ describe("logDose", () => {
     });
 
     expect(stub.rpc).toHaveBeenCalledWith("mark_dose_taken", { p_dose_event_id: "d-1" });
+    expect(stub.argsFor("med_dose_events", "insert")).toEqual([]);
+    expect(result).toMatchObject({
+      planned: true,
+      dose: { id: "d-1", status: "taken", note: "with food" },
+    });
   });
 
   it("refuses an unknown or soft-deleted regimen before writing anything", async () => {

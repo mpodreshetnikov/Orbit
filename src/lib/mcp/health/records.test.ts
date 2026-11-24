@@ -1,7 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  ACTIVE_RECORD_STATUSES,
-  ALL_RECORD_STATUSES,
   getMedicalRecord,
   getRecordConditions,
   getRecordFindings,
@@ -13,14 +11,29 @@ import {
 import { createSupabaseStub } from "./test-support";
 
 describe("searchMedicalRecords", () => {
+  const panel = {
+    id: "r-panel",
+    person_id: "p-1",
+    title: "Ferritin panel",
+    record_type: "lab",
+    record_date: "2026-02-01",
+    status: "active",
+    notes: null,
+    llm_summary: "Iron studies",
+    llm_keywords: ["ferritin"],
+    attachment_count: 2,
+  };
+
   it("defaults to finished documents only", async () => {
-    const stub = createSupabaseStub({}, { search_medical_records: { data: [] } });
-    await searchMedicalRecords(stub.client, { limit: 20, offset: 0 });
+    const stub = createSupabaseStub({}, { search_medical_records: { data: [panel] } });
+
+    const rows = await searchMedicalRecords(stub.client, { limit: 20, offset: 0 });
 
     expect(stub.rpc).toHaveBeenCalledWith(
       "search_medical_records",
-      expect.objectContaining({ p_statuses: ACTIVE_RECORD_STATUSES }),
+      expect.objectContaining({ p_statuses: ["active"] }),
     );
+    expect(rows).toStrictEqual([panel]);
   });
 
   it("leaves the OCR text out of what it returns", async () => {
@@ -38,17 +51,20 @@ describe("searchMedicalRecords", () => {
   });
 
   it("can widen to in-progress documents", async () => {
-    const stub = createSupabaseStub({}, { search_medical_records: { data: [] } });
-    await searchMedicalRecords(stub.client, {
-      statuses: ALL_RECORD_STATUSES,
+    const pending = { ...panel, id: "r-pending", status: "ocr_review" };
+    const stub = createSupabaseStub({}, { search_medical_records: { data: [pending, panel] } });
+
+    const rows = await searchMedicalRecords(stub.client, {
+      statuses: ["active", "ocr_review"],
       limit: 20,
       offset: 0,
     });
 
     expect(stub.rpc).toHaveBeenCalledWith(
       "search_medical_records",
-      expect.objectContaining({ p_statuses: ALL_RECORD_STATUSES }),
+      expect.objectContaining({ p_statuses: ["active", "ocr_review"] }),
     );
+    expect(rows).toStrictEqual([pending, panel]);
   });
 
   it("omits an empty query rather than searching for the empty string", async () => {
@@ -60,9 +76,11 @@ describe("searchMedicalRecords", () => {
   });
 
   it("passes the query, person and type through", async () => {
-    const stub = createSupabaseStub({}, { search_medical_records: { data: [] } });
-    await searchMedicalRecords(stub.client, {
-      query: "ferritin",
+    const match = { ...panel, search_rank: 0.75 };
+    const stub = createSupabaseStub({}, { search_medical_records: { data: [match] } });
+
+    const rows = await searchMedicalRecords(stub.client, {
+      query: "  ferritin  ",
       personId: "p-1",
       recordType: "lab",
       limit: 5,
@@ -79,6 +97,7 @@ describe("searchMedicalRecords", () => {
         p_offset: 10,
       }),
     );
+    expect(rows).toStrictEqual([match]);
   });
 
   it("omits an empty person id so the search spans everyone", async () => {

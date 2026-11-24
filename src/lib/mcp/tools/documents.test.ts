@@ -370,13 +370,22 @@ describe("ingest_medical_document", () => {
   });
 
   it("records the uploaded pages' sizes before handing the document to the server", async () => {
-    userClient.invokeEdgeFunctionAsUser.mockResolvedValue({
-      status: 200,
-      payload: { success: true, rejected: [] },
+    let pageSizesRecorded = false;
+    documents.recordPageSizes.mockImplementationOnce(async () => {
+      await Promise.resolve();
+      pageSizesRecorded = true;
     });
-    await (await handlers()).get("ingest_medical_document")!(SUBMISSION, ctx);
+    userClient.invokeEdgeFunctionAsUser.mockImplementationOnce(async () =>
+      pageSizesRecorded
+        ? { status: 200, payload: { success: true, rejected: [] } }
+        : { status: 409, payload: { error: "Missing page sizes" } },
+    );
+
+    const result = await (await handlers()).get("ingest_medical_document")!(SUBMISSION, ctx);
 
     expect(documents.recordPageSizes).toHaveBeenCalledWith(expect.anything(), RECORD);
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent).toMatchObject({ record_id: RECORD_ID, rejected: [] });
   });
 
   it("says in the text block what was stored, refused, unrecognised and pending", async () => {
