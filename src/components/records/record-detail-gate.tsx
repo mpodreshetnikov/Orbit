@@ -17,7 +17,7 @@ interface RecordDetailGateProps {
 
 /**
  * Routes stuck/failed OCR records to the MCP-only unprocessed view; everything else
- * stays on the legacy detail (view/edit). Keeps record-detail.tsx off the mutate list.
+ * stays on the legacy detail (view/edit).
  */
 export function RecordDetail({ recordId }: RecordDetailGateProps) {
   const t = useTranslations();
@@ -34,7 +34,7 @@ export function RecordDetail({ recordId }: RecordDetailGateProps) {
     );
   }
 
-  if (error !== null && error !== undefined) {
+  if (error) {
     return (
       <div className="space-y-6">
         <Button variant="ghost" onClick={() => router.back()}>
@@ -51,7 +51,7 @@ export function RecordDetail({ recordId }: RecordDetailGateProps) {
     );
   }
 
-  if (record === null || record === undefined) {
+  if (!record) {
     return (
       <div className="space-y-6">
         <Button variant="ghost" onClick={() => router.back()}>

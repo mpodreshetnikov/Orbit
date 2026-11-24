@@ -998,6 +998,7 @@
   "records": {
     "title": "Медицинские записи",
     "search": "Поиск записей...",
+    "clearSearch": "Очистить поиск",
     "filterByType": "Фильтр по типу",
     "allTypes": "Все типы",
     "showRemoved": "Показать удалённые",

@@ -2,41 +2,46 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as page from "./page";
 
-const routerMock = vi.hoisted(() => ({
-  replace: vi.fn(),
-  push: vi.fn(),
-}));
+const navigation = vi.hoisted(() => ({ router: { replace: vi.fn(), push: vi.fn() } }));
 
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => routerMock,
+  useRouter: () => navigation.router,
 }));
+
+const NewRecordPage = page.default;
 
 describe("NewRecordPage", () => {
   beforeEach(() => {
-    routerMock.replace.mockReset();
-    routerMock.push.mockReset();
+    navigation.router = { replace: vi.fn(), push: vi.fn() };
   });
 
-  it("redirects to /health and explains upload is via assistant", async () => {
-    const { default: NewRecordPage, goToHealth, openHealth } = await import("./page");
-    goToHealth(routerMock);
-    expect(routerMock.replace).toHaveBeenCalledWith("/health");
-    openHealth(routerMock);
-    expect(routerMock.push).toHaveBeenCalledWith("/health");
+  it("only exposes the page component to Next.js", () => {
+    expect(Object.keys(page)).toEqual(["default"]);
+  });
 
-    render(<NewRecordPage />);
+  it("replaces the bookmarked route when the navigation context changes", () => {
+    const { rerender } = render(<NewRecordPage />);
     expect(screen.getByText("records.uploadRemoved.title")).toBeInTheDocument();
     expect(screen.getByText("records.uploadRemoved.body")).toBeInTheDocument();
-    expect(routerMock.replace).toHaveBeenCalledWith("/health");
+    expect(navigation.router.replace).toHaveBeenCalledWith("/health");
 
-    await userEvent
-      .setup()
-      .click(screen.getByRole("button", { name: "records.uploadRemoved.back" }));
-    expect(routerMock.push).toHaveBeenCalledWith("/health");
+    navigation.router = { replace: vi.fn(), push: vi.fn() };
+    rerender(<NewRecordPage />);
+    expect(navigation.router.replace).toHaveBeenCalledWith("/health");
+  });
+
+  it("lets a reader manually return to health from the fallback message", async () => {
+    render(<NewRecordPage />);
+    const back = screen.getByRole("button", { name: "records.uploadRemoved.back" });
+    expect(back).toBeEnabled();
+    expect(navigation.router.push).not.toHaveBeenCalled();
+    await userEvent.setup().click(back);
+    expect(navigation.router.push).toHaveBeenCalledWith("/health");
   });
 });

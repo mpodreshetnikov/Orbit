@@ -66,6 +66,9 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const statusFilter = tabFromSearchParams(searchParams);
+  const isDraftTab = statusFilter === "draft";
+  const isProcessingTab = statusFilter === "processing";
+  const isRemovedTab = statusFilter === "removed";
 
   const setTabInUrl = (tab: StatusFilter) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -126,14 +129,6 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
   const processingCount = countOrZero(processingRecords);
   const filtersActive = hasActiveFilters(searchQuery, typeFilter, statusFilter);
 
-  const confirmRemove = () => {
-    if (recordToRemove === null) {
-      return;
-    }
-    softDeleteMutation.mutate(recordToRemove.id);
-    setRecordToRemove(null);
-  };
-
   const iconKind = emptyIconKind(statusFilter);
 
   return (
@@ -152,12 +147,12 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
           {t("records.statusFilter.active")}
         </Button>
         <Button
-          variant={tabButtonVariant(statusFilter === "draft")}
+          variant={tabButtonVariant(isDraftTab)}
           size="sm"
           onClick={() => setTabInUrl("draft")}
           className={cn(
             "shrink-0 gap-1",
-            tabNeedsAccent(draftsCount, statusFilter === "draft") && "text-primary",
+            tabNeedsAccent(draftsCount, isDraftTab) && "text-primary",
           )}
         >
           <FileStack className="h-4 w-4" />
@@ -169,12 +164,12 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
           ) : null}
         </Button>
         <Button
-          variant={tabButtonVariant(statusFilter === "processing")}
+          variant={tabButtonVariant(isProcessingTab)}
           size="sm"
           onClick={() => setTabInUrl("processing")}
           className={cn(
             "shrink-0 gap-1",
-            tabNeedsAccent(processingCount, statusFilter === "processing") && "text-primary",
+            tabNeedsAccent(processingCount, isProcessingTab) && "text-primary",
           )}
         >
           <CircleSlash className="h-4 w-4" />
@@ -186,7 +181,7 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
           ) : null}
         </Button>
         <Button
-          variant={tabButtonVariant(statusFilter === "removed")}
+          variant={tabButtonVariant(isRemovedTab)}
           size="sm"
           onClick={() => setTabInUrl("removed")}
           className="shrink-0"
@@ -209,6 +204,7 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
               type="button"
               variant="ghost"
               size="icon"
+              aria-label={t("records.clearSearch")}
               onClick={() => setSearchQuery("")}
               className="tap-target absolute right-3 top-1/2 -translate-y-1/2 h-7 w-7"
             >
@@ -264,31 +260,29 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
       ) : null}
 
       {!isLoading && error === null && records !== undefined && records.length > 0 ? (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 min-w-0">
+        <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 min-w-0">
           {records.map((record) => (
-            <div key={record.id} className="min-w-0">
+            <li key={record.id} className="min-w-0">
               <RecordCard
                 record={record}
                 onView={(item) => router.push(`/health/records/${item.id}`)}
                 onRemove={setRecordToRemove}
-                onRestore={
-                  statusFilter === "removed" ? (item) => restoreMutation.mutate(item.id) : undefined
-                }
-                onDelete={
-                  statusFilter === "removed"
-                    ? (item) => hardDeleteMutation.mutate(item.id)
-                    : undefined
-                }
+                {...(isRemovedTab
+                  ? {
+                      onRestore: (item: MedicalRecordListItem) => restoreMutation.mutate(item.id),
+                      onDelete: (item: MedicalRecordListItem) => hardDeleteMutation.mutate(item.id),
+                    }
+                  : undefined)}
                 onActivate={
-                  statusFilter === "draft"
+                  isDraftTab
                     ? (item) =>
                         updateMutation.mutate({ id: item.id, updates: { status: "active" } })
                     : undefined
                 }
               />
-            </div>
+            </li>
           ))}
-        </div>
+        </ul>
       ) : null}
 
       {!isLoading && error === null && records !== undefined && records.length === 0 ? (
@@ -311,30 +305,25 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
         </div>
       ) : null}
 
-      <AlertDialog
-        open={recordToRemove !== null}
-        onOpenChange={(open) => {
-          if (!open) {
-            setRecordToRemove(null);
-          }
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("records.confirm.removeTitle")}</AlertDialogTitle>
-            <AlertDialogDescription>{t("records.confirm.removeMessage")}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={confirmRemove}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {t("common.remove")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {recordToRemove && (
+        <AlertDialog open onOpenChange={() => setRecordToRemove(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t("records.confirm.removeTitle")}</AlertDialogTitle>
+              <AlertDialogDescription>{t("records.confirm.removeMessage")}</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => softDeleteMutation.mutate(recordToRemove.id)}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                {t("common.remove")}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </div>
   );
 }

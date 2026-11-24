@@ -41,11 +41,11 @@ async function getAttachmentUrls(attachments: RecordAttachment[]): Promise<Recor
 
   // Batch request for all URLs
   for (const attachment of attachments) {
-    const { data, error } = await supabase.storage
+    const { data } = await supabase.storage
       .from(BUCKET_NAME)
       .createSignedUrl(attachment.storage_path, 3600);
 
-    if (!error && data) {
+    if (data) {
       urls[attachment.id] = data.signedUrl;
     }
   }

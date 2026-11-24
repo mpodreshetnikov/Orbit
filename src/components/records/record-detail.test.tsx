@@ -474,7 +474,7 @@ describe("RecordDetail", () => {
       refetch: vi.fn(),
     });
     const errorView = render(<RecordDetail recordId="record-1" />);
-    expect(screen.getByText("common.error")).toBeInTheDocument();
+    expect(screen.getByText("failed", { exact: true })).toBeVisible();
     await userEvent.setup().click(screen.getByRole("button", { name: "common.back" }));
     expect(routerMock.back).toHaveBeenCalled();
     errorView.unmount();
@@ -529,6 +529,78 @@ describe("RecordDetail", () => {
 
     expect(screen.getByText("records.detail.noAttachments")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "processing.retryOcr" })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { state: "missing record", data: null, error: null, message: "records.detail.notFound" },
+    { state: "unresolved data", data: undefined, error: null, message: "records.detail.notFound" },
+    {
+      state: "error without a message",
+      data: null,
+      error: new Error(),
+      message: "records.detail.notFound",
+    },
+    {
+      state: "failed refresh with cached data",
+      data: baseRecord({ status: "ocr_processing" }),
+      error: new Error("Record request failed"),
+      message: "Record request failed",
+    },
+  ])("shows an error for $state", async ({ data, error, message }) => {
+    const { RecordDetail } = await import("./record-detail-gate");
+    hookMocks.useMedicalRecord.mockReturnValue({ data, error, isLoading: false, refetch: vi.fn() });
+
+    render(<RecordDetail recordId="record-1" />);
+
+    expect(screen.getByText(message)).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "CBC Report" })).not.toBeInTheDocument();
+    expect(screen.queryByText("records.status.notProcessedHint")).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("button", { name: "common.back" }));
+    expect(routerMock.back).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a fallback title and lets readers expand and collapse partial OCR", async () => {
+    const { RecordDetail } = await import("./record-detail-gate");
+    hookMocks.useMedicalRecord.mockReturnValue({
+      data: baseRecord({
+        title: "",
+        status: "ocr_processing",
+        ocr_text: "Synthetic OCR excerpt",
+        ocr_error: "Old OCR failure from a previous attempt",
+      }),
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    render(<RecordDetail recordId="record-1" />);
+    const user = userEvent.setup();
+    const toggle = screen.getByRole("button", { name: /records.detail.ocrText/ });
+
+    expect(screen.getByRole("heading", { name: "records.status.notProcessed" })).toBeVisible();
+    expect(screen.queryByText("Old OCR failure from a previous attempt")).not.toBeInTheDocument();
+    expect(screen.queryByText("Synthetic OCR excerpt")).not.toBeInTheDocument();
+    await user.click(toggle);
+    expect(screen.getByText("Synthetic OCR excerpt")).toBeVisible();
+    await user.click(toggle);
+    expect(screen.queryByText("Synthetic OCR excerpt")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "" }));
+    expect(routerMock.back).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows removal without inventing a failure reason for an older failed record", async () => {
+    const { RecordDetail } = await import("./record-detail-gate");
+    hookMocks.useMedicalRecord.mockReturnValue({
+      data: baseRecord({ status: "ocr_failed", ocr_error: null }),
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    render(<RecordDetail recordId="record-1" />);
+
+    expect(screen.getByRole("heading", { name: "CBC Report" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "records.actions.remove" })).toBeEnabled();
+    expect(screen.queryByText("processing.failed")).not.toBeInTheDocument();
   });
 
   it("names the cause of a failed OCR in the reader's language", async () => {
@@ -891,9 +963,13 @@ describe("RecordDetail", () => {
 
     expect(screen.getByText("records.status.notProcessedHint")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "records.actions.remove" })).toBeInTheDocument();
+    expect(screen.queryByText("records.confirm.removeTitle")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "records.actions.remove" }));
+    expect(screen.getByText("records.confirm.removeTitle")).toBeVisible();
+    expect(softDeleteMutation.mutate).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "common.remove" }));
     expect(softDeleteMutation.mutate).toHaveBeenCalledWith("record-1", expect.any(Object));
+    expect(screen.queryByText("records.confirm.removeTitle")).not.toBeInTheDocument();
     expect(routerMock.push).toHaveBeenCalledWith("/health");
   });
 

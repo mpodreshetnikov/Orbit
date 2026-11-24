@@ -6,8 +6,9 @@ export const TAB_VALUES: readonly StatusFilter[] = ["active", "draft", "processi
 
 export function tabFromSearchParams(searchParams: URLSearchParams): StatusFilter {
   const tab = searchParams.get("tab");
-  if (tab !== null && (TAB_VALUES as readonly string[]).includes(tab)) {
-    return tab as StatusFilter;
+  const knownTab = TAB_VALUES.find((value) => value === tab);
+  if (knownTab) {
+    return knownTab;
   }
   if (searchParams.get("showDrafts") === "true") {
     return "draft";

@@ -122,20 +122,17 @@ export function MobileNav() {
   const [medicationTypeDialogOpen, setMedicationTypeDialogOpen] = useState(false);
   const selectedPersonId = useUIStore((state) => state.selectedPersonId);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [showRightShadow, setShowRightShadow] = useState(false);
-
-  const updateScrollShadow = () => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const { scrollWidth, clientWidth, scrollLeft } = el;
-    const hasOverflow = scrollWidth > clientWidth;
-    const notAtEnd = scrollLeft < scrollWidth - clientWidth - 1;
-    setShowRightShadow(hasOverflow && notAtEnd);
-  };
+  const [showRightShadow, setShowRightShadow] = useState<boolean>();
 
   useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
+    // The scroll container is rendered on every section and its ref is set before the effect.
+    const el = scrollRef.current!;
+    const updateScrollShadow = () => {
+      const { scrollWidth, clientWidth, scrollLeft } = el;
+      const hasOverflow = scrollWidth > clientWidth;
+      const notAtEnd = scrollLeft < scrollWidth - clientWidth - 1;
+      setShowRightShadow(hasOverflow && notAtEnd);
+    };
     updateScrollShadow();
     const ro = new ResizeObserver(updateScrollShadow);
     ro.observe(el);
@@ -144,7 +141,7 @@ export function MobileNav() {
       ro.disconnect();
       el.removeEventListener("scroll", updateScrollShadow);
     };
-  }, []);
+  }, [section]);
 
   const openNewMedication = (kind: "regular" | "one_time") => {
     setMedicationTypeDialogOpen(false);

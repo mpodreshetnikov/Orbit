@@ -998,6 +998,7 @@
   "records": {
     "title": "Medical Records",
     "search": "Search records...",
+    "clearSearch": "Clear search",
     "filterByType": "Filter by type",
     "allTypes": "All types",
     "showRemoved": "Show removed",

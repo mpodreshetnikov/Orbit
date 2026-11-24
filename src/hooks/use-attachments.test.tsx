@@ -100,8 +100,13 @@ describe("use-attachments", () => {
     expect(urlsHook.result.current.data).toEqual({ "att-a": "https://signed.test/a" });
 
     const disabledUrlsHook = renderHookWithQueryClient(() => useAttachmentUrls([]));
-    await waitFor(() => expect(disabledUrlsHook.result.current.fetchStatus).toBe("idle"));
+    expect(disabledUrlsHook.result.current).toMatchObject({
+      status: "pending",
+      fetchStatus: "idle",
+    });
 
+    const orderUpdate = createQueryBuilder<null>({ data: null, error: null });
+    createClientMock.mockReturnValue({ from: vi.fn(() => orderUpdate) });
     const updateHook = renderHookWithQueryClient(() => useUpdateAttachmentOrder());
     const invalidateSpy = vi.spyOn(updateHook.queryClient, "invalidateQueries");
     await act(async () => {
@@ -114,6 +119,8 @@ describe("use-attachments", () => {
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ["medical-record", "record-1"],
     });
+    expect(orderUpdate.update).toHaveBeenCalledExactlyOnceWith({ sort_order: 4 });
+    expect(orderUpdate.eq).toHaveBeenCalledExactlyOnceWith("id", "att-a");
 
     createClientMock.mockReturnValue({
       from: vi.fn(() =>
@@ -131,5 +138,106 @@ describe("use-attachments", () => {
         newOrder: 5,
       }),
     ).rejects.toThrow("update order failed");
+  });
+
+  it("shares a fresh batch across attachment reorderings and isolates different batches", async () => {
+    const { useAttachmentUrls } = await import("./use-attachments");
+    const a = makeAttachment({ id: "att-a", storage_path: "a.png" });
+    const b = makeAttachment({ id: "att-b", storage_path: "b.png" });
+    const c = makeAttachment({ id: "att-c", storage_path: "c.png" });
+    const createSignedUrl = vi.fn(async (path: string) => ({
+      data: { signedUrl: `https://signed.test/${path}` },
+      error: null,
+    }));
+    createClientMock.mockReturnValue({ storage: { from: () => ({ createSignedUrl }) } });
+    const wrapper = createTestQueryWrapper(createTestQueryClient());
+    const { result, rerender } = renderHook(({ files }) => useAttachmentUrls(files), {
+      initialProps: { files: [b, a] },
+      wrapper,
+    });
+    const firstBatch = {
+      "att-a": "https://signed.test/a.png",
+      "att-b": "https://signed.test/b.png",
+    };
+    await waitFor(() => expect(result.current.data).toEqual(firstBatch));
+
+    rerender({ files: [a, b] });
+    expect(result.current.data).toEqual(firstBatch);
+    expect(result.current.fetchStatus).toBe("idle");
+    expect(createSignedUrl).toHaveBeenCalledTimes(2);
+
+    rerender({ files: [a, c] });
+    await waitFor(() =>
+      expect(result.current.data).toEqual({
+        "att-a": "https://signed.test/a.png",
+        "att-c": "https://signed.test/c.png",
+      }),
+    );
+  });
+
+  it("uses cached URLs for each attachment and refreshes them before they expire", async () => {
+    const { useAttachmentUrl } = await import("./use-attachments");
+    const createSignedUrl = vi.fn(async (path: string) => ({
+      data: { signedUrl: `https://signed.test/fresh/${path}` },
+      error: null,
+    }));
+    createClientMock.mockReturnValue({ storage: { from: () => ({ createSignedUrl }) } });
+    const client = createTestQueryClient();
+    client.setQueryData(["attachment-url", "a.png"], "https://signed.test/cached/a.png", {
+      updatedAt: Date.now() - 49 * 60_000,
+    });
+    client.setQueryData(["attachment-url", "b.png"], "https://signed.test/cached/b.png", {
+      updatedAt: Date.now() - 51 * 60_000,
+    });
+    const { result, rerender } = renderHook(({ path }) => useAttachmentUrl(path), {
+      initialProps: { path: "a.png" },
+      wrapper: createTestQueryWrapper(client),
+    });
+
+    expect(result.current.data).toBe("https://signed.test/cached/a.png");
+    expect(result.current.fetchStatus).toBe("idle");
+
+    rerender({ path: "b.png" });
+    await waitFor(() => expect(result.current.data).toBe("https://signed.test/fresh/b.png"));
+    expect(createSignedUrl).toHaveBeenCalledExactlyOnceWith("b.png", 3600);
+  });
+
+  it("refreshes a cached batch after the 50-minute reuse period", async () => {
+    const { useAttachmentUrls } = await import("./use-attachments");
+    const first = makeAttachment({ id: "att-a", storage_path: "a.png" });
+    const second = makeAttachment({ id: "att-b", storage_path: "b.png" });
+    const createSignedUrl = vi.fn(async (path: string) => ({
+      data: { signedUrl: `https://signed.test/fresh/${path}` },
+      error: null,
+    }));
+    createClientMock.mockReturnValue({ storage: { from: () => ({ createSignedUrl }) } });
+    const client = createTestQueryClient();
+    client.setQueryData(
+      ["attachment-urls", ["att-a"]],
+      { "att-a": "https://signed.test/cached/a.png" },
+      {
+        updatedAt: Date.now() - 49 * 60_000,
+      },
+    );
+    client.setQueryData(
+      ["attachment-urls", ["att-b"]],
+      { "att-b": "https://signed.test/cached/b.png" },
+      {
+        updatedAt: Date.now() - 51 * 60_000,
+      },
+    );
+    const { result, rerender } = renderHook(({ files }) => useAttachmentUrls(files), {
+      initialProps: { files: [first] },
+      wrapper: createTestQueryWrapper(client),
+    });
+
+    expect(result.current.data).toEqual({ "att-a": "https://signed.test/cached/a.png" });
+    expect(result.current.fetchStatus).toBe("idle");
+
+    rerender({ files: [second] });
+    await waitFor(() =>
+      expect(result.current.data).toEqual({ "att-b": "https://signed.test/fresh/b.png" }),
+    );
+    expect(createSignedUrl).toHaveBeenCalledExactlyOnceWith("b.png", 3600);
   });
 });
