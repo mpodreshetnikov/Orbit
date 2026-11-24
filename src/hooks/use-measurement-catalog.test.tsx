@@ -169,7 +169,8 @@ describe("use-measurement-catalog", () => {
     const { result, queryClient } = renderHookWithQueryClient(() =>
       useCreateMeasurementCatalogItem(),
     );
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const listKey = ["measurement-catalog", "wei"];
+    queryClient.setQueryData(listKey, []);
 
     await act(async () => {
       await result.current.mutateAsync({
@@ -189,9 +190,7 @@ describe("use-measurement-catalog", () => {
         category: "body",
       }),
     );
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["measurement-catalog"],
-    });
+    expect(queryClient.getQueryState(listKey)?.isInvalidated).toBe(true);
   });
 
   it("creates with default sort order and propagates create errors", async () => {
@@ -241,7 +240,15 @@ describe("use-measurement-catalog", () => {
     const { result, queryClient } = renderHookWithQueryClient(() =>
       useUpdateMeasurementCatalogItem(),
     );
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const listKey = ["measurement-catalog", "wei"];
+    const detailKey = ["measurement-catalog-item", "m-1"];
+    const otherItemKey = ["measurement-catalog-item", "m-2"];
+    const previous = { ...updated, name_ru: "Вес" };
+    queryClient.setQueryData(detailKey, previous);
+    queryClient.setQueryData(otherItemKey, { id: "m-2" });
+    const codeKey = ["measurement-catalog-code", "weight"];
+    queryClient.setQueryData(codeKey, previous);
+    queryClient.setQueryData(listKey, [previous]);
 
     await act(async () => {
       await result.current.mutateAsync({
@@ -252,15 +259,10 @@ describe("use-measurement-catalog", () => {
 
     expect(builder.update).toHaveBeenCalledWith({ name_ru: "Масса" });
     expect(builder.eq).toHaveBeenCalledWith("id", "m-1");
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["measurement-catalog"],
-    });
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["measurement-catalog-item", "m-1"],
-    });
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["measurement-catalog-code", "weight"],
-    });
+    expect(queryClient.getQueryState(listKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(detailKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherItemKey)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(codeKey)?.isInvalidated).toBe(true);
   });
 
   it("returns update errors", async () => {
@@ -291,7 +293,8 @@ describe("use-measurement-catalog", () => {
     const { result, queryClient } = renderHookWithQueryClient(() =>
       useDeleteMeasurementCatalogItem(),
     );
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const listKey = ["measurement-catalog", "wei"];
+    queryClient.setQueryData(listKey, [{ id: "m-1" }]);
 
     await act(async () => {
       await result.current.mutateAsync("m-1");
@@ -299,9 +302,7 @@ describe("use-measurement-catalog", () => {
 
     expect(builder.delete).toHaveBeenCalled();
     expect(builder.eq).toHaveBeenCalledWith("id", "m-1");
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["measurement-catalog"],
-    });
+    expect(queryClient.getQueryState(listKey)?.isInvalidated).toBe(true);
   });
 
   it("returns delete errors", async () => {

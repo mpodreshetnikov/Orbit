@@ -145,6 +145,11 @@ describe("use-checkups", () => {
       data: checkupItemRow(),
       error: null,
     });
+    builder.single.mockResolvedValueOnce({ data: checkupItemRow(), error: null });
+    builder.single.mockResolvedValueOnce({
+      data: checkupItemRow({ title: "Updated", notes: "n" }),
+      error: null,
+    });
     createClientMock.mockReturnValue({
       from: vi.fn(() => builder),
     });
@@ -152,18 +157,27 @@ describe("use-checkups", () => {
     const { useCreateCheckupItem, useUpdateCheckupItem } = await import("./use-checkups");
     const createHook = renderHookWithQueryClient(() => useCreateCheckupItem());
     const updateHook = renderHookWithQueryClient(() => useUpdateCheckupItem());
+    const listKey = ["checkup-items", "person-1", { category: "lab" }];
+    const otherListKey = ["checkup-items", "person-2", { category: "lab" }];
+    const detailKey = ["checkup-item", "checkup-1"];
+    createHook.queryClient.setQueryData(listKey, []);
+    createHook.queryClient.setQueryData(otherListKey, []);
+    updateHook.queryClient.setQueryData(detailKey, checkupItemRow());
 
     await act(async () => {
-      await createHook.result.current.mutateAsync({
+      const created = await createHook.result.current.mutateAsync({
         person_id: "person-1",
         title: "Blood test",
         category: "lab",
         schedule: { cadence: "yearly" },
       } as unknown as import("@/types").CreateCheckupItemInput);
-      await updateHook.result.current.mutateAsync({
+      expect(created.reminder_days_before).toEqual([7, 1]);
+
+      const updated = await updateHook.result.current.mutateAsync({
         id: "checkup-1",
         updates: { title: "Updated", notes: "n" },
       });
+      expect(updated).toMatchObject({ id: "checkup-1", title: "Updated", notes: "n" });
     });
 
     expect(builder.insert).toHaveBeenCalledWith(
@@ -173,6 +187,9 @@ describe("use-checkups", () => {
       }),
     );
     expect(builder.update).toHaveBeenCalledWith({ title: "Updated", notes: "n" });
+    expect(createHook.queryClient.getQueryState(listKey)?.isInvalidated).toBe(true);
+    expect(createHook.queryClient.getQueryState(otherListKey)?.isInvalidated).toBe(false);
+    expect(updateHook.queryClient.getQueryState(detailKey)?.isInvalidated).toBe(true);
   });
 
   it("completes and updates checkup completion with normalized dates", async () => {
@@ -194,6 +211,12 @@ describe("use-checkups", () => {
     const { useCompleteCheckupItem, useUpdateCheckupCompletion } = await import("./use-checkups");
     const completeHook = renderHookWithQueryClient(() => useCompleteCheckupItem());
     const updateHook = renderHookWithQueryClient(() => useUpdateCheckupCompletion());
+    const completionsKey = ["checkup-completions", "checkup-1"];
+    const otherCompletionsKey = ["checkup-completions", "checkup-2"];
+    const checkupKey = ["checkup-item", "checkup-1"];
+    completeHook.queryClient.setQueryData(completionsKey, []);
+    completeHook.queryClient.setQueryData(otherCompletionsKey, []);
+    updateHook.queryClient.setQueryData(checkupKey, checkupItemRow());
 
     await act(async () => {
       await completeHook.result.current.mutateAsync({
@@ -215,17 +238,25 @@ describe("use-checkups", () => {
       done_at: "2026-02-01",
       note: "updated",
     });
+    expect(completeHook.queryClient.getQueryState(completionsKey)?.isInvalidated).toBe(true);
+    expect(completeHook.queryClient.getQueryState(otherCompletionsKey)?.isInvalidated).toBe(false);
+    expect(updateHook.queryClient.getQueryState(checkupKey)?.isInvalidated).toBe(true);
   });
 
   it("deletes completion and checkup item", async () => {
-    const builder = createQueryBuilder({ data: null, error: null });
+    const completions = createQueryBuilder({ data: null, error: null });
+    const items = createQueryBuilder({ data: null, error: null });
     createClientMock.mockReturnValue({
-      from: vi.fn(() => builder),
+      from: vi.fn((table: string) => (table === "checkup_completions" ? completions : items)),
     });
 
     const { useDeleteCheckupCompletion, useDeleteCheckupItem } = await import("./use-checkups");
     const deleteCompletion = renderHookWithQueryClient(() => useDeleteCheckupCompletion());
     const deleteItem = renderHookWithQueryClient(() => useDeleteCheckupItem());
+    const completionsKey = ["checkup-completions", "checkup-1"];
+    const listKey = ["checkup-items", "person-1"];
+    deleteCompletion.queryClient.setQueryData(completionsKey, [{ id: "completion-1" }]);
+    deleteItem.queryClient.setQueryData(listKey, [checkupItemRow()]);
 
     await act(async () => {
       await deleteCompletion.result.current.mutateAsync({
@@ -238,9 +269,12 @@ describe("use-checkups", () => {
       });
     });
 
-    expect(builder.delete).toHaveBeenCalled();
-    expect(builder.eq).toHaveBeenCalledWith("id", "completion-1");
-    expect(builder.eq).toHaveBeenCalledWith("id", "checkup-1");
+    expect(completions.delete).toHaveBeenCalledTimes(1);
+    expect(completions.eq).toHaveBeenCalledWith("id", "completion-1");
+    expect(items.delete).toHaveBeenCalledTimes(1);
+    expect(items.eq).toHaveBeenCalledWith("id", "checkup-1");
+    expect(deleteCompletion.queryClient.getQueryState(completionsKey)?.isInvalidated).toBe(true);
+    expect(deleteItem.queryClient.getQueryState(listKey)?.isInvalidated).toBe(true);
   });
 
   it("supports upcoming window with category/status filters and malformed why_links", async () => {
