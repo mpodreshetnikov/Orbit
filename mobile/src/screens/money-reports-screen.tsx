@@ -1,12 +1,13 @@
+import { niceAxisTicks } from "@orbit-types/money-report-axis-ticks";
+import { formatChange, percentChange } from "@orbit-types/money-report-change";
+import { transactionsFeedQuery } from "@orbit-types/money-report-feed-query";
 import {
   amountOf,
   changeTone,
   childCategories,
-  formatChange,
   formatReportAmount,
   isoDay,
   lastYearOf,
-  percentChange,
   periodContaining,
   periodLabel,
   previousOf,
@@ -17,14 +18,15 @@ import {
   type SpendingCategory,
   type SpendingPeriod,
   type SpendingPeriodKind,
-  type SpendingReport,
   type SpendingReportMode,
 } from "@orbit-types/money-spending-report";
+import type { SpendingMerchant, SpendingReport } from "@orbit-types/money-spending-report-ux";
 import DateTimePicker from "@react-native-community/datetimepicker";
-import { Stack } from "expo-router";
-import { ChevronDown, ChevronLeft, ChevronRight, Filter, X } from "lucide-react-native";
+import { Stack, useRouter, type Href } from "expo-router";
+import { Calendar, ChevronDown, ChevronLeft, ChevronRight, Filter, X } from "lucide-react-native";
 import { useState } from "react";
 import {
+  Alert,
   Image,
   Pressable,
   RefreshControl,
@@ -42,6 +44,7 @@ import { radius, space, usePalette } from "@/theme";
 
 const LOCALE = "ru-RU";
 const CURRENCY = "RUB";
+const LIST_TOP_N = 10;
 
 /**
  * The report's own colours, the web page's Tailwind shades: orange for spending, teal for income,
@@ -98,6 +101,7 @@ const toPicker = (day: string) => new Date(`${day}T12:00:00`);
  */
 export default function MoneyReportsScreen() {
   const palette = usePalette();
+  const router = useRouter();
   const person = usePerson();
   const personId = person.data?.id;
   const accounts = useMoneyAccounts(personId);
@@ -106,15 +110,21 @@ export default function MoneyReportsScreen() {
   );
   const [accountIds, setAccountIds] = useState<string[]>([]);
   const [categoryId, setCategoryId] = useState<string | null>(null);
+  const [merchantName, setMerchantName] = useState<string | null>(null);
+  const [brandId, setBrandId] = useState<string | null>(null);
   const [mode, setMode] = useState<SpendingReportMode>("expense");
   const [mapParentId, setMapParentId] = useState<string | null>(null);
   const [open, setOpen] = useState<Set<string>>(new Set());
+  const [showAllCategories, setShowAllCategories] = useState(false);
+  const [showAllMerchants, setShowAllMerchants] = useState(false);
   const report = useSpendingReport({
     personId,
     period,
     currency: CURRENCY,
     accountIds,
     categoryId,
+    brandId,
+    merchantName,
   });
   const data = report.data;
 
@@ -122,6 +132,12 @@ export default function MoneyReportsScreen() {
     setCategoryId(id);
     setMapParentId(null);
     setOpen(new Set());
+    setShowAllCategories(false);
+  };
+  const filterByMerchant = (merchant: SpendingMerchant | null) => {
+    setMerchantName(merchant?.name ?? null);
+    setBrandId(merchant?.brand_id ?? null);
+    setShowAllMerchants(false);
   };
   const toggle = (id: string) =>
     setOpen((current) => {
@@ -140,9 +156,10 @@ export default function MoneyReportsScreen() {
 
   const all = data?.categories ?? [];
   const filter = all.find((one) => one.id === categoryId) ?? null;
-  const listed = data ? topCategories(all, categoryId, mode) : [];
+  const allListed = data ? topCategories(all, categoryId, mode) : [];
+  const listed = showAllCategories ? allListed : allListed.slice(0, LIST_TOP_N);
   const mapParent = all.find((one) => one.id === mapParentId) ?? null;
-  const mapped = mapParent ? childCategories(all, mapParent.id, mode) : listed;
+  const mapped = mapParent ? childCategories(all, mapParent.id, mode) : allListed;
 
   return (
     <>
@@ -158,11 +175,82 @@ export default function MoneyReportsScreen() {
           />
         }
       >
-        <Segmented
-          options={PERIOD_KINDS.map(([kind, key]) => [kind, t(key)])}
-          value={period.kind}
-          onChange={choosePeriod}
-        />
+        <View style={{ gap: space.sm }}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ flexDirection: "row", flexWrap: "nowrap", gap: space.sm }}
+          >
+            <Segmented
+              options={PERIOD_KINDS.filter(([kind]) => kind !== "custom").map(([kind, key]) => [
+                kind,
+                t(key),
+              ])}
+              value={period.kind === "custom" ? "month" : period.kind}
+              onChange={choosePeriod}
+            />
+          </ScrollView>
+          <View
+            style={{
+              flexDirection: "row",
+              flexWrap: "nowrap",
+              alignItems: "center",
+              gap: 4,
+              paddingVertical: 4,
+              paddingHorizontal: 6,
+              borderRadius: radius.md,
+              borderWidth: 1,
+              borderColor: palette.border,
+            }}
+          >
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t("money.spendingPrevious")}
+              hitSlop={space.sm}
+              onPress={() => setPeriod((current) => shiftPeriod(current, -1))}
+            >
+              <Icon icon={ChevronLeft} size={20} tone="foreground" />
+            </Pressable>
+            <Text
+              weight="semibold"
+              size="sm"
+              numberOfLines={1}
+              style={{ flex: 1, textAlign: "center" }}
+            >
+              {capitalized(periodLabel(period, LOCALE))}
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t("money.spendingNext")}
+              hitSlop={space.sm}
+              onPress={() => setPeriod((current) => shiftPeriod(current, 1))}
+            >
+              <Icon icon={ChevronRight} size={20} tone="foreground" />
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t("money.spendingPeriodCustom")}
+              accessibilityState={{ selected: period.kind === "custom" }}
+              hitSlop={space.sm}
+              onPress={() => choosePeriod("custom")}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 4,
+                flexShrink: 0,
+                paddingHorizontal: space.sm,
+                paddingVertical: 6,
+                borderRadius: radius.md,
+                backgroundColor: period.kind === "custom" ? palette.muted : "transparent",
+              }}
+            >
+              <Icon icon={Calendar} size={16} tone="foreground" />
+              <Text size="sm" weight="medium" numberOfLines={1}>
+                {t("money.spendingPeriodCustom")}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
         {period.kind === "custom" ? (
           <View style={{ flexDirection: "row", gap: space.md }}>
             <Field label={t("money.spendingCustomFrom")}>
@@ -189,27 +277,6 @@ export default function MoneyReportsScreen() {
             </Field>
           </View>
         ) : null}
-        <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={t("money.spendingPrevious")}
-            hitSlop={space.sm}
-            onPress={() => setPeriod((current) => shiftPeriod(current, -1))}
-          >
-            <Icon icon={ChevronLeft} size={22} tone="foreground" />
-          </Pressable>
-          <Text weight="semibold" style={{ flex: 1, textAlign: "center" }}>
-            {capitalized(periodLabel(period, LOCALE))}
-          </Text>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={t("money.spendingNext")}
-            hitSlop={space.sm}
-            onPress={() => setPeriod((current) => shiftPeriod(current, 1))}
-          >
-            <Icon icon={ChevronRight} size={22} tone="foreground" />
-          </Pressable>
-        </View>
         {(accounts.data?.length ?? 0) > 1 ? (
           <ScrollView
             horizontal
@@ -240,34 +307,46 @@ export default function MoneyReportsScreen() {
             })}
           </ScrollView>
         ) : null}
-        {categoryId ? (
-          <View
-            style={{
-              flexDirection: "row",
-              alignSelf: "flex-start",
-              alignItems: "center",
-              gap: space.sm,
-              paddingLeft: space.md,
-              paddingRight: space.xs,
-              paddingVertical: space.xs,
-              borderRadius: 999,
-              backgroundColor: palette.foreground,
-            }}
-          >
-            <Text size="sm" tone="background">
-              {filter
-                ? t("money.spendingFilterChip", { name: categoryName(filter) })
-                : t("money.spendingFilterUnnamed")}
-            </Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={t("money.spendingClearFilter")}
-              hitSlop={space.sm}
-              onPress={() => filterBy(null)}
-              style={{ padding: 4, borderRadius: 999, backgroundColor: palette.mutedForeground }}
-            >
-              <Icon icon={X} size={12} tone="background" />
-            </Pressable>
+
+        <Pressable
+          testID="spending-view-transactions"
+          accessibilityRole="link"
+          onPress={() =>
+            router.push(
+              `/money?${transactionsFeedQuery({
+                start: period.start,
+                end: period.end,
+                accountIds,
+                categoryId,
+                merchantName,
+                mode,
+              })}` as Href,
+            )
+          }
+        >
+          <Text size="sm" tone="mutedForeground" style={{ textDecorationLine: "underline" }}>
+            {t("money.spendingViewTransactionsShort")}
+          </Text>
+        </Pressable>
+
+        {categoryId || merchantName ? (
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}>
+            {categoryId ? (
+              <FilterChip
+                label={
+                  filter
+                    ? t("money.spendingFilterChip", { name: categoryName(filter) })
+                    : t("money.spendingFilterUnnamed")
+                }
+                onClear={() => filterBy(null)}
+              />
+            ) : null}
+            {merchantName ? (
+              <FilterChip
+                label={t("money.spendingFilterChipMerchant", { name: merchantName })}
+                onClear={() => filterByMerchant(null)}
+              />
+            ) : null}
           </View>
         ) : null}
 
@@ -288,11 +367,10 @@ export default function MoneyReportsScreen() {
               </Card>
             )}
             <Totals report={data} />
-            <Forecast report={data} />
 
             <View style={{ gap: space.sm }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: space.md }}>
-                <Text weight="semibold" style={{ flex: 1 }}>
+                <Text weight="semibold" style={{ flex: 1 }} numberOfLines={1}>
                   {t("money.spendingCategories")}
                 </Text>
                 <View style={{ width: 180 }}>
@@ -305,6 +383,7 @@ export default function MoneyReportsScreen() {
                     onChange={(next) => {
                       setMode(next);
                       setMapParentId(null);
+                      setShowAllCategories(false);
                     }}
                   />
                 </View>
@@ -349,28 +428,46 @@ export default function MoneyReportsScreen() {
             </View>
 
             {listed.length ? (
-              <Card style={{ paddingVertical: space.xs }}>
-                {listed.map((category, index) => (
-                  <CategoryRow
-                    key={category.id}
-                    report={data}
-                    category={category}
-                    subcategories={
-                      category.has_children ? childCategories(all, category.id, mode) : []
+              <View style={{ gap: space.sm }}>
+                <Card style={{ paddingVertical: space.xs }}>
+                  {listed.map((category, index) => (
+                    <CategoryRow
+                      key={category.id}
+                      category={category}
+                      previousStart={data.period.previous_start}
+                      lastYear={data.period.last_year}
+                      subcategories={
+                        category.has_children ? childCategories(all, category.id, mode) : []
+                      }
+                      total={listed.reduce((sum, one) => sum + amountOf(one, mode), 0)}
+                      mode={mode}
+                      first={index === 0}
+                      open={open.has(category.id)}
+                      onToggle={() => toggle(category.id)}
+                      onFilter={() => filterBy(category.id)}
+                    />
+                  ))}
+                </Card>
+                {allListed.length > LIST_TOP_N ? (
+                  <Button
+                    label={
+                      showAllCategories ? t("money.spendingShowTop") : t("money.spendingShowAll")
                     }
-                    total={listed.reduce((sum, one) => sum + amountOf(one, mode), 0)}
-                    mode={mode}
-                    first={index === 0}
-                    open={open.has(category.id)}
-                    onToggle={() => toggle(category.id)}
-                    onFilter={() => filterBy(category.id)}
+                    variant="ghost"
+                    compact
+                    onPress={() => setShowAllCategories((current) => !current)}
                   />
-                ))}
-              </Card>
+                ) : null}
+              </View>
             ) : null}
 
             <Days report={data} mode={mode} />
-            <Merchants report={data} />
+            <Merchants
+              report={data}
+              showAll={showAllMerchants}
+              onShowAll={setShowAllMerchants}
+              onSelect={filterByMerchant}
+            />
           </>
         )}
       </ScrollView>
@@ -378,123 +475,196 @@ export default function MoneyReportsScreen() {
   );
 }
 
-/** "▲ 8% к пред.": a change, coloured by whether it is good news, or a dash without a base. */
-function Change({
-  value,
-  base,
-  mode,
-  label,
-}: {
-  value: number;
-  base: number;
-  mode: SpendingReportMode | "net";
-  label: string;
-}) {
-  const scheme = useColorScheme();
-  const change = percentChange(value, base);
-  const tone = changeTone(change, mode);
+function FilterChip({ label, onClear }: { label: string; onClear: () => void }) {
+  const palette = usePalette();
   return (
-    <Text
-      size="xs"
-      tone="mutedForeground"
-      style={tone === "neutral" ? undefined : { color: toneColor(tone, scheme) }}
+    <View
+      style={{
+        flexDirection: "row",
+        alignSelf: "flex-start",
+        alignItems: "center",
+        gap: space.sm,
+        paddingLeft: space.md,
+        paddingRight: space.xs,
+        paddingVertical: space.xs,
+        borderRadius: 999,
+        backgroundColor: palette.foreground,
+      }}
     >
-      {`${formatChange(change) ?? "—"} ${label}`}
-    </Text>
-  );
-}
-
-/** Spending, income and net side by side, each against the period before and last year. */
-function Totals({ report }: { report: SpendingReport }) {
-  const scheme = useColorScheme();
-  const { totals } = report;
-  const year = String(report.period.last_year);
-  const cards = [
-    [
-      "expense",
-      "money.spendingExpense",
-      totals.expense,
-      totals.previous_expense,
-      totals.last_year_expense,
-    ],
-    [
-      "income",
-      "money.spendingIncome",
-      totals.income,
-      totals.previous_income,
-      totals.last_year_income,
-    ],
-    ["net", "money.spendingNet", totals.net, totals.previous_net, totals.last_year_net],
-  ] as const;
-  return (
-    <View style={{ flexDirection: "row", gap: space.sm }}>
-      {cards.map(([key, title, value, previous, lastYear]) => (
-        <Card key={key} style={{ flex: 1, padding: space.md, gap: 2 }}>
-          <Text size="xs" tone="mutedForeground">
-            {t(title)}
-          </Text>
-          <Text
-            weight="bold"
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            testID={`spending-total-${key}`}
-            style={key === "net" && value > 0 ? { color: toneColor("good", scheme) } : undefined}
-          >
-            {`${key === "net" && value > 0 ? "+" : ""}${money(value)}`}
-          </Text>
-          <Change
-            value={value}
-            base={previous}
-            mode={key}
-            label={t("money.spendingVsPreviousShort")}
-          />
-          <Change
-            value={value}
-            base={lastYear}
-            mode={key}
-            label={t("money.spendingVsLastYear", { year })}
-          />
-        </Card>
-      ))}
+      <Text size="sm" tone="background">
+        {label}
+      </Text>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={t("money.spendingClearFilter")}
+        hitSlop={space.sm}
+        onPress={onClear}
+        style={{ padding: 4, borderRadius: 999, backgroundColor: palette.mutedForeground }}
+      >
+        <Icon icon={X} size={12} tone="background" />
+      </Pressable>
     </View>
   );
 }
 
-/** Where spending is heading by the period's end, while the period runs. */
-function Forecast({ report }: { report: SpendingReport }) {
+/** Compact self-evident change badge (`▲ 17% к окт.`); hides «новое». */
+function Change({
+  value,
+  base,
+  mode,
+  basisLabel,
+}: {
+  value: number;
+  base: number;
+  mode: SpendingReportMode | "net";
+  basisLabel?: string;
+}) {
+  const scheme = useColorScheme();
   const palette = usePalette();
-  const { forecast, totals, period } = report;
-  if (!forecast) return null;
-  const end = new Intl.DateTimeFormat(LOCALE, {
-    day: "numeric",
-    month: "long",
-    timeZone: "UTC",
-  }).format(new Date(`${period.end}T00:00:00Z`));
-  const done = forecast.expense > 0 ? Math.min(100, (totals.expense / forecast.expense) * 100) : 0;
+  const change = percentChange(value, base);
+  const newLabel = t("money.spendingChangeNew");
+  const text = formatChange(change, { value, base, newLabel });
+  if (text === null || text === newLabel) return null;
+  const tone = changeTone(change, mode);
   return (
-    <Card style={{ padding: space.lg, gap: space.xs }}>
-      <View style={{ flexDirection: "row", gap: space.sm }}>
-        <Text size="sm" tone="mutedForeground" style={{ flex: 1 }}>
-          {t("money.spendingForecast", { date: end })}
-        </Text>
-        <Text size="sm" weight="semibold" testID="spending-forecast">
-          {`≈ ${money(forecast.expense)}`}
-        </Text>
-      </View>
-      <View style={{ height: 8, borderRadius: radius.sm, backgroundColor: palette.muted }}>
-        <View
-          style={{
-            width: `${done}%`,
-            height: 8,
-            borderRadius: radius.sm,
-            backgroundColor: COLORS.bar.expense,
-          }}
-        />
-      </View>
-      <Text size="xs" tone="mutedForeground">
-        {`${t("money.spendingForecastDaysLeft", { days: forecast.days_left })} · ${t("money.spendingForecastHint")}`}
+    <View
+      style={{
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: radius.sm,
+        backgroundColor:
+          tone === "neutral"
+            ? palette.muted
+            : tone === "good"
+              ? "rgba(20, 184, 166, 0.12)"
+              : "rgba(249, 115, 22, 0.12)",
+      }}
+    >
+      <Text
+        size="xs"
+        tone="mutedForeground"
+        numberOfLines={1}
+        style={tone === "neutral" ? undefined : { color: toneColor(tone, scheme) }}
+      >
+        {basisLabel ? `${text} ${basisLabel}` : text}
       </Text>
-    </Card>
+    </View>
+  );
+}
+
+function previousBasisShort(previousStart: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(previousStart)) return "";
+  return new Intl.DateTimeFormat(LOCALE, {
+    month: "short",
+    timeZone: "UTC",
+  }).format(new Date(`${previousStart}T00:00:00Z`));
+}
+
+/** Spending, income and net side by side; date once above, short forecast inside each card. */
+function Totals({ report }: { report: SpendingReport }) {
+  const scheme = useColorScheme();
+  const { totals, forecast, period } = report;
+  const year = String(period.last_year);
+  const prevShort = previousBasisShort(period.previous_start);
+  const prevBadge = prevShort ? t("money.spendingBadgePrevious", { period: prevShort }) : undefined;
+  const yearBadge = t("money.spendingBadgeLastYear", { year });
+  const end = forecast
+    ? new Intl.DateTimeFormat(LOCALE, {
+        day: "numeric",
+        month: "short",
+        timeZone: "UTC",
+      }).format(new Date(`${period.end}T00:00:00Z`))
+    : "";
+  const cards = [
+    {
+      key: "expense" as const,
+      title: "money.spendingExpense",
+      value: totals.expense,
+      previous: totals.previous_expense,
+      lastYear: totals.last_year_expense,
+      forecast: forecast?.expense,
+      testId: "spending-forecast",
+    },
+    {
+      key: "income" as const,
+      title: "money.spendingIncome",
+      value: totals.income,
+      previous: totals.previous_income,
+      lastYear: totals.last_year_income,
+      forecast: forecast?.income,
+      testId: "spending-forecast-income",
+    },
+    {
+      key: "net" as const,
+      title: "money.spendingNet",
+      value: totals.net,
+      previous: totals.previous_net,
+      lastYear: totals.last_year_net,
+      forecast: forecast?.net,
+      testId: "spending-forecast-net",
+    },
+  ];
+  return (
+    <View style={{ gap: space.xs, width: "100%" }}>
+      {end ? (
+        <Text size="xs" tone="mutedForeground" numberOfLines={1}>
+          {t("money.spendingForecastDate", { date: end })}
+        </Text>
+      ) : null}
+      <View style={{ flexDirection: "row", gap: 4, width: "100%" }}>
+        {cards.map((card) => {
+          const forecastAmount =
+            card.forecast === undefined
+              ? null
+              : card.key === "net" && card.forecast > 0
+                ? `+${money(card.forecast)}`
+                : money(card.forecast);
+          return (
+            <Card
+              key={card.key}
+              testID={`spending-total-${card.key}`}
+              style={{ flex: 1, minWidth: 0, padding: space.sm, gap: 2 }}
+            >
+              <Text size="xs" tone="mutedForeground" numberOfLines={1}>
+                {t(card.title)}
+              </Text>
+              <Text
+                weight="bold"
+                size="sm"
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                style={
+                  card.key === "net" && card.value > 0
+                    ? { color: toneColor("good", scheme) }
+                    : undefined
+                }
+              >
+                {`${card.key === "net" && card.value > 0 ? "+" : ""}${money(card.value)}`}
+              </Text>
+              {forecastAmount ? (
+                <Text size="xs" tone="mutedForeground" testID={card.testId}>
+                  {t("money.spendingForecastShort", { amount: forecastAmount })}
+                </Text>
+              ) : null}
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 2 }}>
+                <Change
+                  value={card.value}
+                  base={card.previous}
+                  mode={card.key}
+                  basisLabel={prevBadge}
+                />
+                <Change
+                  value={card.value}
+                  base={card.lastYear}
+                  mode={card.key}
+                  basisLabel={yearBadge}
+                />
+              </View>
+            </Card>
+          );
+        })}
+      </View>
+    </View>
   );
 }
 
@@ -562,13 +732,56 @@ function CategoryMap({
   );
 }
 
+/** Twelve month bars; a tap shows the month and amount. */
+function Sparkline({ category, mode }: { category: SpendingCategory; mode: SpendingReportMode }) {
+  const palette = usePalette();
+  const values = category.months.map((month) => (mode === "income" ? month.income : month.expense));
+  const max = Math.max(...values, 0);
+  const monthLabel = new Intl.DateTimeFormat(LOCALE, {
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+  return (
+    <View
+      testID={`spending-sparkline-${category.id}`}
+      style={{ flexDirection: "row", alignItems: "flex-end", gap: 2, height: 24 }}
+    >
+      {values.map((value, index) => {
+        const month = category.months[index]?.month_start;
+        const label = t("money.spendingMonthTooltip", {
+          month: month ? monthLabel.format(new Date(`${month}T00:00:00Z`)) : String(index + 1),
+          amount: money(value),
+        });
+        return (
+          <Pressable
+            key={month ?? index}
+            accessibilityRole="button"
+            accessibilityLabel={label}
+            onPress={() => Alert.alert(label)}
+            style={{
+              width: 6,
+              height: max > 0 ? Math.max(2, (value / max) * 24) : 2,
+              borderRadius: 2,
+              backgroundColor:
+                index === values.length - 1 ? COLORS.bar[mode] : palette.mutedForeground,
+              opacity: index === values.length - 1 ? 1 : 0.35,
+            }}
+          />
+        );
+      })}
+    </View>
+  );
+}
+
 /**
  * A category in the list: its amount and share, its changes under the name. A tap opens its
  * subcategories and the button that narrows the whole report to it.
  */
 function CategoryRow({
-  report,
   category,
+  previousStart,
+  lastYear,
   subcategories,
   total,
   mode,
@@ -577,8 +790,9 @@ function CategoryRow({
   onToggle,
   onFilter,
 }: {
-  report: SpendingReport;
   category: SpendingCategory;
+  previousStart: string;
+  lastYear: number;
   subcategories: SpendingCategory[];
   total: number;
   mode: SpendingReportMode;
@@ -590,7 +804,9 @@ function CategoryRow({
   const palette = usePalette();
   const amount = amountOf(category, mode);
   const name = categoryName(category);
-  const year = String(report.period.last_year);
+  const prevShort = previousBasisShort(previousStart);
+  const prevBadge = prevShort ? t("money.spendingBadgePrevious", { period: prevShort }) : undefined;
+  const yearBadge = t("money.spendingBadgeLastYear", { year: String(lastYear) });
   return (
     <View
       testID={`spending-row-${category.id}`}
@@ -617,20 +833,21 @@ function CategoryRow({
               {name}
             </Text>
           </View>
-          <View style={{ flexDirection: "row", flexWrap: "wrap", columnGap: space.sm }}>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4 }}>
             <Change
               value={amount}
               base={previousOf(category, mode)}
               mode={mode}
-              label={t("money.spendingVsPreviousShort")}
+              basisLabel={prevBadge}
             />
             <Change
               value={amount}
               base={lastYearOf(category, mode)}
               mode={mode}
-              label={t("money.spendingVsLastYear", { year })}
+              basisLabel={yearBadge}
             />
           </View>
+          {category.months.length ? <Sparkline category={category} mode={mode} /> : null}
         </View>
         <View style={{ alignItems: "flex-end" }}>
           <Text weight="semibold">{money(amount)}</Text>
@@ -662,12 +879,14 @@ function CategoryRow({
   );
 }
 
-/** One bar a day; the days still ahead are drawn empty. */
+/** One bar a day with a rounded Y axis; a tap shows the date and amount. */
 function Days({ report, mode }: { report: SpendingReport; mode: SpendingReportMode }) {
   const palette = usePalette();
   const today = isoDay(new Date());
   const values = report.days.map((day) => (mode === "income" ? day.income : day.expense));
   const max = Math.max(...values, 0);
+  const ticks = niceAxisTicks(max);
+  const axisMax = ticks[ticks.length - 1] || 1;
   const label = (day: string) =>
     new Intl.DateTimeFormat(LOCALE, { day: "numeric", month: "short", timeZone: "UTC" }).format(
       new Date(`${day}T00:00:00Z`),
@@ -676,32 +895,60 @@ function Days({ report, mode }: { report: SpendingReport; mode: SpendingReportMo
   return (
     <Card style={{ padding: space.lg, gap: space.sm }}>
       <Text weight="semibold">{t("money.spendingDays")}</Text>
-      <View
-        testID="spending-days"
-        style={{
-          height: 120,
-          flexDirection: "row",
-          alignItems: "flex-end",
-          gap: 2,
-          borderBottomWidth: 1,
-          borderColor: palette.border,
-        }}
-      >
-        {report.days.map((day, index) => (
-          <View
-            key={day.date}
-            style={{
-              flex: 1,
-              height: `${max > 0 ? ((values[index] ?? 0) / max) * 100 : 0}%`,
-              borderTopLeftRadius: 2,
-              borderTopRightRadius: 2,
-              backgroundColor: day.date > today ? palette.muted : COLORS.bar[mode],
-              opacity: day.date === today ? 0.7 : 1,
-            }}
-          />
-        ))}
+      <View style={{ flexDirection: "row", gap: space.sm }}>
+        <View
+          testID="spending-days-axis"
+          style={{
+            width: 52,
+            height: 120,
+            justifyContent: "space-between",
+            alignItems: "flex-end",
+          }}
+        >
+          {[...ticks].reverse().map((tick) => (
+            <Text key={tick} size="xs" tone="mutedForeground" tabular>
+              {money(tick)}
+            </Text>
+          ))}
+        </View>
+        <View
+          testID="spending-days"
+          style={{
+            flex: 1,
+            height: 120,
+            flexDirection: "row",
+            alignItems: "flex-end",
+            gap: 2,
+            borderBottomWidth: 1,
+            borderColor: palette.border,
+          }}
+        >
+          {report.days.map((day, index) => {
+            const value = values[index] ?? 0;
+            const tip = t("money.spendingDayTooltip", {
+              date: label(day.date),
+              amount: money(value),
+            });
+            return (
+              <Pressable
+                key={day.date}
+                accessibilityRole="button"
+                accessibilityLabel={tip}
+                onPress={() => Alert.alert(tip)}
+                style={{
+                  flex: 1,
+                  height: `${axisMax > 0 ? (value / axisMax) * 100 : 0}%`,
+                  borderTopLeftRadius: 2,
+                  borderTopRightRadius: 2,
+                  backgroundColor: day.date > today ? palette.muted : COLORS.bar[mode],
+                  opacity: day.date === today ? 0.7 : 1,
+                }}
+              />
+            );
+          })}
+        </View>
       </View>
-      <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+      <View style={{ flexDirection: "row", justifyContent: "space-between", paddingLeft: 60 }}>
         <Text size="xs" tone="mutedForeground">
           {label(report.days[0]!.date)}
         </Text>
@@ -713,17 +960,40 @@ function Days({ report, mode }: { report: SpendingReport; mode: SpendingReportMo
   );
 }
 
-/** The top merchants by spending, each with its logo or its colour and initial. */
-function Merchants({ report }: { report: SpendingReport }) {
+/** Top merchants by spending; tap filters the report by that shop. */
+function Merchants({
+  report,
+  showAll,
+  onShowAll,
+  onSelect,
+}: {
+  report: SpendingReport;
+  showAll: boolean;
+  onShowAll: (next: boolean) => void;
+  onSelect: (merchant: SpendingMerchant) => void;
+}) {
   const palette = usePalette();
   if (!report.merchants.length) return null;
+  const visible = showAll ? report.merchants : report.merchants.slice(0, LIST_TOP_N);
+  const prevShort = previousBasisShort(report.period.previous_start);
+  const prevBadge = prevShort ? t("money.spendingBadgePrevious", { period: prevShort }) : undefined;
   return (
-    <Card style={{ padding: space.lg, gap: space.md }}>
-      <Text weight="semibold">{t("money.spendingMerchants")}</Text>
-      {report.merchants.slice(0, 6).map((merchant) => (
-        <View
+    <Card style={{ padding: space.lg, gap: space.md }} testID="spending-merchants">
+      <Text weight="semibold" numberOfLines={1}>
+        {t("money.spendingMerchants")}
+      </Text>
+      {visible.map((merchant) => (
+        <Pressable
           key={`${merchant.brand_id ?? ""}:${merchant.name}`}
-          style={{ flexDirection: "row", alignItems: "center", gap: space.md }}
+          accessibilityRole="button"
+          accessibilityLabel={merchant.name}
+          onPress={() => onSelect(merchant)}
+          style={({ pressed }) => ({
+            flexDirection: "row",
+            alignItems: "center",
+            gap: space.md,
+            opacity: pressed ? 0.6 : 1,
+          })}
         >
           {merchant.logo_url ? (
             <Image
@@ -754,15 +1024,31 @@ function Merchants({ report }: { report: SpendingReport }) {
             <Text size="sm" weight="medium" numberOfLines={1}>
               {merchant.name}
             </Text>
-            <Text size="xs" tone="mutedForeground">
-              {t("money.spendingMerchantCount", { count: merchant.transaction_count })}
-            </Text>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
+              <Text size="xs" tone="mutedForeground" numberOfLines={1}>
+                {t("money.spendingMerchantCount", { count: merchant.transaction_count })}
+              </Text>
+              <Change
+                value={merchant.expense}
+                base={merchant.previous_expense}
+                mode="expense"
+                basisLabel={prevBadge}
+              />
+            </View>
           </View>
           <Text size="sm" weight="semibold">
             {money(merchant.expense)}
           </Text>
-        </View>
+        </Pressable>
       ))}
+      {report.merchants.length > LIST_TOP_N ? (
+        <Button
+          label={showAll ? t("money.spendingShowTop") : t("money.spendingShowAll")}
+          variant="ghost"
+          compact
+          onPress={() => onShowAll(!showAll)}
+        />
+      ) : null}
     </Card>
   );
 }

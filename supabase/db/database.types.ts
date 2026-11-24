@@ -3047,8 +3047,10 @@ export type Database = {
       money_get_spending_report: {
         Args: {
           p_account_ids?: string[]
+          p_brand_id?: string
           p_category_id?: string
           p_end: string
+          p_merchant_name?: string
           p_person_id: string
           p_report_currency?: string
           p_start: string

@@ -3,21 +3,23 @@
 import React, { useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { ChevronDown, ChevronLeft, ChevronRight, Filter, X } from "lucide-react";
-import { useIsMobile, useMoneyAccounts, useMoneySpendingReport } from "@/hooks";
+import { Calendar, ChevronDown, ChevronLeft, ChevronRight, Filter, X } from "lucide-react";
+import { useIsMobile, useMoneyAccounts } from "@/hooks";
+import { useMoneySpendingReport } from "@/hooks/use-money-spending-report";
 import { useIntlLocale } from "@/lib/date-locale";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/stores/ui-store";
+import { niceAxisTicks } from "@/types/money-report-axis-ticks";
+import { formatChange, percentChange } from "@/types/money-report-change";
+import { transactionsFeedQuery } from "@/types/money-report-feed-query";
 import {
   amountOf,
   changeTone,
   childCategories,
-  formatChange,
   formatReportAmount,
   isoDay,
   lastYearOf,
   parsePeriod,
-  percentChange,
   periodContaining,
   periodLabel,
   previousOf,
@@ -28,9 +30,9 @@ import {
   type SpendingCategory,
   type SpendingPeriod,
   type SpendingPeriodKind,
-  type SpendingReport,
   type SpendingReportMode,
 } from "@/types/money-spending-report";
+import type { SpendingMerchant, SpendingReport } from "@/types/money-spending-report-ux";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -83,25 +85,54 @@ function categoryName(
   return category.direct && t ? t("money.spendingDirect", { name }) : name;
 }
 
+/**
+ * Compact self-evident change badge (`▲ 17% к окт.`). Hides the old «новое» chip — no basis
+ * means no badge. Comparison math stays in {@link percentChange} / {@link formatChange}.
+ */
 function Change({
   value,
   base,
   mode,
-  label,
+  basisLabel,
+  newLabel,
+  title,
 }: {
   value: number;
   base: number;
   mode: SpendingReportMode | "net";
-  label?: string;
+  /** Short basis inside the badge, e.g. `к окт.` / `vs Oct`. */
+  basisLabel?: string;
+  newLabel?: string;
+  title?: string;
 }) {
   const change = percentChange(value, base);
-  const text = formatChange(change);
+  const text = formatChange(change, { value, base, newLabel });
+  // «новое» without a %, or nothing to show — omit the chip (Lead: clear or hide).
+  if (text === null || (newLabel !== undefined && text === newLabel)) return null;
+  const tone = changeTone(change, mode);
   return (
-    <span className={TONE_CLASS[changeTone(change, mode)]}>
-      {text ?? "—"}
-      {label ? ` ${label}` : null}
+    <span
+      title={title}
+      className={cn(
+        "inline-flex max-w-full items-center whitespace-nowrap rounded-md px-1.5 py-0.5 text-[11px] font-medium tabular-nums leading-none",
+        tone === "good" && "bg-teal-500/10",
+        tone === "bad" && "bg-orange-500/10",
+        tone === "neutral" && "bg-muted",
+        TONE_CLASS[tone],
+      )}
+    >
+      {basisLabel ? `${text} ${basisLabel}` : text}
     </span>
   );
+}
+
+/** Short month of the previous comparison window (`окт.` / `Oct`) for badge copy. */
+function previousBasisShort(previousStart: string, locale: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(previousStart)) return "";
+  return new Intl.DateTimeFormat(locale, {
+    month: "short",
+    timeZone: "UTC",
+  }).format(new Date(`${previousStart}T00:00:00Z`));
 }
 
 function PeriodControls({
@@ -124,95 +155,119 @@ function PeriodControls({
     last30: t("money.spendingPeriodLast30"),
     custom: t("money.spendingPeriodCustom"),
   };
+  const chipKinds = PERIOD_KINDS.filter((kind) => kind !== "custom");
+  const customPopover = (
+    <Popover open={customOpen} onOpenChange={setCustomOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-pressed={period.kind === "custom"}
+          aria-label={labels.custom}
+          title={labels.custom}
+          className={cn(
+            "inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-2 py-1.5 text-sm",
+            period.kind === "custom"
+              ? "bg-background font-semibold shadow-sm"
+              : "text-muted-foreground",
+          )}
+        >
+          <Calendar className="h-3.5 w-3.5 shrink-0" aria-hidden />
+          <span>{labels.custom}</span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-64 space-y-3">
+        <label className="block space-y-1 text-sm">
+          <span>{t("money.spendingCustomFrom")}</span>
+          <Input type="date" value={from} onChange={(event) => setFrom(event.target.value)} />
+        </label>
+        <label className="block space-y-1 text-sm">
+          <span>{t("money.spendingCustomTo")}</span>
+          <Input type="date" value={to} onChange={(event) => setTo(event.target.value)} />
+        </label>
+        <Button
+          type="button"
+          className="w-full"
+          disabled={!from || !to || from > to}
+          onClick={() => {
+            onChange({ kind: "custom", start: from, end: to });
+            setCustomOpen(false);
+          }}
+        >
+          {t("money.spendingApply")}
+        </Button>
+      </PopoverContent>
+    </Popover>
+  );
 
-  return (
-    <>
-      <div role="group" className="flex rounded-lg bg-muted p-1">
-        {PERIOD_KINDS.map((kind) =>
-          kind === "custom" ? (
-            <Popover key={kind} open={customOpen} onOpenChange={setCustomOpen}>
-              <PopoverTrigger asChild>
-                <button
-                  type="button"
-                  aria-pressed={period.kind === kind}
-                  className={cn(
-                    "rounded-md px-3 py-1.5 text-sm",
-                    period.kind === kind
-                      ? "bg-background font-semibold shadow-sm"
-                      : "text-muted-foreground",
-                  )}
-                >
-                  {labels[kind]}
-                </button>
-              </PopoverTrigger>
-              <PopoverContent className="w-64 space-y-3">
-                <label className="block space-y-1 text-sm">
-                  <span>{t("money.spendingCustomFrom")}</span>
-                  <Input
-                    type="date"
-                    value={from}
-                    onChange={(event) => setFrom(event.target.value)}
-                  />
-                </label>
-                <label className="block space-y-1 text-sm">
-                  <span>{t("money.spendingCustomTo")}</span>
-                  <Input type="date" value={to} onChange={(event) => setTo(event.target.value)} />
-                </label>
-                <Button
-                  type="button"
-                  className="w-full"
-                  disabled={!from || !to || from > to}
-                  onClick={() => {
-                    onChange({ kind: "custom", start: from, end: to });
-                    setCustomOpen(false);
-                  }}
-                >
-                  {t("money.spendingApply")}
-                </Button>
-              </PopoverContent>
-            </Popover>
-          ) : (
-            <button
-              key={kind}
-              type="button"
-              aria-pressed={period.kind === kind}
-              onClick={() => onChange(periodContaining(kind, isoDay(new Date())))}
-              className={cn(
-                "rounded-md px-3 py-1.5 text-sm",
-                period.kind === kind
-                  ? "bg-background font-semibold shadow-sm"
-                  : "text-muted-foreground",
-              )}
-            >
-              {labels[kind]}
-            </button>
-          ),
+  const monthAndCustom = (
+    <div className="flex w-full min-w-0 flex-nowrap items-center gap-1 overflow-x-auto rounded-lg border bg-background p-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8 shrink-0"
+        aria-label={t("money.spendingPrevious")}
+        onClick={() => onChange(shiftPeriod(period, -1))}
+      >
+        <ChevronLeft className="h-4 w-4" />
+      </Button>
+      <span className="min-w-0 flex-1 whitespace-nowrap text-center text-sm font-semibold first-letter:uppercase">
+        {periodLabel(period, locale)}
+      </span>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8 shrink-0"
+        aria-label={t("money.spendingNext")}
+        onClick={() => onChange(shiftPeriod(period, 1))}
+      >
+        <ChevronRight className="h-4 w-4" />
+      </Button>
+      <div
+        className={cn(
+          "ml-0.5 flex shrink-0 rounded-md",
+          period.kind === "custom" ? "bg-muted" : undefined,
         )}
+      >
+        {customPopover}
       </div>
-      <div className="flex items-center gap-1 rounded-lg border bg-background p-0.5">
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          aria-label={t("money.spendingPrevious")}
-          onClick={() => onChange(shiftPeriod(period, -1))}
-        >
-          <ChevronLeft className="h-4 w-4" />
-        </Button>
-        <span className="min-w-36 text-center text-sm font-semibold first-letter:uppercase">
-          {periodLabel(period, locale)}
-        </span>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          aria-label={t("money.spendingNext")}
-          onClick={() => onChange(shiftPeriod(period, 1))}
-        >
-          <ChevronRight className="h-4 w-4" />
-        </Button>
+    </div>
+  );
+
+  // Phone: chips on one row; ‹ month › + calendar «Период»/«Range» on their own nowrap row (Lead).
+  // Desktop: chips and month+custom share one strip like before.
+  return (
+    <div
+      className={cn(
+        "flex min-w-0 gap-2",
+        // max-md stacking so ‹ month › + Period never fight the chips for width.
+        "max-md:flex-col md:flex-nowrap md:items-center md:overflow-x-auto md:[-ms-overflow-style:none] md:[scrollbar-width:none] md:[&::-webkit-scrollbar]:hidden",
+      )}
+    >
+      <div
+        role="group"
+        className="flex w-full shrink-0 overflow-x-auto rounded-lg bg-muted p-1 md:w-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        {chipKinds.map((kind) => (
+          <button
+            key={kind}
+            type="button"
+            aria-pressed={period.kind === kind}
+            onClick={() => onChange(periodContaining(kind, isoDay(new Date())))}
+            className={cn(
+              "whitespace-nowrap rounded-md px-2.5 py-1.5 text-sm",
+              period.kind === kind
+                ? "bg-background font-semibold shadow-sm"
+                : "text-muted-foreground",
+            )}
+          >
+            {labels[kind]}
+          </button>
+        ))}
       </div>
-    </>
+      {monthAndCustom}
+    </div>
   );
 }
 
@@ -235,7 +290,7 @@ function AccountFilter({
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button type="button" variant="outline" className="gap-1">
+        <Button type="button" variant="outline" className="shrink-0 gap-1 whitespace-nowrap">
           {label}
           <ChevronDown className="h-4 w-4" />
         </Button>
@@ -269,33 +324,50 @@ function AccountFilter({
   );
 }
 
-function Forecast({ report, t, locale }: { report: SpendingReport; t: Translate; locale: string }) {
-  const { totals, forecast, period, currency } = report;
-  if (!forecast) return null;
-  const endLabel = new Intl.DateTimeFormat(locale, {
+/** Short end-of-period date for the calm forecast line under a total. */
+function forecastDateLabel(periodEnd: string, locale: string) {
+  return new Intl.DateTimeFormat(locale, {
     day: "numeric",
-    month: "long",
+    month: "short",
     timeZone: "UTC",
-  }).format(new Date(`${period.end}T00:00:00Z`));
-  const done = forecast.expense > 0 ? Math.min(100, (totals.expense / forecast.expense) * 100) : 0;
+  }).format(new Date(`${periodEnd}T00:00:00Z`));
+}
+
+/**
+ * Quiet forecast line. Desktop: full `Прогноз на {date}: ≈X` inside the card. Phone: short
+ * `Прогноз ≈X` inside the card (date sits once above the three cards — Lead v4).
+ */
+function ForecastLine({
+  date,
+  amount,
+  hint,
+  testId,
+  t,
+  compact,
+}: {
+  date: string;
+  amount: string;
+  hint: string;
+  testId: string;
+  t: Translate;
+  /** Phone cards: short copy that fits without mid-word wraps. */
+  compact?: boolean;
+}) {
   return (
-    <div data-testid="spending-forecast" className="space-y-1.5">
-      <p className="flex justify-between gap-2 text-sm">
-        <span className="text-muted-foreground">
-          {t("money.spendingForecast", { date: endLabel })}
-        </span>
-        <span className="font-semibold">
-          ≈ {formatReportAmount(forecast.expense, currency, locale)}
-        </span>
-      </p>
-      <div className="relative h-2 overflow-hidden rounded bg-muted">
-        <div className="absolute inset-y-0 left-0 bg-orange-600" style={{ width: `${done}%` }} />
-      </div>
-      <p className="text-xs text-muted-foreground">
-        {t("money.spendingForecastDaysLeft", { days: forecast.days_left })} ·{" "}
-        {t("money.spendingForecastHint")}
-      </p>
-    </div>
+    <p
+      data-testid={testId}
+      title={hint}
+      className={cn(
+        "text-muted-foreground",
+        compact
+          ? "whitespace-normal break-words text-[10px] leading-snug"
+          : "truncate whitespace-nowrap text-[11px] leading-tight",
+      )}
+    >
+      {compact
+        ? t("money.spendingForecastShort", { amount })
+        : t("money.spendingForecastLine", { date, amount })}
+    </p>
   );
 }
 
@@ -310,111 +382,139 @@ function TotalCards({
   locale: string;
   isMobile: boolean;
 }) {
-  const { totals, period, currency } = report;
+  const { totals, period, currency, forecast } = report;
   const money = (amount: number) => formatReportAmount(amount, currency, locale);
+  const narrowMoney = (amount: number) => {
+    try {
+      return new Intl.NumberFormat(locale, {
+        style: "currency",
+        currency,
+        currencyDisplay: "narrowSymbol",
+        maximumFractionDigits: 0,
+      }).format(amount);
+    } catch {
+      return money(amount);
+    }
+  };
+  const formatAmount = isMobile ? narrowMoney : money;
   const year = String(period.last_year);
+  const prevBasis = previousBasisShort(period.previous_start, locale);
+  const prevBadge = prevBasis ? t("money.spendingBadgePrevious", { period: prevBasis }) : undefined;
+  const yearBadge = t("money.spendingBadgeLastYear", { year });
+  const newLabel = t("money.spendingChangeNew");
+  const endLabel = forecastDateLabel(period.end, locale);
+  const forecastHint = forecast
+    ? `${t("money.spendingForecastDaysLeft", { days: forecast.days_left })} · ${t("money.spendingForecastHint")}`
+    : "";
   const cards = [
     {
       key: "expense" as const,
       title: t("money.spendingExpense"),
-      value: money(totals.expense),
+      value: formatAmount(totals.expense),
       current: totals.expense,
       previous: totals.previous_expense,
       lastYear: totals.last_year_expense,
+      forecastAmount: forecast ? formatAmount(forecast.expense) : null,
+      forecastTestId: "spending-forecast",
     },
     {
       key: "income" as const,
       title: t("money.spendingIncome"),
-      value: money(totals.income),
+      value: formatAmount(totals.income),
       current: totals.income,
       previous: totals.previous_income,
       lastYear: totals.last_year_income,
+      forecastAmount: forecast ? formatAmount(forecast.income) : null,
+      forecastTestId: "spending-forecast-income",
     },
     {
       key: "net" as const,
       title: t("money.spendingNet"),
-      value: `${totals.net > 0 ? "+" : ""}${money(totals.net)}`,
+      value: `${totals.net > 0 ? "+" : ""}${formatAmount(totals.net)}`,
       current: totals.net,
       previous: totals.previous_net,
       lastYear: totals.last_year_net,
+      forecastAmount: forecast
+        ? `${forecast.net > 0 ? "+" : ""}${formatAmount(forecast.net)}`
+        : null,
+      forecastTestId: "spending-forecast-net",
     },
   ];
   const netClass = (card: (typeof cards)[number]) =>
     card.key === "net" && card.current > 0 && "text-teal-800 dark:text-teal-300";
 
-  if (isMobile) {
-    // Three narrow tiles side by side, the forecast under them: the phone sees all three numbers
-    // without scrolling, which three stacked cards would not allow.
-    return (
-      <div className="space-y-3">
-        <div className="grid grid-cols-3 gap-2">
-          {cards.map((card) => (
-            <Card key={card.key} data-testid={`spending-total-${card.key}`}>
-              <CardContent className="space-y-1 p-3">
-                <p className="text-xs text-muted-foreground">{card.title}</p>
-                <p className={cn("text-base font-bold leading-tight", netClass(card))}>
-                  {card.value}
-                </p>
-                <p className="text-xs">
-                  <Change
-                    value={card.current}
-                    base={card.previous}
-                    mode={card.key}
-                    label={t("money.spendingVsPreviousShort")}
-                  />
-                </p>
-                <p className="text-xs">
-                  <Change
-                    value={card.current}
-                    base={card.lastYear}
-                    mode={card.key}
-                    label={t("money.spendingVsLastYear", { year })}
-                  />
-                </p>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-        {report.forecast ? (
-          <Card>
-            <CardContent className="p-4">
-              <Forecast report={report} t={t} locale={locale} />
+  return (
+    <div className={cn("w-full max-w-full", isMobile ? "space-y-1.5" : "space-y-3")}>
+      {isMobile && forecast ? (
+        <p
+          title={forecastHint}
+          className="whitespace-nowrap text-[11px] leading-tight text-muted-foreground"
+        >
+          {t("money.spendingForecastDate", { date: endLabel })}
+        </p>
+      ) : null}
+      <div
+        className={cn(
+          "grid w-full max-w-full",
+          isMobile ? "grid-cols-3 gap-1" : "gap-4 md:grid-cols-3",
+        )}
+      >
+        {cards.map((card) => (
+          <Card
+            key={card.key}
+            className={isMobile ? "min-w-0 max-w-full" : undefined}
+            data-testid={`spending-total-${card.key}`}
+          >
+            <CardContent className={cn("space-y-1", isMobile ? "p-1.5" : "space-y-2 p-5")}>
+              <p
+                className={cn(
+                  "truncate whitespace-nowrap text-muted-foreground",
+                  isMobile ? "text-[11px]" : "text-sm",
+                )}
+              >
+                {card.title}
+              </p>
+              <p
+                className={cn(
+                  "truncate whitespace-nowrap font-bold tabular-nums",
+                  isMobile ? "text-sm leading-tight" : "text-3xl tracking-tight",
+                  netClass(card),
+                )}
+              >
+                {card.value}
+              </p>
+              {card.forecastAmount ? (
+                <ForecastLine
+                  date={endLabel}
+                  amount={card.forecastAmount}
+                  hint={forecastHint}
+                  testId={card.forecastTestId}
+                  t={t}
+                  compact={isMobile}
+                />
+              ) : null}
+              <div className={cn("flex flex-wrap", isMobile ? "gap-0.5" : "gap-1.5")}>
+                <Change
+                  value={card.current}
+                  base={card.previous}
+                  mode={card.key}
+                  basisLabel={prevBadge}
+                  title={t("money.spendingVsPrevious")}
+                  newLabel={newLabel}
+                />
+                <Change
+                  value={card.current}
+                  base={card.lastYear}
+                  mode={card.key}
+                  basisLabel={yearBadge}
+                  title={t("money.spendingVsLastYear", { year })}
+                  newLabel={newLabel}
+                />
+              </div>
             </CardContent>
           </Card>
-        ) : null}
+        ))}
       </div>
-    );
-  }
-
-  return (
-    <div className="grid gap-4 md:grid-cols-3">
-      {cards.map((card) => (
-        <Card key={card.key} data-testid={`spending-total-${card.key}`}>
-          <CardContent className="space-y-2 p-5">
-            <p className="text-sm text-muted-foreground">{card.title}</p>
-            <p className={cn("text-3xl font-bold tracking-tight", netClass(card))}>{card.value}</p>
-            <p className="flex flex-wrap gap-x-3 text-sm">
-              <Change
-                value={card.current}
-                base={card.previous}
-                mode={card.key}
-                label={t("money.spendingVsPrevious")}
-              />
-              <Change
-                value={card.current}
-                base={card.lastYear}
-                mode={card.key}
-                label={t("money.spendingVsLastYear", { year })}
-              />
-            </p>
-            {card.key === "expense" && report.forecast ? (
-              <div className="border-t pt-2">
-                <Forecast report={report} t={t} locale={locale} />
-              </div>
-            ) : null}
-          </CardContent>
-        </Card>
-      ))}
     </div>
   );
 }
@@ -477,7 +577,9 @@ function CategoryMap({
             {tiny ? null : (
               <span
                 className={cn(
-                  "block break-words font-semibold leading-tight",
+                  // Keep whole words; overflow clips instead of letter-splitting (e.g. Uncategorize/d).
+                  "block overflow-hidden break-keep font-semibold leading-tight",
+                  isMobile && "whitespace-nowrap",
                   roomy && !isMobile ? "text-base" : "text-xs",
                 )}
               >
@@ -485,7 +587,12 @@ function CategoryMap({
               </span>
             )}
             {roomy ? (
-              <span className={cn("block", isMobile ? "text-xs" : "text-sm")}>
+              <span
+                className={cn(
+                  "block whitespace-nowrap tabular-nums",
+                  isMobile ? "text-xs" : "text-sm",
+                )}
+              >
                 {formatReportAmount(amount, report.currency, locale)} · {share}%
               </span>
             ) : null}
@@ -496,24 +603,53 @@ function CategoryMap({
   );
 }
 
-function Sparkline({ category, mode }: { category: SpendingCategory; mode: SpendingReportMode }) {
+function Sparkline({
+  category,
+  mode,
+  currency,
+  locale,
+  t,
+}: {
+  category: SpendingCategory;
+  mode: SpendingReportMode;
+  currency: string;
+  locale: string;
+  t: Translate;
+}) {
   const values = category.months.map((month) => (mode === "income" ? month.income : month.expense));
   const max = Math.max(...values, 0);
+  const monthLabel = new Intl.DateTimeFormat(locale, {
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
   return (
-    <span aria-hidden="true" className="flex h-6 items-end gap-0.5">
-      {values.map((value, index) => (
-        <span
-          key={category.months[index]?.month_start ?? index}
-          className={cn(
-            "w-1.5 rounded-sm",
-            index === values.length - 1 ? BAR_CLASS[mode] : "bg-muted-foreground/30",
-          )}
-          style={{ height: `${max > 0 ? Math.max(2, (value / max) * 24) : 2}px` }}
-        />
-      ))}
+    <span className="flex h-6 items-end gap-0.5" data-testid="spending-sparkline">
+      {values.map((value, index) => {
+        const month = category.months[index]?.month_start;
+        const title = t("money.spendingMonthTooltip", {
+          month: month ? monthLabel.format(new Date(`${month}T00:00:00Z`)) : String(index + 1),
+          amount: formatReportAmount(value, currency, locale),
+        });
+        return (
+          <span
+            key={month ?? index}
+            title={title}
+            aria-label={title}
+            role="img"
+            className={cn(
+              "inline-block w-1.5 rounded-sm",
+              index === values.length - 1 ? BAR_CLASS[mode] : "bg-muted-foreground/30",
+            )}
+            style={{ height: `${max > 0 ? Math.max(2, (value / max) * 24) : 2}px` }}
+          />
+        );
+      })}
     </span>
   );
 }
+
+const LIST_TOP_N = 10;
 
 /**
  * The phone's category list: a table would scroll sideways, so each row carries its comparisons
@@ -542,6 +678,10 @@ function CategoryList({
 }) {
   const total = categories.reduce((sum, category) => sum + amountOf(category, mode), 0);
   const year = String(report.period.last_year);
+  const prevShort = previousBasisShort(report.period.previous_start, locale);
+  const prevBadge = prevShort ? t("money.spendingBadgePrevious", { period: prevShort }) : undefined;
+  const yearBadge = t("money.spendingBadgeLastYear", { year });
+  const newLabel = t("money.spendingChangeNew");
   return (
     <Card>
       <ul className="divide-y">
@@ -570,20 +710,39 @@ function CategoryList({
                     )}
                     <span className="truncate">{name}</span>
                   </span>
-                  <span className="mt-0.5 flex flex-wrap gap-x-2 text-xs">
+                  <span className="mt-0.5 flex flex-wrap gap-1">
                     <Change
                       value={amount}
                       base={previousOf(category, mode)}
                       mode={mode}
-                      label={t("money.spendingVsPreviousShort")}
+                      basisLabel={prevBadge}
+                      title={t("money.spendingVsPreviousShort")}
+                      newLabel={newLabel}
                     />
                     <Change
                       value={amount}
                       base={lastYearOf(category, mode)}
                       mode={mode}
-                      label={t("money.spendingVsLastYear", { year })}
+                      basisLabel={yearBadge}
+                      title={t("money.spendingVsLastYear", { year })}
+                      newLabel={newLabel}
                     />
                   </span>
+                  {category.months.length > 0 ? (
+                    <span
+                      className="mt-1 block"
+                      onClick={(event) => event.stopPropagation()}
+                      onKeyDown={(event) => event.stopPropagation()}
+                    >
+                      <Sparkline
+                        category={category}
+                        mode={mode}
+                        currency={report.currency}
+                        locale={locale}
+                        t={t}
+                      />
+                    </span>
+                  ) : null}
                 </span>
                 <span className="text-right">
                   <span className="block text-[15px] font-semibold">
@@ -644,6 +803,10 @@ function CategoryTable({
 }) {
   const total = categories.reduce((sum, category) => sum + amountOf(category, mode), 0);
   const year = String(report.period.last_year);
+  const prevShort = previousBasisShort(report.period.previous_start, locale);
+  const prevBadge = prevShort ? t("money.spendingBadgePrevious", { period: prevShort }) : undefined;
+  const yearBadge = t("money.spendingBadgeLastYear", { year });
+  const newLabel = t("money.spendingChangeNew");
   const columns =
     "grid grid-cols-[minmax(10rem,2fr)_7rem_4rem_5.5rem_6.5rem_7rem_2.5rem] items-center gap-3";
 
@@ -685,12 +848,30 @@ function CategoryTable({
             {depth === 0 && total > 0 ? `${Math.round((amount / total) * 100)}%` : ""}
           </span>
           <span className="text-right">
-            <Change value={amount} base={previousOf(category, mode)} mode={mode} />
+            <Change
+              value={amount}
+              base={previousOf(category, mode)}
+              mode={mode}
+              basisLabel={prevBadge}
+              newLabel={newLabel}
+            />
           </span>
           <span className="text-right">
-            <Change value={amount} base={lastYearOf(category, mode)} mode={mode} />
+            <Change
+              value={amount}
+              base={lastYearOf(category, mode)}
+              mode={mode}
+              basisLabel={yearBadge}
+              newLabel={newLabel}
+            />
           </span>
-          <Sparkline category={category} mode={mode} />
+          <Sparkline
+            category={category}
+            mode={mode}
+            currency={report.currency}
+            locale={locale}
+            t={t}
+          />
           <Button
             type="button"
             variant="outline"
@@ -740,39 +921,64 @@ function DaysChart({
   const today = isoDay(new Date());
   const values = report.days.map((day) => (mode === "income" ? day.income : day.expense));
   const max = Math.max(...values, 0);
+  const ticks = niceAxisTicks(max);
+  const axisMax = ticks[ticks.length - 1] || 1;
   const dayLabel = new Intl.DateTimeFormat(locale, {
     day: "numeric",
     month: "short",
     timeZone: "UTC",
   });
   return (
-    <Card className="min-w-0 flex-[999_1_34rem]">
+    <Card className="min-w-0 w-full">
       <CardHeader className="pb-2">
         <CardTitle className="text-base">{t("money.spendingDays")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-2">
-        <div data-testid="spending-days" className="flex h-36 items-end gap-0.5 border-b">
-          {report.days.map((day, index) => {
-            const value = values[index] ?? 0;
-            const label = t("money.spendingDayTooltip", {
-              date: dayLabel.format(new Date(`${day.date}T00:00:00Z`)),
-              amount: formatReportAmount(value, report.currency, locale),
-            });
-            return (
+        <div className="flex gap-2">
+          <div
+            data-testid="spending-days-axis"
+            className="flex h-36 w-12 shrink-0 flex-col justify-between text-right text-[10px] leading-none text-muted-foreground"
+          >
+            {[...ticks].reverse().map((tick) => (
+              <span key={tick}>{formatReportAmount(tick, report.currency, locale)}</span>
+            ))}
+          </div>
+          <div
+            data-testid="spending-days"
+            className="relative flex h-36 min-w-0 flex-1 items-end gap-0.5 border-b"
+          >
+            {ticks.slice(1).map((tick) => (
               <span
-                key={day.date}
-                title={label}
-                className={cn(
-                  "flex-1 rounded-t-sm",
-                  day.date > today ? "bg-muted" : BAR_CLASS[mode],
-                  day.date === today && "opacity-70",
-                )}
-                style={{ height: `${max > 0 ? (value / max) * 100 : 0}%` }}
+                key={`grid-${tick}`}
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-x-0 border-t border-muted"
+                style={{ bottom: `${(tick / axisMax) * 100}%` }}
               />
-            );
-          })}
+            ))}
+            {report.days.map((day, index) => {
+              const value = values[index] ?? 0;
+              const label = t("money.spendingDayTooltip", {
+                date: dayLabel.format(new Date(`${day.date}T00:00:00Z`)),
+                amount: formatReportAmount(value, report.currency, locale),
+              });
+              return (
+                <button
+                  key={day.date}
+                  type="button"
+                  title={label}
+                  aria-label={label}
+                  className={cn(
+                    "relative z-[1] flex-1 rounded-t-sm",
+                    day.date > today ? "bg-muted" : BAR_CLASS[mode],
+                    day.date === today && "opacity-70",
+                  )}
+                  style={{ height: `${axisMax > 0 ? (value / axisMax) * 100 : 0}%` }}
+                />
+              );
+            })}
+          </div>
         </div>
-        <div className="flex justify-between text-xs text-muted-foreground">
+        <div className="flex justify-between pl-14 text-xs text-muted-foreground">
           <span>
             {report.days[0] ? dayLabel.format(new Date(`${report.days[0].date}T00:00:00Z`)) : ""}
           </span>
@@ -791,52 +997,85 @@ function MerchantList({
   report,
   t,
   locale,
+  showAll,
+  onShowAll,
+  onSelect,
 }: {
   report: SpendingReport;
   t: Translate;
   locale: string;
+  showAll: boolean;
+  onShowAll: (next: boolean) => void;
+  onSelect: (merchant: SpendingMerchant) => void;
 }) {
   if (report.merchants.length === 0) return null;
+  const visible = showAll ? report.merchants : report.merchants.slice(0, LIST_TOP_N);
+  const prevShort = previousBasisShort(report.period.previous_start, locale);
+  const prevBadge = prevShort ? t("money.spendingBadgePrevious", { period: prevShort }) : undefined;
+  const newLabel = t("money.spendingChangeNew");
   return (
-    <Card className="min-w-0 flex-[1_1_20rem]">
-      <CardHeader className="pb-2">
+    <Card className="min-w-0 w-full">
+      <CardHeader className="space-y-1 pb-2">
         <CardTitle className="text-base">{t("money.spendingMerchants")}</CardTitle>
+        <p className="whitespace-nowrap text-[11px] text-muted-foreground">
+          {t("money.spendingVsPreviousShort")}
+        </p>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-3">
         <ul data-testid="spending-merchants" className="space-y-3">
-          {report.merchants.slice(0, 6).map((merchant) => (
-            <li
-              key={`${merchant.brand_id ?? ""}:${merchant.name}`}
-              className="flex items-center gap-3"
-            >
-              {merchant.logo_url ? (
-                // eslint-disable-next-line @next/next/no-img-element -- brand logos come from many hosts
-                <img src={merchant.logo_url} alt="" className="h-9 w-9 rounded-lg object-cover" />
-              ) : (
-                <span
-                  aria-hidden="true"
-                  className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted font-semibold"
-                  style={
-                    merchant.base_color
-                      ? { background: merchant.base_color, color: "#fff" }
-                      : undefined
-                  }
-                >
-                  {merchant.name.charAt(0).toUpperCase()}
+          {visible.map((merchant) => (
+            <li key={`${merchant.brand_id ?? ""}:${merchant.name}`}>
+              <button
+                type="button"
+                className="flex w-full items-center gap-3 rounded-lg text-left hover:bg-muted/60"
+                onClick={() => onSelect(merchant)}
+              >
+                {merchant.logo_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- brand logos come from many hosts
+                  <img src={merchant.logo_url} alt="" className="h-9 w-9 rounded-lg object-cover" />
+                ) : (
+                  <span
+                    aria-hidden="true"
+                    className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted font-semibold"
+                    style={
+                      merchant.base_color
+                        ? { background: merchant.base_color, color: "#fff" }
+                        : undefined
+                    }
+                  >
+                    {merchant.name.charAt(0).toUpperCase()}
+                  </span>
+                )}
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate whitespace-nowrap text-sm font-medium">
+                    {merchant.name}
+                  </span>
+                  <span className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+                    <span className="whitespace-nowrap">
+                      {t("money.spendingMerchantCount", { count: merchant.transaction_count })}
+                    </span>
+                    <Change
+                      value={merchant.expense}
+                      base={merchant.previous_expense}
+                      mode="expense"
+                      basisLabel={prevBadge}
+                      title={t("money.spendingVsPreviousShort")}
+                      newLabel={newLabel}
+                    />
+                  </span>
                 </span>
-              )}
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-medium">{merchant.name}</span>
-                <span className="block text-xs text-muted-foreground">
-                  {t("money.spendingMerchantCount", { count: merchant.transaction_count })}
+                <span className="whitespace-nowrap text-sm font-semibold tabular-nums">
+                  {formatReportAmount(merchant.expense, report.currency, locale)}
                 </span>
-              </span>
-              <span className="text-sm font-semibold">
-                {formatReportAmount(merchant.expense, report.currency, locale)}
-              </span>
+              </button>
             </li>
           ))}
         </ul>
+        {report.merchants.length > LIST_TOP_N ? (
+          <Button type="button" variant="ghost" size="sm" onClick={() => onShowAll(!showAll)}>
+            {showAll ? t("money.spendingShowTop") : t("money.spendingShowAll")}
+          </Button>
+        ) : null}
       </CardContent>
     </Card>
   );
@@ -863,9 +1102,15 @@ export default function MoneyReportsPage() {
     [searchParams],
   );
   const categoryId = searchParams?.get("category") || null;
-  const [mode, setMode] = useState<SpendingReportMode>("expense");
+  const merchantName = searchParams?.get("merchant") || null;
+  const brandId = searchParams?.get("brand") || null;
+  const [mode, setMode] = useState<SpendingReportMode>(
+    searchParams?.get("mode") === "income" ? "income" : "expense",
+  );
   const [mapParentId, setMapParentId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [showAllCategories, setShowAllCategories] = useState(false);
+  const [showAllMerchants, setShowAllMerchants] = useState(false);
 
   const reportQuery = useMoneySpendingReport({
     personId,
@@ -873,6 +1118,8 @@ export default function MoneyReportsPage() {
     currency: REPORT_CURRENCY,
     accountIds,
     categoryId,
+    brandId,
+    merchantName,
   });
   const report = reportQuery.data;
 
@@ -903,19 +1150,45 @@ export default function MoneyReportsPage() {
   function setCategoryFilter(id: string | null) {
     setMapParentId(null);
     setExpanded(new Set());
+    setShowAllCategories(false);
     updateParams((params) => {
       if (id) params.set("category", id);
       else params.delete("category");
     });
   }
 
+  function setMerchantFilter(merchant: SpendingMerchant | null) {
+    setShowAllMerchants(false);
+    updateParams((params) => {
+      if (merchant) {
+        params.set("merchant", merchant.name);
+        if (merchant.brand_id) params.set("brand", merchant.brand_id);
+        else params.delete("brand");
+      } else {
+        params.delete("merchant");
+        params.delete("brand");
+      }
+    });
+  }
+
   const allCategories = report?.categories ?? [];
   const filterCategory = allCategories.find((category) => category.id === categoryId) ?? null;
-  const tableCategories = report ? topCategories(allCategories, categoryId, mode) : [];
+  const allTableCategories = report ? topCategories(allCategories, categoryId, mode) : [];
+  const tableCategories = showAllCategories
+    ? allTableCategories
+    : allTableCategories.slice(0, LIST_TOP_N);
   const mapParent = allCategories.find((category) => category.id === mapParentId) ?? null;
   const mapCategories = mapParent
     ? childCategories(allCategories, mapParent.id, mode)
-    : tableCategories;
+    : allTableCategories;
+  const transactionsHref = `/money/transactions?${transactionsFeedQuery({
+    start: period.start,
+    end: period.end,
+    accountIds,
+    categoryId,
+    merchantName,
+    mode,
+  })}`;
 
   if (!personId) {
     return (
@@ -927,9 +1200,23 @@ export default function MoneyReportsPage() {
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold">{t("money.spendingTitle")}</h1>
-        <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h1 className="text-2xl font-semibold">{t("money.spendingTitle")}</h1>
+          {!isMobile ? (
+            <span className="whitespace-nowrap text-sm text-muted-foreground">
+              {t("money.spendingCurrencyNote", { currency: REPORT_CURRENCY })}
+            </span>
+          ) : null}
+        </div>
+        <div
+          className={cn(
+            "flex min-w-0 gap-2",
+            isMobile
+              ? "flex-col"
+              : "flex-nowrap items-center overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+          )}
+        >
           <PeriodControls
             key={`${period.start}:${period.end}`}
             period={period}
@@ -948,28 +1235,50 @@ export default function MoneyReportsPage() {
             }
             t={t}
           />
-          <span className="text-sm text-muted-foreground">
-            {t("money.spendingCurrencyNote", { currency: REPORT_CURRENCY })}
-          </span>
         </div>
+        <a
+          href={transactionsHref}
+          target={isMobile ? undefined : "_blank"}
+          rel={isMobile ? undefined : "noreferrer"}
+          data-testid="spending-view-transactions"
+          className="inline-flex w-fit whitespace-nowrap text-sm font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+        >
+          {isMobile
+            ? t("money.spendingViewTransactionsShort")
+            : t("money.spendingViewTransactions")}
+        </a>
       </div>
 
-      {categoryId ? (
-        <div>
-          <span className="inline-flex items-center gap-2 rounded-full bg-foreground py-1 pl-3 pr-1 text-sm text-background">
-            {/* Named when the report still lists it; an empty filtered report still lets it go. */}
-            {filterCategory
-              ? t("money.spendingFilterChip", { name: categoryName(filterCategory, locale) })
-              : t("money.spendingFilterUnnamed")}
-            <button
-              type="button"
-              aria-label={t("money.spendingClearFilter")}
-              onClick={() => setCategoryFilter(null)}
-              className="rounded-full bg-background/20 p-1"
-            >
-              <X className="h-3 w-3" />
-            </button>
-          </span>
+      {categoryId || merchantName ? (
+        <div className="flex flex-wrap gap-2">
+          {categoryId ? (
+            <span className="inline-flex items-center gap-2 rounded-full bg-foreground py-1 pl-3 pr-1 text-sm text-background">
+              {filterCategory
+                ? t("money.spendingFilterChip", { name: categoryName(filterCategory, locale) })
+                : t("money.spendingFilterUnnamed")}
+              <button
+                type="button"
+                aria-label={t("money.spendingClearFilter")}
+                onClick={() => setCategoryFilter(null)}
+                className="rounded-full bg-background/20 p-1"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          ) : null}
+          {merchantName ? (
+            <span className="inline-flex items-center gap-2 rounded-full bg-foreground py-1 pl-3 pr-1 text-sm text-background">
+              {t("money.spendingFilterChipMerchant", { name: merchantName })}
+              <button
+                type="button"
+                aria-label={t("money.spendingClearFilter")}
+                onClick={() => setMerchantFilter(null)}
+                className="rounded-full bg-background/20 p-1"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          ) : null}
         </div>
       ) : null}
 
@@ -1039,9 +1348,13 @@ export default function MoneyReportsPage() {
                       onClick={() => {
                         setMode(value);
                         setMapParentId(null);
+                        updateParams((params) => {
+                          if (value === "income") params.set("mode", "income");
+                          else params.delete("mode");
+                        });
                       }}
                       className={cn(
-                        "rounded-md px-3 py-1 text-sm",
+                        "whitespace-nowrap rounded-md px-3 py-1 text-sm",
                         mode === value
                           ? "bg-background font-semibold shadow-sm"
                           : "text-muted-foreground",
@@ -1052,7 +1365,7 @@ export default function MoneyReportsPage() {
                   ))}
                 </div>
               </div>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-sm leading-snug text-muted-foreground [overflow-wrap:anywhere]">
                 {t(isMobile ? "money.spendingCategoriesHintTouch" : "money.spendingCategoriesHint")}
               </p>
             </CardHeader>
@@ -1084,35 +1397,56 @@ export default function MoneyReportsPage() {
             </CardContent>
           </Card>
 
-          {tableCategories.length > 0 && isMobile ? (
-            <CategoryList
-              report={report}
-              categories={tableCategories}
-              allCategories={allCategories}
-              mode={mode}
-              expanded={expanded}
-              onToggle={toggleExpanded}
-              onFilter={(category) => setCategoryFilter(category.id)}
-              t={t}
-              locale={locale}
-            />
-          ) : tableCategories.length > 0 ? (
-            <CategoryTable
-              report={report}
-              categories={tableCategories}
-              allCategories={allCategories}
-              mode={mode}
-              expanded={expanded}
-              onToggle={toggleExpanded}
-              onFilter={(category) => setCategoryFilter(category.id)}
-              t={t}
-              locale={locale}
-            />
+          {tableCategories.length > 0 ? (
+            <div className="space-y-2">
+              {isMobile ? (
+                <CategoryList
+                  report={report}
+                  categories={tableCategories}
+                  allCategories={allCategories}
+                  mode={mode}
+                  expanded={expanded}
+                  onToggle={toggleExpanded}
+                  onFilter={(category) => setCategoryFilter(category.id)}
+                  t={t}
+                  locale={locale}
+                />
+              ) : (
+                <CategoryTable
+                  report={report}
+                  categories={tableCategories}
+                  allCategories={allCategories}
+                  mode={mode}
+                  expanded={expanded}
+                  onToggle={toggleExpanded}
+                  onFilter={(category) => setCategoryFilter(category.id)}
+                  t={t}
+                  locale={locale}
+                />
+              )}
+              {allTableCategories.length > LIST_TOP_N ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowAllCategories((current) => !current)}
+                >
+                  {showAllCategories ? t("money.spendingShowTop") : t("money.spendingShowAll")}
+                </Button>
+              ) : null}
+            </div>
           ) : null}
 
-          <div className="flex flex-wrap items-start gap-4">
+          <div className="flex flex-col gap-4">
             <DaysChart report={report} mode={mode} t={t} locale={locale} />
-            <MerchantList report={report} t={t} locale={locale} />
+            <MerchantList
+              report={report}
+              t={t}
+              locale={locale}
+              showAll={showAllMerchants}
+              onShowAll={setShowAllMerchants}
+              onSelect={setMerchantFilter}
+            />
           </div>
         </>
       )}
