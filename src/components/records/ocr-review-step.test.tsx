@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { OcrReviewStep } from "./ocr-review-step";
@@ -155,7 +155,8 @@ describe("OcrReviewStep", () => {
   });
 
   it("skips OCR update when text is unchanged and keeps user on failed extraction", async () => {
-    extractStructureMock.mockResolvedValueOnce({ success: false });
+    const extraction = Promise.withResolvers<{ success: boolean }>();
+    extractStructureMock.mockReturnValueOnce(extraction.promise);
     const onComplete = vi.fn();
     const user = userEvent.setup();
 
@@ -168,12 +169,15 @@ describe("OcrReviewStep", () => {
       />,
     );
 
-    await user.click(screen.getAllByRole("button", { name: "records.ocr.confirmAndExtract" })[0]);
+    const [confirm] = screen.getAllByRole("button", { name: "records.ocr.confirmAndExtract" });
+    await user.click(confirm);
+    expect(confirm).toBeDisabled();
 
-    await waitFor(() => {
-      expect(updateMutateAsyncMock).not.toHaveBeenCalled();
-      expect(extractStructureMock).toHaveBeenCalledWith({ recordId: "record-1" });
-    });
+    await act(async () => extraction.resolve({ success: false }));
+    expect(confirm).toBeEnabled();
+    expect(screen.getByPlaceholderText("records.ocr.noTextExtracted")).toHaveValue("same text");
+    expect(updateMutateAsyncMock).not.toHaveBeenCalled();
+    expect(extractStructureMock).toHaveBeenCalledWith({ recordId: "record-1" });
     expect(onComplete).not.toHaveBeenCalled();
   });
 });

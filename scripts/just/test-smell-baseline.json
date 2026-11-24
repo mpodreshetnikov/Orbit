@@ -1,31 +1,13 @@
 {
-  "generated_at": "2026-11-24T20:16:40.522Z",
-  "total": 67,
+  "generated_at": "2026-11-24T21:13:45.181Z",
+  "total": 31,
   "counts": {
     "browserExtension/src/core/content-bridge.test.ts::mock-call-only": 10,
     "browserExtension/src/core/import-runner.test.ts::mock-call-only": 2,
     "browserExtension/src/core/self-update.test.ts::mock-call-only": 3,
-    "src/app/health/conditions/[id]/page.test.tsx::mock-call-only": 4,
     "src/app/money/categories/page.test.tsx::mock-call-only": 5,
-    "src/components/catalogs/body-site-edit-dialog.test.tsx::mock-call-only": 2,
-    "src/components/catalogs/finding-type-edit-dialog.test.tsx::mock-call-only": 2,
-    "src/components/catalogs/measurement-catalog-edit-dialog.test.tsx::mock-call-only": 1,
-    "src/components/checkups/checkup-form.test.tsx::mock-call-only": 1,
-    "src/components/checkups/edit-completion-dialog.test.tsx::mock-call-only": 2,
-    "src/components/checkups/mark-complete-dialog.test.tsx::mock-call-only": 2,
-    "src/components/checkups/plan-dialog.test.tsx::mock-call-only": 2,
-    "src/components/conditions/condition-add-history-dialog.test.tsx::mock-call-only": 2,
-    "src/components/conditions/condition-edit-dialog.test.tsx::mock-call-only": 3,
-    "src/components/conditions/condition-record-row.test.tsx::mock-call-only": 1,
     "src/components/layout/person-id-from-url-sync.test.tsx::mock-call-only": 3,
-    "src/components/measurements/add-measurement-dialog.test.tsx::mock-call-only": 2,
-    "src/components/measurements/body-map/body-map-callouts.test.tsx::mock-call-only": 2,
-    "src/components/measurements/body-map/body-map.test.tsx::mock-call-only": 2,
-    "src/components/measurements/edit-measurement-dialog.test.tsx::mock-call-only": 2,
-    "src/components/measurements/measurement-visibility-dialog.test.tsx::mock-call-only": 2,
     "src/components/money/transaction-form.test.tsx::mock-call-only": 5,
-    "src/components/records/ocr-review-step.test.tsx::mock-call-only": 1,
-    "src/components/records/structure-review-step.test.tsx::mock-call-only": 3,
     "src/lib/medications/regenerate-dose-events.test.ts::mock-call-only": 3
   }
 }

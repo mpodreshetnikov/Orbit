@@ -180,18 +180,29 @@ describe("a closure nobody has confirmed", () => {
   });
 
   it("keeps delete on a mention that is not a proposed closure", async () => {
-    const onDelete = vi.fn();
-    const { container } = render(
-      <ConditionRecordRow
-        conditionRecord={makeRecord({ ...pendingClosure, is_user_verified: true })}
-        onDelete={onDelete}
-        onDismiss={vi.fn()}
-      />,
-    );
+    function History() {
+      const [deleted, setDeleted] = React.useState(false);
+      return (
+        <>
+          {!deleted && (
+            <ConditionRecordRow
+              conditionRecord={makeRecord({ ...pendingClosure, is_user_verified: true })}
+              onDelete={() => setDeleted(true)}
+              onDismiss={vi.fn()}
+            />
+          )}
+          <ConditionRecordRow
+            conditionRecord={makeRecord({ condition_name: "Another condition" })}
+          />
+        </>
+      );
+    }
+    const { container } = render(<History />);
 
     await userEvent
       .setup()
       .click(container.querySelector("button.text-destructive") as HTMLButtonElement);
-    expect(onDelete).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Original condition")).toBeNull();
+    expect(screen.getByText("Another condition")).toBeInTheDocument();
   });
 });

@@ -3,6 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MeasurementHistoryPoint } from "@/types";
+import { ControlledDialog } from "../../../test/utils/web/controlled-dialog";
 
 const hookMocks = vi.hoisted(() => ({
   useUpdateMeasurement: vi.fn(),
@@ -110,65 +111,71 @@ describe("EditMeasurementDialog", () => {
   });
 
   it("ignores submit when required context is missing", async () => {
-    const onOpenChange = vi.fn();
+    const user = userEvent.setup();
     const updateMutation = mutationMock();
     hookMocks.useUpdateMeasurement.mockReturnValue(updateMutation);
 
     const { EditMeasurementDialog } = await import("./edit-measurement-dialog");
-    const { rerender } = render(
-      <EditMeasurementDialog
-        open
-        onOpenChange={onOpenChange}
-        personId={null}
-        measurement={measurement}
-        catalogId="catalog-1"
-      />,
+    const dialogFor = (personId: string | null, reading: MeasurementHistoryPoint | null) => (
+      <ControlledDialog>
+        {(dialog) => (
+          <EditMeasurementDialog
+            {...dialog}
+            personId={personId}
+            measurement={reading}
+            catalogId="catalog-1"
+          />
+        )}
+      </ControlledDialog>
     );
+    const { rerender } = render(dialogFor(null, measurement));
 
-    await userEvent.setup().click(screen.getByRole("button", { name: "common.save" }));
+    const notes = screen.getByLabelText("measurements.notes");
+    await user.clear(notes);
+    await user.type(notes, "unsaved note");
+    await user.click(screen.getByRole("button", { name: "common.save" }));
+    expect(screen.getByLabelText("measurements.notes")).toHaveValue("unsaved note");
     expect(updateMutation.mutateAsync).not.toHaveBeenCalled();
 
-    rerender(
-      <EditMeasurementDialog
-        open
-        onOpenChange={onOpenChange}
-        personId="person-1"
-        measurement={null}
-        catalogId="catalog-1"
-      />,
-    );
-    await userEvent.setup().click(screen.getByRole("button", { name: "common.save" }));
+    rerender(dialogFor("person-1", null));
+    await user.click(screen.getByRole("button", { name: "common.save" }));
+    expect(screen.getByLabelText("measurements.notes")).toHaveValue("unsaved note");
     expect(updateMutation.mutateAsync).not.toHaveBeenCalled();
   });
 
   it("handles update mutation error without closing dialog", async () => {
-    const onOpenChange = vi.fn();
+    const error = new Error("failed");
     const updateMutation = {
       isPending: false,
       mutate: vi.fn(),
-      mutateAsync: vi.fn().mockRejectedValue(new Error("failed")),
+      mutateAsync: vi.fn().mockRejectedValueOnce(error).mockResolvedValue(undefined),
     };
     hookMocks.useUpdateMeasurement.mockReturnValue(updateMutation);
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     const { EditMeasurementDialog } = await import("./edit-measurement-dialog");
     render(
-      <EditMeasurementDialog
-        open
-        onOpenChange={onOpenChange}
-        personId="person-1"
-        measurement={measurement}
-        catalogId="catalog-1"
-      />,
+      <ControlledDialog>
+        {(dialog) => (
+          <EditMeasurementDialog
+            {...dialog}
+            personId="person-1"
+            measurement={measurement}
+            catalogId="catalog-1"
+          />
+        )}
+      </ControlledDialog>,
     );
 
-    await userEvent.setup().click(screen.getByRole("button", { name: "common.save" }));
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "common.save" }));
 
-    await waitFor(() => {
-      expect(updateMutation.mutateAsync).toHaveBeenCalled();
-      expect(onOpenChange).not.toHaveBeenCalledWith(false);
-      expect(errorSpy).toHaveBeenCalled();
-    });
+    expect(errorSpy).toHaveBeenCalledWith("Failed to update measurement:", error);
+    expect(screen.getByLabelText("measurements.notes")).toHaveValue("  initial note  ");
+    expect(screen.getByRole("button", { name: "common.save" })).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "common.save" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "common.save" })).toBeNull());
 
     errorSpy.mockRestore();
   });

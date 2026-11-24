@@ -3,6 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MarkCompleteDialog } from "./mark-complete-dialog";
+import { ControlledDialog } from "../../../test/utils/web/controlled-dialog";
 
 const hookMocks = vi.hoisted(() => ({
   useCompleteCheckupItem: vi.fn(),
@@ -64,21 +65,23 @@ describe("MarkCompleteDialog", () => {
   });
 
   it("submits completion with selected evidence record and clears planned date", async () => {
-    const onOpenChange = vi.fn();
     const onSaved = vi.fn();
     render(
-      <MarkCompleteDialog
-        open
-        onOpenChange={onOpenChange}
-        item={makeItem()}
-        records={
-          [
-            { id: "rec-1", title: "Visit note", record_date: "2026-02-09" },
-            { id: "rec-2", title: "Lab note", record_date: "2026-02-08" },
-          ] as unknown as import("@/types").MedicalRecordListItem[]
-        }
-        onSaved={onSaved}
-      />,
+      <ControlledDialog>
+        {(dialog) => (
+          <MarkCompleteDialog
+            {...dialog}
+            item={makeItem()}
+            records={
+              [
+                { id: "rec-1", title: "Visit note", record_date: "2026-02-09" },
+                { id: "rec-2", title: "Lab note", record_date: "2026-02-08" },
+              ] as unknown as import("@/types").MedicalRecordListItem[]
+            }
+            onSaved={onSaved}
+          />
+        )}
+      </ControlledDialog>,
     );
 
     const user = userEvent.setup();
@@ -86,37 +89,46 @@ describe("MarkCompleteDialog", () => {
     await user.click(screen.getByRole("button", { name: /Visit note/ }));
     await user.click(screen.getByRole("button", { name: "checkups.markComplete" }));
 
-    await waitFor(() => {
-      expect(completeMutateAsync).toHaveBeenCalledWith({
-        checkup_item_id: "item-1",
-        done_at: expect.any(String),
-        note: "done note",
-        evidence_record_id: "rec-1",
-      });
-      expect(updateMutateAsync).toHaveBeenCalledWith({
-        id: "item-1",
-        updates: { planned_on: null },
-      });
-      expect(onSaved).toHaveBeenCalled();
-      expect(onOpenChange).toHaveBeenCalledWith(false);
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "checkups.markComplete" })).toBeNull(),
+    );
+    expect(completeMutateAsync).toHaveBeenCalledWith({
+      checkup_item_id: "item-1",
+      done_at: expect.any(String),
+      note: "done note",
+      evidence_record_id: "rec-1",
     });
+    expect(updateMutateAsync).toHaveBeenCalledWith({
+      id: "item-1",
+      updates: { planned_on: null },
+    });
+    expect(onSaved).toHaveBeenCalled();
   });
 
   it("skips planned_on update when item has no planned date", async () => {
     render(
-      <MarkCompleteDialog
-        open
-        onOpenChange={vi.fn()}
-        item={makeItem({ planned_on: null })}
-        records={[] as import("@/types").MedicalRecordListItem[]}
-      />,
+      <ControlledDialog>
+        {(dialog) => (
+          <MarkCompleteDialog
+            {...dialog}
+            item={makeItem({ planned_on: null })}
+            records={[] as import("@/types").MedicalRecordListItem[]}
+          />
+        )}
+      </ControlledDialog>,
     );
 
     await userEvent.setup().click(screen.getByRole("button", { name: "checkups.markComplete" }));
-    await waitFor(() => {
-      expect(completeMutateAsync).toHaveBeenCalled();
-      expect(updateMutateAsync).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "checkups.markComplete" })).toBeNull(),
+    );
+    expect(completeMutateAsync).toHaveBeenCalledWith({
+      checkup_item_id: "item-1",
+      done_at: expect.any(String),
+      note: null,
+      evidence_record_id: null,
     });
+    expect(updateMutateAsync).not.toHaveBeenCalled();
   });
 
   it("returns null when item is missing", () => {
