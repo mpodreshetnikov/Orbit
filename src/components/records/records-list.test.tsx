@@ -157,7 +157,13 @@ describe("RecordsList Decision B", () => {
     });
     render(<RecordsList personId="person-1" personName="Ada" />);
     await user.click(screen.getByRole("button", { name: "remove-record-1" }));
-    await user.click(screen.getByRole("button", { name: "common.remove" }));
+    const confirmRemove = screen.getByRole("button", { name: "common.remove" });
+    expect(confirmRemove).toBeVisible();
+    expect(mutate).not.toHaveBeenCalled();
+
+    await user.click(confirmRemove);
+
     expect(mutate).toHaveBeenCalledWith("record-1");
+    expect(confirmRemove).not.toBeInTheDocument();
   });
 });
