@@ -468,8 +468,9 @@ describe("use-money-transactions", () => {
       merchant_name: "Store",
     };
     const txBuilder = createQueryBuilder({ data: tx, error: null });
+    const savedLine = { id: "line-1", transaction_id: "tx-1", title: "Store", amount: 123 };
     const lineBuilder = createQueryBuilder({
-      data: [{ id: "line-1", transaction_id: "tx-1", title: "Store", amount: 123 }],
+      data: [savedLine],
       error: null,
     });
     const from = vi.fn((table: string) => {
@@ -481,35 +482,40 @@ describe("use-money-transactions", () => {
 
     const { useCreateMoneyTransaction } = await import("./use-money-transactions");
     const { result, queryClient } = renderHookWithQueryClient(() => useCreateMoneyTransaction());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const listKey = ["money-transactions", "p1"];
+    const otherListKey = ["money-transactions", "p2"];
+    const feedKey = ["money-transaction-feed", "p1", { pageSize: 20 }];
+    queryClient.setQueryData(listKey, [{ id: "tx-existing" }]);
+    queryClient.setQueryData(otherListKey, [{ id: "tx-other" }]);
+    queryClient.setQueryData(feedKey, { pages: [{ items: [{ id: "tx-existing" }] }] });
 
     await act(async () => {
-      await result.current.mutateAsync({
-        transaction: {
-          payer_person_id: "p1",
-          account_id: "acc-1",
-          posted_at: "2026-01-01T00:00:00.000Z",
-          amount: 123,
-          currency: "USD",
-          transaction_type: "expense",
-          merchant_name: "Store",
-        } as CreateMoneyTransactionInput,
-        lineItems: [],
-      });
+      await expect(
+        result.current.mutateAsync({
+          transaction: {
+            payer_person_id: "p1",
+            account_id: "acc-1",
+            posted_at: "2026-01-01T00:00:00.000Z",
+            amount: 123,
+            currency: "USD",
+            transaction_type: "expense",
+            merchant_name: "Store",
+          } as CreateMoneyTransactionInput,
+          lineItems: [],
+        }),
+      ).resolves.toEqual({ ...tx, line_items: [savedLine] });
     });
 
-    expect(lineBuilder.insert).toHaveBeenCalledWith(
-      expect.arrayContaining([
-        expect.objectContaining({
-          transaction_id: "tx-1",
-          title: "Store",
-          amount: 123,
-        }),
-      ]),
-    );
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["money-transactions", "p1"],
-    });
+    expect(lineBuilder.insert).toHaveBeenCalledWith([
+      expect.objectContaining({
+        transaction_id: "tx-1",
+        title: "Store",
+        amount: 123,
+      }),
+    ]);
+    expect(queryClient.getQueryState(listKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherListKey)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(feedKey)?.isInvalidated).toBe(true);
   });
 
   it("creates transaction with default item values and returns line insert errors", async () => {
@@ -717,9 +723,13 @@ describe("use-money-transactions", () => {
   });
 
   it("sends one line item for the whole amount when none are given", async () => {
+    const savedLine = { id: "line-1", transaction_id: "tx-1", title: "Кафе", amount: -300 };
     const rpc = vi.fn(() =>
       createQueryBuilder({
-        data: { transaction: { id: "tx-1", payer_person_id: "p1" }, line_items: [] },
+        data: {
+          transaction: { id: "tx-1", payer_person_id: "p1", amount: -300 },
+          line_items: [savedLine],
+        },
         error: null,
       }),
     );
@@ -728,10 +738,17 @@ describe("use-money-transactions", () => {
     const { useUpdateMoneyTransaction } = await import("./use-money-transactions");
     const { result } = renderHookWithQueryClient(() => useUpdateMoneyTransaction());
     await act(async () => {
-      await result.current.mutateAsync({
+      await expect(
+        result.current.mutateAsync({
+          id: "tx-1",
+          updates: { amount: -300, merchant_name: "Кафе" } as UpdateMoneyTransactionInput,
+          lineItems: [],
+        }),
+      ).resolves.toEqual({
         id: "tx-1",
-        updates: { amount: -300, merchant_name: "Кафе" } as UpdateMoneyTransactionInput,
-        lineItems: [],
+        payer_person_id: "p1",
+        amount: -300,
+        line_items: [savedLine],
       });
     });
 
@@ -766,7 +783,12 @@ describe("use-money-transactions", () => {
 
     const { useDeleteMoneyTransaction } = await import("./use-money-transactions");
     const { result, queryClient } = renderHookWithQueryClient(() => useDeleteMoneyTransaction());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const listKey = ["money-transactions", "p1"];
+    const otherListKey = ["money-transactions", "p2"];
+    const feedKey = ["money-transaction-feed", "p1", { pageSize: 20 }];
+    queryClient.setQueryData(listKey, [{ id: "tx-existing" }]);
+    queryClient.setQueryData(otherListKey, [{ id: "tx-other" }]);
+    queryClient.setQueryData(feedKey, { pages: [{ items: [{ id: "tx-existing" }] }] });
 
     await act(async () => {
       await result.current.mutateAsync({
@@ -777,9 +799,9 @@ describe("use-money-transactions", () => {
 
     expect(txBuilder.delete).toHaveBeenCalled();
     expect(txBuilder.eq).toHaveBeenCalledWith("id", "tx-1");
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["money-transactions", "p1"],
-    });
+    expect(queryClient.getQueryState(listKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherListKey)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(feedKey)?.isInvalidated).toBe(true);
   });
 
   it("returns delete transaction errors", async () => {

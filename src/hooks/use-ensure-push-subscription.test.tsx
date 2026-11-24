@@ -1,218 +1,150 @@
 import React from "react";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-describe("use-ensure-push-subscription", () => {
-  const originalVapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+const subscriptionPayload = {
+  endpoint: "https://push.example/endpoint",
+  keys: { p256dh: "p256dh-key", auth: "auth-key" },
+};
 
+const originalServiceWorker = Object.getOwnPropertyDescriptor(navigator, "serviceWorker");
+
+function stubPushBrowser({
+  permission = "granted",
+  hasRegistration = false,
+  subscriptionError,
+}: {
+  permission?: NotificationPermission;
+  hasRegistration?: boolean;
+  subscriptionError?: Error;
+} = {}) {
+  const subscription = { toJSON: () => subscriptionPayload };
+  let activeSubscription: typeof subscription | null = null;
+  const subscribe = vi.fn(async () => {
+    if (subscriptionError) throw subscriptionError;
+    activeSubscription = subscription;
+    return subscription;
+  });
+  const registration = {
+    pushManager: { getSubscription: async () => activeSubscription, subscribe },
+  };
+  let registeredWorker = hasRegistration ? registration : null;
+  const getRegistration = vi.fn(async () => registeredWorker);
+  const register = vi.fn(async () => {
+    registeredWorker = registration;
+    return registration;
+  });
+  Object.defineProperty(navigator, "serviceWorker", {
+    configurable: true,
+    value: { getRegistration, register },
+  });
+
+  const requestPermission = vi.fn(async () => "granted");
+  vi.stubGlobal("Notification", { permission, requestPermission });
+  vi.stubGlobal("PushManager", class PushManagerStub {});
+
+  const requests: Request[] = [];
+  vi.stubGlobal("fetch", async (url: string, options: RequestInit) => {
+    requests.push(new Request(new URL(url, window.location.origin), options));
+    return new Response(null, { status: 204 });
+  });
+
+  return {
+    getRegistration,
+    register,
+    requestPermission,
+    requests,
+    subscribe,
+    getRegisteredWorker: () => registeredWorker,
+    getActiveSubscription: () => activeSubscription,
+  };
+}
+
+describe("use-ensure-push-subscription", () => {
   afterEach(() => {
-    process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY = originalVapidKey;
+    if (originalServiceWorker) {
+      Object.defineProperty(navigator, "serviceWorker", originalServiceWorker);
+    } else {
+      Reflect.deleteProperty(navigator, "serviceWorker");
+    }
+    vi.unstubAllEnvs();
     vi.unstubAllGlobals();
     vi.resetModules();
   });
 
   it("does nothing when VAPID key is missing", async () => {
-    delete process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-
-    const getRegistrationMock = vi.fn();
-    const registerMock = vi.fn();
-    Object.defineProperty(globalThis.navigator, "serviceWorker", {
-      configurable: true,
-      writable: true,
-      value: {
-        getRegistration: getRegistrationMock,
-        register: registerMock,
-      },
-    });
-
-    Object.defineProperty(globalThis, "Notification", {
-      configurable: true,
-      writable: true,
-      value: class NotificationMock {
-        static permission: NotificationPermission = "granted";
-        static requestPermission = vi.fn().mockResolvedValue("granted");
-      },
-    });
-
-    Object.defineProperty(globalThis, "PushManager", {
-      configurable: true,
-      writable: true,
-      value: class PushManagerMock {},
-    });
-
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubEnv("NEXT_PUBLIC_VAPID_PUBLIC_KEY", undefined);
+    const browser = stubPushBrowser({ permission: "default" });
 
     const { useEnsurePushSubscription } = await import("./use-ensure-push-subscription");
-    renderHook(() => useEnsurePushSubscription());
+    await act(async () => {
+      renderHook(() => useEnsurePushSubscription());
+    });
 
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(getRegistrationMock).not.toHaveBeenCalled();
-    expect(registerMock).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(browser.requestPermission).not.toHaveBeenCalled();
+    expect(browser.getRegistration).not.toHaveBeenCalled();
+    expect(browser.getRegisteredWorker()).toBeNull();
+    expect(browser.requests).toEqual([]);
   });
 
-  it("subscribes and syncs subscription to api", async () => {
-    process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY = "test-vapid";
-
-    const subscription = {
-      toJSON: () => ({
-        endpoint: "https://push.example/endpoint",
-        keys: {
-          p256dh: "p256dh-key",
-          auth: "auth-key",
-        },
-      }),
-    };
-    const subscribeMock = vi.fn().mockResolvedValue(subscription);
-    const getSubscriptionMock = vi.fn().mockResolvedValue(null);
-    const registration = {
-      pushManager: {
-        getSubscription: getSubscriptionMock,
-        subscribe: subscribeMock,
-      },
-    };
-    const getRegistrationMock = vi.fn().mockResolvedValue(null);
-    const registerMock = vi.fn().mockResolvedValue(registration);
-
-    Object.defineProperty(globalThis.navigator, "serviceWorker", {
-      configurable: true,
-      writable: true,
-      value: {
-        getRegistration: getRegistrationMock,
-        register: registerMock,
-      },
-    });
-
-    Object.defineProperty(globalThis, "Notification", {
-      configurable: true,
-      writable: true,
-      value: class NotificationMock {
-        static permission: NotificationPermission = "granted";
-        static requestPermission = vi.fn().mockResolvedValue("granted");
-      },
-    });
-
-    Object.defineProperty(globalThis, "PushManager", {
-      configurable: true,
-      writable: true,
-      value: class PushManagerMock {},
-    });
-
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({}),
-    });
-    vi.stubGlobal("fetch", fetchMock);
+  it("subscribes and syncs the endpoint and keys to the API", async () => {
+    vi.stubEnv("NEXT_PUBLIC_VAPID_PUBLIC_KEY", "test-vapid");
+    const browser = stubPushBrowser();
 
     const { useEnsurePushSubscription } = await import("./use-ensure-push-subscription");
     renderHook(() => useEnsurePushSubscription());
 
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/push-subscribe",
-        expect.objectContaining({
-          method: "POST",
-        }),
-      ),
-    );
-    expect(registerMock).toHaveBeenCalledWith("/sw.js", {
+    await waitFor(() => expect(browser.requests).toHaveLength(1));
+    const [request] = browser.requests;
+    expect(new URL(request.url).pathname).toBe("/api/push-subscribe");
+    expect(request.method).toBe("POST");
+    expect(request.headers.get("Content-Type")).toBe("application/json");
+    await expect(request.json()).resolves.toEqual(subscriptionPayload);
+    expect(browser.register).toHaveBeenCalledWith("/sw.js", {
       scope: "/",
       updateViaCache: "none",
     });
-    expect(subscribeMock).toHaveBeenCalledWith({
+    expect(browser.subscribe).toHaveBeenCalledWith({
       userVisibleOnly: true,
       applicationServerKey: "test-vapid",
     });
   });
 
   it("skips service worker work when notification permission is denied", async () => {
-    process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY = "test-vapid";
-
-    const getRegistrationMock = vi.fn();
-    const registerMock = vi.fn();
-    Object.defineProperty(globalThis.navigator, "serviceWorker", {
-      configurable: true,
-      writable: true,
-      value: {
-        getRegistration: getRegistrationMock,
-        register: registerMock,
-      },
-    });
-
-    Object.defineProperty(globalThis, "Notification", {
-      configurable: true,
-      writable: true,
-      value: class NotificationMock {
-        static permission: NotificationPermission = "denied";
-        static requestPermission = vi.fn().mockResolvedValue("denied");
-      },
-    });
-
-    Object.defineProperty(globalThis, "PushManager", {
-      configurable: true,
-      writable: true,
-      value: class PushManagerMock {},
-    });
-
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubEnv("NEXT_PUBLIC_VAPID_PUBLIC_KEY", "test-vapid");
+    const browser = stubPushBrowser({ permission: "denied" });
 
     const { useEnsurePushSubscription } = await import("./use-ensure-push-subscription");
-    renderHook(() => useEnsurePushSubscription());
+    await act(async () => {
+      renderHook(() => useEnsurePushSubscription());
+    });
 
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(getRegistrationMock).not.toHaveBeenCalled();
-    expect(registerMock).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(browser.requestPermission).not.toHaveBeenCalled();
+    expect(browser.getRegistration).not.toHaveBeenCalled();
+    expect(browser.getRegisteredWorker()).toBeNull();
+    expect(browser.requests).toEqual([]);
   });
 
-  it("stops when pushManager.subscribe throws", async () => {
-    process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY = "test-vapid";
-
-    const subscribeMock = vi.fn().mockRejectedValue(new Error("subscribe failed"));
-    const registration = {
-      pushManager: {
-        getSubscription: vi.fn().mockResolvedValue(null),
-        subscribe: subscribeMock,
-      },
-    };
-    const getRegistrationMock = vi.fn().mockResolvedValue(registration);
-    const registerMock = vi.fn();
-
-    Object.defineProperty(globalThis.navigator, "serviceWorker", {
-      configurable: true,
-      writable: true,
-      value: {
-        getRegistration: getRegistrationMock,
-        register: registerMock,
-      },
+  it("keeps the existing worker and skips the API sync when subscription fails", async () => {
+    vi.stubEnv("NEXT_PUBLIC_VAPID_PUBLIC_KEY", "test-vapid");
+    const browser = stubPushBrowser({
+      hasRegistration: true,
+      subscriptionError: new Error("subscribe failed"),
     });
-
-    Object.defineProperty(globalThis, "Notification", {
-      configurable: true,
-      writable: true,
-      value: class NotificationMock {
-        static permission: NotificationPermission = "granted";
-        static requestPermission = vi.fn().mockResolvedValue("granted");
-      },
-    });
-
-    Object.defineProperty(globalThis, "PushManager", {
-      configurable: true,
-      writable: true,
-      value: class PushManagerMock {},
-    });
-
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
+    const existingWorker = browser.getRegisteredWorker();
 
     const { useEnsurePushSubscription } = await import("./use-ensure-push-subscription");
-    renderHook(() => useEnsurePushSubscription());
+    await act(async () => {
+      renderHook(() => useEnsurePushSubscription());
+    });
 
-    await waitFor(() => expect(subscribeMock).toHaveBeenCalled());
-    expect(getRegistrationMock).toHaveBeenCalled();
-    expect(registerMock).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(browser.subscribe).toHaveBeenCalledWith({
+      userVisibleOnly: true,
+      applicationServerKey: "test-vapid",
+    });
+    expect(browser.register).not.toHaveBeenCalled();
+    expect(browser.getRegisteredWorker()).toBe(existingWorker);
+    expect(browser.getActiveSubscription()).toBeNull();
+    expect(browser.requests).toEqual([]);
   });
 });
