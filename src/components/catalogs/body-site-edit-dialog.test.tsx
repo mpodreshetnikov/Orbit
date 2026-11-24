@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BodySiteCatalog } from "@/types";
 import { BodySiteEditDialog } from "./body-site-edit-dialog";
+import { ControlledDialog } from "../../../test/utils/web/controlled-dialog";
 
 const hookMocks = vi.hoisted(() => ({
   useCreateBodySite: vi.fn(),
@@ -116,17 +117,24 @@ describe("BodySiteEditDialog", () => {
 
   it("creates a new body-site entry with parent and synonyms", async () => {
     const user = userEvent.setup();
-    const onOpenChange = vi.fn();
 
     render(
-      <BodySiteEditDialog
-        open
-        onOpenChange={onOpenChange}
-        bodySite={null}
-        allSites={[
-          bodySite({ id: "parent-1", site_code: "abdomen", name_ru: "Живот", name_en: "Abdomen" }),
-        ]}
-      />,
+      <ControlledDialog>
+        {(dialog) => (
+          <BodySiteEditDialog
+            {...dialog}
+            bodySite={null}
+            allSites={[
+              bodySite({
+                id: "parent-1",
+                site_code: "abdomen",
+                name_ru: "Живот",
+                name_en: "Abdomen",
+              }),
+            ]}
+          />
+        )}
+      </ControlledDialog>,
     );
 
     fireEvent.change(screen.getByLabelText("catalogs.code"), {
@@ -153,42 +161,47 @@ describe("BodySiteEditDialog", () => {
 
     await user.click(screen.getByRole("button", { name: "common.save" }));
 
-    await waitFor(() => {
-      expect(createMutateAsync).toHaveBeenCalledWith({
-        site_code: "kidney_left",
-        name_ru: "Левая почка",
-        name_en: "Left kidney",
-        parent_site_code: "abdomen",
-        synonyms_ru: ["почка слева"],
-        synonyms_en: ["left renal"],
-        notes: "custom note",
-      });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "common.save" })).toBeNull());
+    expect(createMutateAsync).toHaveBeenCalledWith({
+      site_code: "kidney_left",
+      name_ru: "Левая почка",
+      name_en: "Left kidney",
+      parent_site_code: "abdomen",
+      synonyms_ru: ["почка слева"],
+      synonyms_en: ["left renal"],
+      notes: "custom note",
     });
-    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
   it("updates existing site and supports clearing parent", async () => {
     const user = userEvent.setup();
-    const onOpenChange = vi.fn();
 
     render(
-      <BodySiteEditDialog
-        open
-        onOpenChange={onOpenChange}
-        bodySite={bodySite({
-          id: "site-2",
-          site_code: "kidney_left",
-          name_ru: "Левая почка",
-          name_en: "Left kidney",
-          parent_site_code: "abdomen",
-          synonyms_ru: ["почка слева"],
-          synonyms_en: ["left renal"],
-          notes: "old note",
-        })}
-        allSites={[
-          bodySite({ id: "parent-1", site_code: "abdomen", name_ru: "Живот", name_en: "Abdomen" }),
-        ]}
-      />,
+      <ControlledDialog>
+        {(dialog) => (
+          <BodySiteEditDialog
+            {...dialog}
+            bodySite={bodySite({
+              id: "site-2",
+              site_code: "kidney_left",
+              name_ru: "Левая почка",
+              name_en: "Left kidney",
+              parent_site_code: "abdomen",
+              synonyms_ru: ["почка слева"],
+              synonyms_en: ["left renal"],
+              notes: "old note",
+            })}
+            allSites={[
+              bodySite({
+                id: "parent-1",
+                site_code: "abdomen",
+                name_ru: "Живот",
+                name_en: "Abdomen",
+              }),
+            ]}
+          />
+        )}
+      </ControlledDialog>,
     );
 
     fireEvent.change(screen.getByLabelText("catalogs.nameEn"), {
@@ -198,19 +211,18 @@ describe("BodySiteEditDialog", () => {
 
     await user.click(screen.getByRole("button", { name: "common.save" }));
 
-    await waitFor(() => {
-      expect(updateMutateAsync).toHaveBeenCalledWith({
-        id: "site-2",
-        updates: {
-          site_code: "kidney_left",
-          name_ru: "Левая почка",
-          name_en: "Left kidney updated",
-          parent_site_code: null,
-          synonyms_ru: ["почка слева"],
-          synonyms_en: ["left renal"],
-          notes: "old note",
-        },
-      });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "common.save" })).toBeNull());
+    expect(updateMutateAsync).toHaveBeenCalledWith({
+      id: "site-2",
+      updates: {
+        site_code: "kidney_left",
+        name_ru: "Левая почка",
+        name_en: "Left kidney updated",
+        parent_site_code: null,
+        synonyms_ru: ["почка слева"],
+        synonyms_en: ["left renal"],
+        notes: "old note",
+      },
     });
   });
 });

@@ -1,5 +1,5 @@
 import React from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Condition, ConditionRecordWithDetails } from "@/types";
@@ -190,7 +190,8 @@ describe("ConditionEditDialog", () => {
   });
 
   it("links an existing condition and submits status/source payload", async () => {
-    const onSave = vi.fn().mockResolvedValue(undefined);
+    const save = Promise.withResolvers<void>();
+    const onSave = vi.fn().mockReturnValue(save.promise);
     const user = userEvent.setup();
 
     render(
@@ -210,19 +211,22 @@ describe("ConditionEditDialog", () => {
       target: { value: "mentioned in summary" },
     });
 
-    await user.click(screen.getByRole("button", { name: "common.save" }));
+    const saveButton = screen.getByRole("button", { name: "common.save" });
+    await user.click(saveButton);
+    expect(saveButton).toBeDisabled();
 
-    await waitFor(() => {
-      expect(onSave).toHaveBeenCalledWith({
-        condition_id: "cond-1",
-        status_in_record: "resolved",
-        source_anchor: "mentioned in summary",
-      });
+    await act(async () => save.resolve());
+    expect(saveButton).toBeEnabled();
+    expect(onSave).toHaveBeenCalledWith({
+      condition_id: "cond-1",
+      status_in_record: "resolved",
+      source_anchor: "mentioned in summary",
     });
   });
 
   it("creates a new condition with ICD lookup metadata", async () => {
-    const onSave = vi.fn().mockResolvedValue(undefined);
+    const save = Promise.withResolvers<void>();
+    const onSave = vi.fn().mockReturnValue(save.promise);
     const user = userEvent.setup();
 
     render(
@@ -243,22 +247,25 @@ describe("ConditionEditDialog", () => {
       target: { value: "d50.9" },
     });
 
-    await user.click(screen.getByRole("button", { name: "common.save" }));
+    const saveButton = screen.getByRole("button", { name: "common.save" });
+    await user.click(saveButton);
+    expect(saveButton).toBeDisabled();
 
-    await waitFor(() => {
-      expect(onSave).toHaveBeenCalledWith({
-        name: "Anemia",
-        code: "D50.9",
-        icd_name_en: "Iron deficiency anemia",
-        icd_name_ru: null,
-        status_in_record: "suspected",
-        source_anchor: null,
-      });
+    await act(async () => save.resolve());
+    expect(saveButton).toBeEnabled();
+    expect(onSave).toHaveBeenCalledWith({
+      name: "Anemia",
+      code: "D50.9",
+      icd_name_en: "Iron deficiency anemia",
+      icd_name_ru: null,
+      status_in_record: "suspected",
+      source_anchor: null,
     });
   });
 
   it("edits an existing condition record and persists ICD/status updates", async () => {
-    const onSave = vi.fn().mockResolvedValue(undefined);
+    const save = Promise.withResolvers<void>();
+    const onSave = vi.fn().mockReturnValue(save.promise);
     const user = userEvent.setup();
 
     render(
@@ -280,17 +287,19 @@ describe("ConditionEditDialog", () => {
       target: { value: "updated anchor" },
     });
 
-    await user.click(screen.getByRole("button", { name: "common.save" }));
+    const saveButton = screen.getByRole("button", { name: "common.save" });
+    await user.click(saveButton);
+    expect(saveButton).toBeDisabled();
 
-    await waitFor(() => {
-      expect(onSave).toHaveBeenCalledWith({
-        condition_id: "cond-1",
-        status_in_record: "history",
-        source_anchor: "updated anchor",
-        code: "I10",
-        icd_name_en: null,
-        icd_name_ru: null,
-      });
+    await act(async () => save.resolve());
+    expect(saveButton).toBeEnabled();
+    expect(onSave).toHaveBeenCalledWith({
+      condition_id: "cond-1",
+      status_in_record: "history",
+      source_anchor: "updated anchor",
+      code: "I10",
+      icd_name_en: null,
+      icd_name_ru: null,
     });
   });
 });

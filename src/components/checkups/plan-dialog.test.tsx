@@ -3,6 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PlanDialog } from "./plan-dialog";
+import { ControlledDialog } from "../../../test/utils/web/controlled-dialog";
 
 const hookMocks = vi.hoisted(() => ({
   useUpdateCheckupItem: vi.fn(),
@@ -72,56 +73,53 @@ describe("PlanDialog", () => {
   });
 
   it("saves planned date for a single item and closes", async () => {
-    const onOpenChange = vi.fn();
     const onSaved = vi.fn();
     const user = userEvent.setup();
 
-    render(<PlanDialog open onOpenChange={onOpenChange} items={[makeItem()]} onSaved={onSaved} />);
+    render(
+      <ControlledDialog>
+        {(dialog) => <PlanDialog {...dialog} items={[makeItem()]} onSaved={onSaved} />}
+      </ControlledDialog>,
+    );
 
     await user.clear(screen.getByLabelText("checkups.plannedOn"));
     await user.type(screen.getByLabelText("checkups.plannedOn"), "2026-02-20");
     await user.click(screen.getByRole("button", { name: "common.save" }));
 
-    await waitFor(() => {
-      expect(mutateAsyncMock).toHaveBeenCalledWith({
-        id: "item-1",
-        updates: { planned_on: "2026-02-20" },
-      });
-      expect(onSaved).toHaveBeenCalled();
-      expect(onOpenChange).toHaveBeenCalledWith(false);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "common.save" })).toBeNull());
+    expect(mutateAsyncMock).toHaveBeenCalledWith({
+      id: "item-1",
+      updates: { planned_on: "2026-02-20" },
     });
+    expect(onSaved).toHaveBeenCalled();
   });
 
   it("removes planned date for batch items", async () => {
-    const onOpenChange = vi.fn();
     const onSaved = vi.fn();
     const user = userEvent.setup();
 
     render(
-      <PlanDialog
-        open
-        onOpenChange={onOpenChange}
-        items={[
-          makeItem({ id: "item-1", planned_on: "2026-01-10" }),
-          makeItem({ id: "item-2", planned_on: null }),
-        ]}
-        onSaved={onSaved}
-      />,
+      <ControlledDialog>
+        {(dialog) => (
+          <PlanDialog
+            {...dialog}
+            items={[
+              makeItem({ id: "item-1", planned_on: "2026-01-10" }),
+              makeItem({ id: "item-2", planned_on: "2026-01-15" }),
+            ]}
+            onSaved={onSaved}
+          />
+        )}
+      </ControlledDialog>,
     );
 
     await user.click(screen.getByRole("button", { name: "checkups.removePlannedDate" }));
 
-    await waitFor(() => {
-      expect(mutateAsyncMock).toHaveBeenNthCalledWith(1, {
-        id: "item-1",
-        updates: { planned_on: null },
-      });
-      expect(mutateAsyncMock).toHaveBeenNthCalledWith(2, {
-        id: "item-2",
-        updates: { planned_on: null },
-      });
-      expect(onSaved).toHaveBeenCalled();
-      expect(onOpenChange).toHaveBeenCalledWith(false);
-    });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "common.save" })).toBeNull());
+    expect(mutateAsyncMock.mock.calls.map(([payload]) => payload)).toEqual([
+      { id: "item-1", updates: { planned_on: null } },
+      { id: "item-2", updates: { planned_on: null } },
+    ]);
+    expect(onSaved).toHaveBeenCalled();
   });
 });

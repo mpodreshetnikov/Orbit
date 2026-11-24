@@ -241,15 +241,21 @@ describe("CheckupForm", () => {
       />,
     );
 
-    fireEvent.change(screen.getByLabelText("checkups.itemTitle *"), {
-      target: { value: "Updated annual panel" },
-    });
+    const title = screen.getByLabelText("checkups.itemTitle *");
+    const save = screen.getByRole("button", { name: "common.save" });
+    await user.clear(title);
+    expect(save).toBeDisabled();
+    await user.click(save);
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    await user.type(title, "Updated annual panel");
     await user.click(screen.getByRole("button", { name: "checkups.categoryDental" }));
     await user.click(screen.getByRole("button", { name: "checkups.oneOff" }));
     fireEvent.change(screen.getByLabelText("checkups.dueDate"), {
       target: { value: "2026-08-20" },
     });
-    await user.click(screen.getByRole("button", { name: "common.save" }));
+    expect(save).toBeEnabled();
+    await user.click(save);
 
     await waitFor(() => {
       expect(onSubmit).toHaveBeenCalledWith({

@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ObservationStatus, RecordObservationWithCatalog } from "@/types";
@@ -407,6 +407,8 @@ describe("StructureReviewStep", () => {
   it("applies suggested checkups and completes review on save", async () => {
     const updateMedicalRecordMutation = createMutationMock();
     const completeCheckupMutation = createMutationMock();
+    const completion = Promise.withResolvers<void>();
+    completeCheckupMutation.mutateAsync.mockReturnValueOnce(completion.promise);
     hookMocks.useUpdateMedicalRecord.mockReturnValue(updateMedicalRecordMutation);
     hookMocks.useCompleteCheckupItem.mockReturnValue(completeCheckupMutation);
     const onComplete = vi.fn();
@@ -416,17 +418,30 @@ describe("StructureReviewStep", () => {
       <StructureReviewStep record={createRecord()} onComplete={onComplete} onBack={vi.fn()} />,
     );
 
-    await userEvent
-      .setup()
-      .click(screen.getByRole("button", { name: "records.add.saveAndActivate" }));
-
-    await waitFor(() => expect(updateMedicalRecordMutation.mutateAsync).toHaveBeenCalled());
+    const activate = screen.getByRole("button", { name: "records.add.saveAndActivate" });
+    await userEvent.setup().click(activate);
+    expect(activate).toBeDisabled();
+    expect(routerMocks.push).not.toHaveBeenCalled();
+    expect(updateMedicalRecordMutation.mutateAsync).toHaveBeenCalledExactlyOnceWith({
+      id: "record-1",
+      updates: {
+        title: "CBC",
+        record_type: "lab",
+        record_date: "2026-01-01",
+        notes: null,
+        llm_keywords: ["cbc"],
+        status: "active",
+      },
+    });
     expect(completeCheckupMutation.mutateAsync).toHaveBeenCalledWith({
       checkup_item_id: "checkup-1",
       done_at: "2026-01-02",
       note: null,
       evidence_record_id: "record-1",
     });
+
+    await act(async () => completion.resolve());
+    expect(activate).toBeEnabled();
     expect(updateMedicalRecordMutation.mutateAsync).toHaveBeenNthCalledWith(2, {
       id: "record-1",
       updates: { llm_suggested_checkup_completions: null },
@@ -441,29 +456,36 @@ describe("StructureReviewStep", () => {
     const onComplete = vi.fn();
 
     const { StructureReviewStep } = await import("./structure-review-step");
-    render(
-      <StructureReviewStep
-        record={createRecord({
-          llm_suggested_checkup_completions: [
-            {
-              checkup_item_id: "checkup-1",
-              checkup_title: "CBC yearly",
-              suggested_done_at: "2026-01-02",
-            },
-            {
-              checkup_item_id: "checkup-2",
-              checkup_title: "BP check",
-              suggested_done_at: "2026-01-03",
-            },
-          ],
-        })}
-        onComplete={onComplete}
-        onBack={vi.fn()}
-      />,
+    let record = createRecord({
+      llm_suggested_checkup_completions: [
+        {
+          checkup_item_id: "checkup-1",
+          checkup_title: "CBC yearly",
+          suggested_done_at: "2026-01-02",
+        },
+        {
+          checkup_item_id: "checkup-2",
+          checkup_title: "BP check",
+          suggested_done_at: "2026-01-03",
+        },
+      ],
+    });
+    const onBack = vi.fn();
+    const { rerender } = render(
+      <StructureReviewStep record={record} onComplete={onComplete} onBack={onBack} />,
+    );
+    updateMedicalRecordMutation.mutateAsync.mockImplementationOnce(async ({ updates }) => {
+      record = { ...record, ...updates };
+    });
+    onComplete.mockImplementationOnce(() =>
+      rerender(<StructureReviewStep record={record} onComplete={onComplete} onBack={onBack} />),
     );
 
-    await userEvent.setup().click(screen.getAllByTitle("checkups.suggestedCompletions.dismiss")[0]);
-    await userEvent.setup().click(screen.getByRole("button", { name: "records.add.saveDraft" }));
+    const user = userEvent.setup();
+    await user.click(screen.getAllByTitle("checkups.suggestedCompletions.dismiss")[0]);
+    expect(screen.queryByText("CBC yearly")).toBeNull();
+    expect(screen.getByText("BP check")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "records.add.saveDraft" }));
 
     await waitFor(() => {
       expect(updateMedicalRecordMutation.mutateAsync).toHaveBeenNthCalledWith(1, {
@@ -488,7 +510,7 @@ describe("StructureReviewStep", () => {
         }),
       );
     });
-    expect(onComplete).toHaveBeenCalled();
+    expect(onComplete).toHaveBeenCalledTimes(2);
     expect(routerMocks.push).not.toHaveBeenCalled();
   });
 
@@ -583,10 +605,12 @@ describe("StructureReviewStep", () => {
     });
   }, 15000);
 
-  it("keeps unapplied observations on save, out of history by is_applied", async () => {
+  it("keeps unapplied observations available for review when saved as a draft", async () => {
     const deleteObservationMutation = createMutationMock();
+    const updateObservationMutation = createMutationMock();
     const updateMedicalRecordMutation = createMutationMock();
     hookMocks.useDeleteRecordObservation.mockReturnValue(deleteObservationMutation);
+    hookMocks.useUpdateRecordObservation.mockReturnValue(updateObservationMutation);
     hookMocks.useUpdateMedicalRecord.mockReturnValue(updateMedicalRecordMutation);
     hookMocks.useRecordObservations.mockReturnValue({
       data: [
@@ -627,15 +651,21 @@ describe("StructureReviewStep", () => {
 
     await userEvent.setup().click(screen.getByRole("button", { name: "records.add.saveDraft" }));
 
-    await waitFor(() => expect(onComplete).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(onComplete).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole("button", { name: "records.add.saveDraft" })).toBeEnabled();
+    });
+    expect(screen.getByText("Custom marker")).toBeInTheDocument();
+    expect(screen.getByText("observations.pendingBadge")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "observations.applyButton" })).toBeEnabled();
     expect(deleteObservationMutation.mutateAsync).not.toHaveBeenCalled();
+    expect(updateObservationMutation.mutateAsync).not.toHaveBeenCalled();
     expect(updateMedicalRecordMutation.mutateAsync).toHaveBeenCalledWith(
       expect.objectContaining({
         id: "record-1",
         updates: expect.objectContaining({ status: "draft" }),
       }),
     );
-    expect(onComplete).toHaveBeenCalled();
   });
 
   it("renders observation status/comparison indicators across branch variants", async () => {
