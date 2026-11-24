@@ -45,18 +45,17 @@ describe("RefillDialog", () => {
     expect(screen.getByLabelText("medications.refillAmountLabel")).toHaveValue("1");
   });
 
-  it("does not submit invalid amounts or null regimen", async () => {
-    const onOpenChange = vi.fn();
+  it("keeps invalid refills open and accepts a negative inventory correction", async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const medication = { custom_name: "Vitamin D", intake_unit: "pill" } as MedRegimen;
     const { RefillDialog } = await import("./refill-dialog");
-    const { rerender } = render(
-      <RefillDialog
-        open
-        onOpenChange={onOpenChange}
-        regimen={{ custom_name: "Vitamin D", intake_unit: "pill" } as MedRegimen}
-        onSubmit={onSubmit}
-      />,
-    );
+    function ControlledDialog({ regimen }: { regimen: MedRegimen | null }) {
+      const [open, setOpen] = React.useState(true);
+      return (
+        <RefillDialog open={open} onOpenChange={setOpen} regimen={regimen} onSubmit={onSubmit} />
+      );
+    }
+    const { rerender } = render(<ControlledDialog regimen={medication} />);
 
     const user = userEvent.setup();
     const amountInput = screen.getByLabelText("medications.refillAmountLabel");
@@ -64,15 +63,25 @@ describe("RefillDialog", () => {
     await user.type(amountInput, "0");
     await user.click(screen.getByRole("button", { name: "medications.refillButton" }));
     expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeVisible();
 
     await user.clear(amountInput);
     await user.type(amountInput, "abc");
     await user.click(screen.getByRole("button", { name: "medications.refillButton" }));
     expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeVisible();
 
-    rerender(<RefillDialog open onOpenChange={onOpenChange} regimen={null} onSubmit={onSubmit} />);
+    rerender(<ControlledDialog regimen={null} />);
+    await user.type(amountInput, "-3");
+    expect(amountInput).toHaveValue("-3");
     await user.click(screen.getByRole("button", { name: "medications.refillButton" }));
     expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeVisible();
+
+    rerender(<ControlledDialog regimen={medication} />);
+    await user.click(screen.getByRole("button", { name: "medications.refillButton" }));
+    expect(onSubmit).toHaveBeenCalledExactlyOnceWith(-3);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("shows pending state during submit and supports cancel close", async () => {

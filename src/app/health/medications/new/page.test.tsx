@@ -2,6 +2,8 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { AddOneTimeDoseToRegimenInput } from "@/hooks/use-regimens";
+import type { CreateMedRegimenInput } from "@/types/regimen";
 import NewMedicationPage from "./page";
 
 let selectedPersonIdState: string | null = "person-1";
@@ -95,7 +97,7 @@ vi.mock("@/components/medications", () => ({
             dose_definition: { intake: { amount: 3, unit: "pill" }, active: [] },
             intake_advice_type: "none",
             intake_advice_text: null,
-            schedule: { mode: "one_off", due_at: "2026-02-01T11:00:00.000Z" },
+            schedule: { mode: "one_off", due_at: "2026-02-01T18:00:00+07:00" },
             duration: { type: "endless" },
             inventory: null,
             notes: "with snack",
@@ -114,7 +116,7 @@ vi.mock("@/components/medications", () => ({
             dose_definition: { intake: { amount: 2, unit: "pill" }, active: [] },
             intake_advice_type: "none",
             intake_advice_text: null,
-            schedule: { mode: "one_off", due_at: "" },
+            schedule: { mode: "one_off", due_at: "not-a-date" },
             duration: { type: "endless" },
             inventory: null,
             notes: "broken payload",
@@ -129,6 +131,25 @@ vi.mock("@/components/medications", () => ({
     </div>
   ),
 }));
+
+function captureMedicationWrites() {
+  const courses: CreateMedRegimenInput[] = [];
+  const intakes: AddOneTimeDoseToRegimenInput[] = [];
+  useCreateRegimenMock.mockReturnValue({
+    async mutateAsync(course: CreateMedRegimenInput) {
+      courses.push(course);
+      return { id: "reg-new", person_id: course.person_id };
+    },
+    isPending: false,
+  });
+  useAddOneTimeDoseToRegimenMock.mockReturnValue({
+    async mutateAsync(intake: AddOneTimeDoseToRegimenInput) {
+      intakes.push(intake);
+    },
+    isPending: false,
+  });
+  return { courses, intakes };
+}
 
 describe("new medication page", () => {
   beforeEach(() => {
@@ -217,64 +238,50 @@ describe("new medication page", () => {
 
   it("creates one-time regimen with notes null and creates intake with one-time form note/dose", async () => {
     kindParamState = "one_time";
-    const createMutation = {
-      mutateAsync: vi.fn().mockResolvedValue({ id: "reg-new", person_id: "person-1" }),
-      isPending: false,
-    };
-    const addMutation = {
-      mutateAsync: vi.fn().mockResolvedValue(undefined),
-      isPending: false,
-    };
-    useCreateRegimenMock.mockReturnValue(createMutation);
-    useAddOneTimeDoseToRegimenMock.mockReturnValue(addMutation);
+    const { courses, intakes } = captureMedicationWrites();
 
     render(<NewMedicationPage />);
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "submit-create-onetime-regimen" }));
 
-    await waitFor(() => {
-      expect(createMutation.mutateAsync).toHaveBeenCalledWith(
-        expect.objectContaining({
-          custom_name: "One Time Med",
-          schedule: { mode: "one_off", due_at: "2026-02-01T11:00:00.000Z" },
-          notes: null,
-        }),
-      );
-      expect(addMutation.mutateAsync).toHaveBeenCalledWith({
+    expect(courses).toEqual([
+      expect.objectContaining({
+        person_id: "person-1",
+        custom_name: "One Time Med",
+        schedule: { mode: "one_off", due_at: "2026-02-01T18:00:00+07:00" },
+        notes: null,
+      }),
+    ]);
+    expect(intakes).toEqual([
+      {
         person_id: "person-1",
         regimen_id: "reg-new",
         scheduled_at: "2026-02-01T11:00:00.000Z",
         amount: 3,
         unit: "pill",
         notes: "with snack",
-      });
-      expect(regenerateMedicationEventsMock).not.toHaveBeenCalled();
-      expect(routerMock.push).toHaveBeenCalledWith("/health/medications/reg-new");
-    });
+      },
+    ]);
+    expect(regenerateMedicationEventsMock).not.toHaveBeenCalled();
+    expect(routerMock.push).toHaveBeenCalledExactlyOnceWith("/health/medications/reg-new");
   });
 
   it("does not mutate when one-time due_at is invalid", async () => {
     kindParamState = "one_time";
-    const createMutation = {
-      mutateAsync: vi.fn().mockResolvedValue({ id: "reg-new", person_id: "person-1" }),
-      isPending: false,
-    };
-    const addMutation = {
-      mutateAsync: vi.fn().mockResolvedValue(undefined),
-      isPending: false,
-    };
-    useCreateRegimenMock.mockReturnValue(createMutation);
-    useAddOneTimeDoseToRegimenMock.mockReturnValue(addMutation);
+    const { courses, intakes } = captureMedicationWrites();
 
     render(<NewMedicationPage />);
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "submit-create-onetime-invalid" }));
 
-    await waitFor(() => {
-      expect(createMutation.mutateAsync).not.toHaveBeenCalled();
-      expect(addMutation.mutateAsync).not.toHaveBeenCalled();
-      expect(regenerateMedicationEventsMock).not.toHaveBeenCalled();
-      expect(routerMock.push).not.toHaveBeenCalled();
-    });
+    expect(courses).toEqual([]);
+    expect(intakes).toEqual([]);
+    expect(regenerateMedicationEventsMock).not.toHaveBeenCalled();
+    expect(routerMock.push).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "submit-create-onetime-regimen" }));
+    expect(courses.map((course) => course.custom_name)).toEqual(["One Time Med"]);
+    expect(intakes.map((intake) => intake.regimen_id)).toEqual(["reg-new"]);
+    expect(routerMock.push).toHaveBeenCalledExactlyOnceWith("/health/medications/reg-new");
   });
 });

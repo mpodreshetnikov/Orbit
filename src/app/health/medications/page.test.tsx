@@ -290,6 +290,7 @@ describe("MedicationsPage", () => {
     const intervalInput = screen.getByLabelText("medications.overdueReminderInterval");
     fireEvent.change(intervalInput, { target: { value: "2000" } });
     fireEvent.blur(intervalInput);
+    expect(intervalInput).toHaveValue("1440");
 
     await waitFor(() => {
       expect(updatePrefsMutateAsync).toHaveBeenCalledWith({
@@ -301,6 +302,7 @@ describe("MedicationsPage", () => {
     await waitFor(() => {
       expect(updatePrefsMutateAsync).toHaveBeenCalledTimes(2);
     });
+    expect(screen.queryByLabelText("medications.overdueReminderInterval")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "medications.oneTime" }));
     await user.click(screen.getByRole("button", { name: "medications.regular" }));
