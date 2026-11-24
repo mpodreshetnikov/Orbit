@@ -131,13 +131,21 @@ describe("use-user-preferences", () => {
 
     const { useUpdateUserPreferences } = await import("./use-user-preferences");
     const { result, queryClient } = renderHookWithQueryClient(() => useUpdateUserPreferences());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const preferencesKey = ["user-preferences"];
+    queryClient.setQueryData(preferencesKey, {
+      ...row,
+      checkup_notification_time: "09:00:00",
+      overdue_reminder_interval_minutes: 30,
+      hidden_measurement_codes: {},
+    });
 
     await act(async () => {
-      await result.current.mutateAsync({
-        checkup_notification_time: "08:30:00",
-        overdue_reminder_interval_minutes: 15,
-      });
+      await expect(
+        result.current.mutateAsync({
+          checkup_notification_time: "08:30:00",
+          overdue_reminder_interval_minutes: 15,
+        }),
+      ).resolves.toEqual({ ...row, hidden_measurement_codes: {} });
     });
 
     const builder = (supabase.from as ReturnType<typeof vi.fn>).mock.results[0].value as ReturnType<
@@ -151,9 +159,7 @@ describe("use-user-preferences", () => {
       }),
       { onConflict: "auth_user_id" },
     );
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["user-preferences"],
-    });
+    expect(queryClient.getQueryState(preferencesKey)?.isInvalidated).toBe(true);
   });
 
   it("leaves hidden measurement codes alone when saving other preferences", async () => {
@@ -176,7 +182,12 @@ describe("use-user-preferences", () => {
     const { result } = renderHookWithQueryClient(() => useUpdateUserPreferences());
 
     await act(async () => {
-      await result.current.mutateAsync({ checkup_notification_time: "08:30:00" });
+      await expect(
+        result.current.mutateAsync({ checkup_notification_time: "08:30:00" }),
+      ).resolves.toMatchObject({
+        checkup_notification_time: "08:30:00",
+        hidden_measurement_codes: { "person-1": ["height"] },
+      });
     });
 
     const builder = (supabase.from as ReturnType<typeof vi.fn>).mock.results[0].value as ReturnType<
@@ -206,7 +217,12 @@ describe("use-user-preferences", () => {
     const { result } = renderHookWithQueryClient(() => useUpdateUserPreferences());
 
     await act(async () => {
-      await result.current.mutateAsync({
+      await expect(
+        result.current.mutateAsync({
+          hidden_measurement_codes: { "person-1": ["height"] },
+        }),
+      ).resolves.toMatchObject({
+        checkup_notification_time: "09:00:00",
         hidden_measurement_codes: { "person-1": ["height"] },
       });
     });

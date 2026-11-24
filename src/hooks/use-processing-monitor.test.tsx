@@ -1,17 +1,11 @@
 import React from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useProcessingQueueStore } from "@/stores/processing-queue-store";
 import { createTestQueryClient, createTestQueryWrapper } from "../../test/utils/web/render";
 
-const {
-  createClientMock,
-  useProcessingQueueStoreMock,
-  toastSuccessMock,
-  toastErrorMock,
-  toastWarningMock,
-} = vi.hoisted(() => ({
+const { createClientMock, toastSuccessMock, toastErrorMock, toastWarningMock } = vi.hoisted(() => ({
   createClientMock: vi.fn(),
-  useProcessingQueueStoreMock: Object.assign(vi.fn(), { getState: vi.fn() }),
   toastSuccessMock: vi.fn(),
   toastErrorMock: vi.fn(),
   toastWarningMock: vi.fn(),
@@ -19,10 +13,6 @@ const {
 
 vi.mock("@/lib/supabase", () => ({
   createClient: createClientMock,
-}));
-
-vi.mock("@/stores/processing-queue-store", () => ({
-  useProcessingQueueStore: useProcessingQueueStoreMock,
 }));
 
 vi.mock("next-intl", () => ({
@@ -58,7 +48,7 @@ function createSupabaseMock(
       }) => void)
     | null = null;
 
-  const inMock = vi.fn().mockResolvedValue({
+  const initialProcessingRows = Promise.resolve({
     data: initialProcessingIds.map((id) => ({
       id,
       title: "Record",
@@ -66,7 +56,7 @@ function createSupabaseMock(
       person_id: "person-1",
     })),
   });
-  const eqMock = vi.fn(() => ({ in: inMock }));
+  const eqMock = vi.fn(() => ({ in: () => initialProcessingRows }));
   // The reconcile query has no .eq(): it asks about the queue's own jobs, whoever they belong to.
   const reconcileInMock = vi.fn().mockResolvedValue({ data: reconcileRows, error: null });
   const selectMock = vi.fn(() => ({ eq: eqMock, in: reconcileInMock }));
@@ -91,48 +81,53 @@ function createSupabaseMock(
 
   return {
     supabase,
-    inMock,
+    initialProcessingRows,
     reconcileInMock,
     getChangeHandler: () => changeHandler,
   };
 }
 
+function addProcessingJob(recordId: string, person = { id: "person-1", name: "Alex" }) {
+  useProcessingQueueStore.getState().addJob({
+    id: recordId,
+    recordId,
+    personId: person.id,
+    personName: person.name,
+    stage: "processing",
+    progress: 50,
+  });
+}
+
 describe("use-processing-monitor", () => {
   beforeEach(() => {
     createClientMock.mockReset();
-    useProcessingQueueStoreMock.mockReset();
-    useProcessingQueueStoreMock.getState.mockReset();
-    useProcessingQueueStoreMock.getState.mockReturnValue({
-      getJobByRecordId: () => ({ personName: "Alex" }),
-      getActiveJobs: () => [],
-      updateJob: () => {},
-    });
+    useProcessingQueueStore.setState({ jobs: {}, notifications: [] });
+    toastWarningMock.mockReset();
     toastSuccessMock.mockReset();
     toastErrorMock.mockReset();
   });
 
   it("does nothing when person id is missing", async () => {
-    const updateJobMock = vi.fn();
-    const addNotificationMock = vi.fn();
-    useProcessingQueueStoreMock.mockImplementation((selector: (state: unknown) => unknown) =>
-      selector({ updateJob: updateJobMock, addNotification: addNotificationMock }),
+    addProcessingJob("record-1");
+    const { supabase } = createSupabaseMock(
+      [],
+      [{ id: "record-1", title: "Finished scan", status: "ocr_review" }],
     );
+    createClientMock.mockReturnValue(supabase);
 
     const { useProcessingMonitor } = await import("./use-processing-monitor");
-    renderHookWithQueryClient(() => useProcessingMonitor(null));
-
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await act(async () => {
+      renderHookWithQueryClient(() => useProcessingMonitor(null));
+    });
     expect(createClientMock).not.toHaveBeenCalled();
-    expect(updateJobMock).not.toHaveBeenCalled();
+    expect(useProcessingQueueStore.getState().getActiveJobs()).toEqual([
+      expect.objectContaining({ id: "record-1", stage: "processing", progress: 50 }),
+    ]);
+    expect(useProcessingQueueStore.getState().notifications).toEqual([]);
   });
 
   it("marks OCR job complete on realtime status transition and unsubscribes on unmount", async () => {
-    const updateJobMock = vi.fn();
-    const addNotificationMock = vi.fn();
-    useProcessingQueueStoreMock.mockImplementation((selector: (state: unknown) => unknown) =>
-      selector({ updateJob: updateJobMock, addNotification: addNotificationMock }),
-    );
-
+    addProcessingJob("record-1");
     const { supabase, getChangeHandler } = createSupabaseMock(["record-1"]);
     createClientMock.mockReturnValue(supabase);
 
@@ -140,9 +135,13 @@ describe("use-processing-monitor", () => {
     const { queryClient, unmount } = renderHookWithQueryClient(() =>
       useProcessingMonitor("person-1"),
     );
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const listKey = ["medical-records", "person-1"];
+    const detailKey = ["medical-record", "record-1"];
+    const otherDetailKey = ["medical-record", "record-2"];
+    queryClient.setQueryData(listKey, [{ id: "record-1", status: "ocr_processing" }]);
+    queryClient.setQueryData(detailKey, { id: "record-1", status: "ocr_processing" });
+    queryClient.setQueryData(otherDetailKey, { id: "record-2", status: "ocr_processing" });
 
-    await waitFor(() => expect(supabase.channel).toHaveBeenCalled());
     const handler = getChangeHandler();
     expect(handler).toBeTypeOf("function");
 
@@ -164,15 +163,8 @@ describe("use-processing-monitor", () => {
       });
     });
 
-    await waitFor(() =>
-      expect(updateJobMock).toHaveBeenCalledWith(
-        "record-1",
-        expect.objectContaining({
-          stage: "completed",
-          progress: 100,
-          title: "New title",
-        }),
-      ),
+    expect(useProcessingQueueStore.getState().getJobByRecordId("record-1")).toEqual(
+      expect.objectContaining({ stage: "completed", progress: 100, title: "New title" }),
     );
     expect(toastSuccessMock).toHaveBeenCalledWith(
       "processing.ocrComplete",
@@ -180,9 +172,9 @@ describe("use-processing-monitor", () => {
         description: "New title",
       }),
     );
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["medical-records"],
-    });
+    expect(queryClient.getQueryState(listKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(detailKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherDetailKey)?.isInvalidated).toBe(false);
 
     unmount();
     expect(supabase.removeChannel).toHaveBeenCalled();
@@ -192,19 +184,14 @@ describe("use-processing-monitor", () => {
   // waiting on the pipeline's call. A record that lands in ocr_failed has to close its job here,
   // or the queue shows a spinner that never resolves.
   it("fails the job when the record reports an OCR failure", async () => {
-    const updateJobMock = vi.fn();
-    const addNotificationMock = vi.fn();
-    useProcessingQueueStoreMock.mockImplementation((selector: (state: unknown) => unknown) =>
-      selector({ updateJob: updateJobMock, addNotification: addNotificationMock }),
-    );
-
-    const { supabase, getChangeHandler } = createSupabaseMock(["record-1"]);
+    addProcessingJob("record-1");
+    const { supabase, getChangeHandler, initialProcessingRows } = createSupabaseMock(["record-1"]);
     createClientMock.mockReturnValue(supabase);
 
     const { useProcessingMonitor } = await import("./use-processing-monitor");
     renderHookWithQueryClient(() => useProcessingMonitor("person-1"));
 
-    await waitFor(() => expect(supabase.channel).toHaveBeenCalled());
+    await initialProcessingRows;
     const handler = getChangeHandler();
 
     act(() => {
@@ -226,41 +213,31 @@ describe("use-processing-monitor", () => {
       });
     });
 
-    await waitFor(() =>
-      expect(updateJobMock).toHaveBeenCalledWith("record-1", {
+    expect(useProcessingQueueStore.getState().getJobByRecordId("record-1")).toEqual(
+      expect.objectContaining({
         stage: "failed",
-        // Written before the cause vocabulary existed, so it is shown as it stands.
         error: "Failed to extract text from any attachment",
       }),
     );
-    expect(addNotificationMock).toHaveBeenCalledWith(
+    expect(useProcessingQueueStore.getState().notifications).toEqual([
       expect.objectContaining({
+        recordId: "record-1",
         type: "error",
         personName: "Alex",
         message: "Failed to extract text from any attachment",
       }),
-    );
+    ]);
     expect(toastErrorMock).toHaveBeenCalled();
   });
 
   it("announces a transcription that lost a page as partial, not complete", async () => {
-    const updateJobMock = vi.fn();
-    const addNotificationMock = vi.fn();
-    useProcessingQueueStoreMock.mockImplementation((selector: (state: unknown) => unknown) =>
-      selector({
-        updateJob: updateJobMock,
-        addNotification: addNotificationMock,
-        getActiveJobs: () => [],
-      }),
-    );
-
+    addProcessingJob("record-1");
     const { supabase, getChangeHandler } = createSupabaseMock(["record-1"]);
     createClientMock.mockReturnValue(supabase);
 
     const { useProcessingMonitor } = await import("./use-processing-monitor");
     renderHookWithQueryClient(() => useProcessingMonitor("person-1"));
 
-    await waitFor(() => expect(supabase.channel).toHaveBeenCalled());
     const handler = getChangeHandler();
 
     act(() => {
@@ -281,7 +258,6 @@ describe("use-processing-monitor", () => {
 
     // "OCR complete" for a document that came back missing a page is the same defect one level
     // up from the column this work is about.
-    await waitFor(() => expect(toastWarningMock).toHaveBeenCalled());
     expect(toastSuccessMock).not.toHaveBeenCalled();
     expect(toastWarningMock).toHaveBeenCalledWith(
       "processing.ocrPartial",
@@ -289,27 +265,28 @@ describe("use-processing-monitor", () => {
         description: "processing.ocrCause.provider_unavailable",
       }),
     );
-    expect(addNotificationMock).toHaveBeenCalledWith(
-      expect.objectContaining({ message: "processing.ocrCause.provider_unavailable" }),
+    expect(useProcessingQueueStore.getState().getJobByRecordId("record-1")).toEqual(
+      expect.objectContaining({ stage: "completed", progress: 100 }),
     );
+    expect(useProcessingQueueStore.getState().notifications).toEqual([
+      expect.objectContaining({
+        recordId: "record-1",
+        message: "processing.ocrCause.provider_unavailable",
+      }),
+    ]);
   });
 
   // A structuring failure has no failed status of its own: the record goes back to ocr_review,
   // which is also what a successful OCR looks like. Only the previous status tells them apart.
   it("fails the job when structuring returns the record to review", async () => {
-    const updateJobMock = vi.fn();
-    const addNotificationMock = vi.fn();
-    useProcessingQueueStoreMock.mockImplementation((selector: (state: unknown) => unknown) =>
-      selector({ updateJob: updateJobMock, addNotification: addNotificationMock }),
-    );
-
-    const { supabase, getChangeHandler } = createSupabaseMock(["record-2"]);
+    addProcessingJob("record-2");
+    const { supabase, getChangeHandler, initialProcessingRows } = createSupabaseMock(["record-2"]);
     createClientMock.mockReturnValue(supabase);
 
     const { useProcessingMonitor } = await import("./use-processing-monitor");
     renderHookWithQueryClient(() => useProcessingMonitor("person-1"));
 
-    await waitFor(() => expect(supabase.channel).toHaveBeenCalled());
+    await initialProcessingRows;
     const handler = getChangeHandler();
 
     act(() => {
@@ -331,30 +308,21 @@ describe("use-processing-monitor", () => {
       });
     });
 
-    await waitFor(() =>
-      expect(updateJobMock).toHaveBeenCalledWith("record-2", {
-        stage: "failed",
-        error: "Model returned invalid JSON",
-      }),
+    expect(useProcessingQueueStore.getState().getJobByRecordId("record-2")).toEqual(
+      expect.objectContaining({ stage: "failed", error: "Model returned invalid JSON" }),
     );
   });
 
   // A client whose connection dropped can mark a record failed while the run that owns it is
   // still transcribing. When that run finishes, the recovery has to reach the job.
   it("treats a recovery from ocr_failed as a completion", async () => {
-    const updateJobMock = vi.fn();
-    const addNotificationMock = vi.fn();
-    useProcessingQueueStoreMock.mockImplementation((selector: (state: unknown) => unknown) =>
-      selector({ updateJob: updateJobMock, addNotification: addNotificationMock }),
-    );
-
+    addProcessingJob("record-1");
     const { supabase, getChangeHandler } = createSupabaseMock(["record-1"]);
     createClientMock.mockReturnValue(supabase);
 
     const { useProcessingMonitor } = await import("./use-processing-monitor");
     renderHookWithQueryClient(() => useProcessingMonitor("person-1"));
 
-    await waitFor(() => expect(supabase.channel).toHaveBeenCalled());
     act(() => {
       getChangeHandler()?.({
         eventType: "UPDATE",
@@ -363,38 +331,15 @@ describe("use-processing-monitor", () => {
       });
     });
 
-    await waitFor(() =>
-      expect(updateJobMock).toHaveBeenCalledWith(
-        "record-1",
-        expect.objectContaining({ stage: "completed", progress: 100 }),
-      ),
+    expect(useProcessingQueueStore.getState().getJobByRecordId("record-1")).toEqual(
+      expect.objectContaining({ stage: "completed", progress: 100, title: "Scan" }),
     );
   });
 
   // The channel is filtered to the selected person, so a job for anyone else is invisible to it.
   it("closes out a job for a person this channel does not watch", async () => {
-    const updateJobMock = vi.fn();
-    const addNotificationMock = vi.fn();
-    const getActiveJobs = vi.fn(() => [
-      {
-        id: "record-9",
-        recordId: "record-9",
-        personId: "person-2",
-        personName: "Sam",
-        stage: "processing",
-        progress: 50,
-      },
-    ]);
-    const storeState = {
-      updateJob: updateJobMock,
-      addNotification: addNotificationMock,
-      getActiveJobs,
-      getJobByRecordId: () => undefined,
-    };
-    useProcessingQueueStoreMock.mockImplementation((selector: (state: unknown) => unknown) =>
-      selector(storeState),
-    );
-    useProcessingQueueStoreMock.getState.mockReturnValue(storeState);
+    addProcessingJob("record-9", { id: "person-2", name: "Sam" });
+    addProcessingJob("record-1");
 
     const { supabase, reconcileInMock } = createSupabaseMock(
       [],
@@ -405,22 +350,24 @@ describe("use-processing-monitor", () => {
     const { useProcessingMonitor } = await import("./use-processing-monitor");
     renderHookWithQueryClient(() => useProcessingMonitor("person-1"));
 
-    await waitFor(() => expect(reconcileInMock).toHaveBeenCalled());
     await waitFor(() =>
-      expect(updateJobMock).toHaveBeenCalledWith(
-        "record-9",
-        expect.objectContaining({ stage: "completed", title: "Other person's scan" }),
+      expect(useProcessingQueueStore.getState().getJobByRecordId("record-9")).toEqual(
+        expect.objectContaining({
+          stage: "completed",
+          progress: 100,
+          title: "Other person's scan",
+        }),
       ),
     );
+    expect(reconcileInMock).toHaveBeenCalledWith("id", ["record-9"]);
+    expect(useProcessingQueueStore.getState().getActiveJobs()).toEqual([
+      expect.objectContaining({ id: "record-1", stage: "processing", progress: 50 }),
+    ]);
   });
 
   it("handles structure completion, processing starts, inserts/deletes, and subscription errors", async () => {
-    const updateJobMock = vi.fn();
-    const addNotificationMock = vi.fn();
-    useProcessingQueueStoreMock.mockImplementation((selector: (state: unknown) => unknown) =>
-      selector({ updateJob: updateJobMock, addNotification: addNotificationMock }),
-    );
-
+    addProcessingJob("record-2");
+    addProcessingJob("record-3");
     const { supabase, getChangeHandler } = createSupabaseMock();
     const subscriptionError = new Error("subscription failed");
     vi.mocked(supabase.channel).mockImplementation(() => {
@@ -447,7 +394,7 @@ describe("use-processing-monitor", () => {
     );
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
 
-    await waitFor(() => expect(supabase.channel).toHaveBeenCalled());
+    expect(supabase.channel).toHaveBeenCalled();
     const handler =
       (supabase as unknown as { __handler?: ReturnType<typeof getChangeHandler> }).__handler ??
       getChangeHandler();
@@ -528,7 +475,9 @@ describe("use-processing-monitor", () => {
           description: "Structured title",
         }),
       );
-      expect(updateJobMock).toHaveBeenCalledWith("record-3", { title: "Renamed while processing" });
+      expect(useProcessingQueueStore.getState().getJobByRecordId("record-3")).toEqual(
+        expect.objectContaining({ stage: "processing", title: "Renamed while processing" }),
+      );
     });
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ["medical-records"],

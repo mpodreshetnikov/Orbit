@@ -1,6 +1,6 @@
 import React from "react";
 import { renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NotificationForDevice } from "@/types";
 
 describe("use-notifications", () => {
@@ -9,20 +9,18 @@ describe("use-notifications", () => {
     localStorage.clear();
   });
 
+  afterEach(() => vi.unstubAllGlobals());
+
   it("uses service worker controller to request notification display", async () => {
     const postMessageMock = vi.fn();
-    const addEventListenerMock = vi.fn();
-    const removeEventListenerMock = vi.fn();
+    const serviceWorker = Object.assign(new EventTarget(), {
+      controller: { postMessage: postMessageMock },
+    });
 
     Object.defineProperty(globalThis.navigator, "serviceWorker", {
       configurable: true,
       writable: true,
-      value: {
-        controller: { postMessage: postMessageMock },
-        addEventListener: addEventListenerMock,
-        removeEventListener: removeEventListenerMock,
-        getRegistration: vi.fn().mockResolvedValue(null),
-      },
+      value: serviceWorker,
     });
 
     Object.defineProperty(globalThis, "Notification", {
@@ -51,7 +49,7 @@ describe("use-notifications", () => {
     }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const { useNotifications } = await import("./use-notifications");
+    const { getShownToday, useNotifications } = await import("./use-notifications");
     const { unmount } = renderHook(() => useNotifications());
 
     await waitFor(() =>
@@ -62,10 +60,18 @@ describe("use-notifications", () => {
         }),
       ),
     );
-    expect(addEventListenerMock).toHaveBeenCalledWith("message", expect.any(Function));
+    expect(getShownToday()).toEqual(new Set());
+
+    serviceWorker.dispatchEvent(
+      new MessageEvent("message", { data: { type: "notificationShown", id: "notif-1" } }),
+    );
+    expect(getShownToday()).toEqual(new Set(["notif-1"]));
 
     unmount();
-    expect(removeEventListenerMock).toHaveBeenCalledWith("message", expect.any(Function));
+    serviceWorker.dispatchEvent(
+      new MessageEvent("message", { data: { type: "notificationShown", id: "after-unmount" } }),
+    );
+    expect(getShownToday()).toEqual(new Set(["notif-1"]));
   });
 
   it("falls back to registration.showNotification and marks shown", async () => {
@@ -264,7 +270,10 @@ describe("use-notifications", () => {
   });
 
   it("uses stable medication fallback tags so repeat reminders can replace prior cards", async () => {
-    const showNotificationMock = vi.fn().mockResolvedValue(undefined);
+    const visible = new Map<string | undefined, string | undefined>();
+    const showNotification = async (_title: string, options: NotificationOptions) => {
+      visible.set(options.tag, options.body);
+    };
     Object.defineProperty(globalThis.navigator, "serviceWorker", {
       configurable: true,
       writable: true,
@@ -273,7 +282,7 @@ describe("use-notifications", () => {
         addEventListener: vi.fn(),
         removeEventListener: vi.fn(),
         getRegistration: vi.fn().mockResolvedValue({
-          showNotification: showNotificationMock,
+          showNotification,
         }),
       },
     });
@@ -292,7 +301,7 @@ describe("use-notifications", () => {
       }),
     );
 
-    const { showNotificationFallback } = await import("./use-notifications");
+    const { getShownToday, showNotificationFallback } = await import("./use-notifications");
     const scheduledAt = new Date().toISOString();
 
     await showNotificationFallback({
@@ -314,20 +323,15 @@ describe("use-notifications", () => {
       url: "/health/medications",
     } as NotificationForDevice);
 
-    expect(showNotificationMock).toHaveBeenNthCalledWith(
-      1,
-      "Medications",
-      expect.objectContaining({ tag: "medication-person-1" }),
-    );
-    expect(showNotificationMock).toHaveBeenNthCalledWith(
-      2,
-      "Medications",
-      expect.objectContaining({ tag: "medication-person-1" }),
-    );
+    expect([...visible]).toEqual([["medication-person-1", "Dose 2"]]);
+    expect(getShownToday()).toEqual(new Set(["med-1", "med-2"]));
   });
 
   it("keeps non-medication fallback tags digest-scoped", async () => {
-    const showNotificationMock = vi.fn().mockResolvedValue(undefined);
+    const visible = new Map<string | undefined, string | undefined>();
+    const showNotification = async (_title: string, options: NotificationOptions) => {
+      visible.set(options.tag, options.body);
+    };
     Object.defineProperty(globalThis.navigator, "serviceWorker", {
       configurable: true,
       writable: true,
@@ -336,7 +340,7 @@ describe("use-notifications", () => {
         addEventListener: vi.fn(),
         removeEventListener: vi.fn(),
         getRegistration: vi.fn().mockResolvedValue({
-          showNotification: showNotificationMock,
+          showNotification,
         }),
       },
     });
@@ -355,14 +359,14 @@ describe("use-notifications", () => {
       }),
     );
 
-    const { showNotificationFallback } = await import("./use-notifications");
+    const { getShownToday, showNotificationFallback } = await import("./use-notifications");
     const scheduledAt = new Date().toISOString();
 
     await showNotificationFallback({
       id: "checkup-1",
       type: "checkup",
       title: "Checkup",
-      body: "Body",
+      body: "Blood test",
       person_id: "person-9",
       scheduledAt,
       url: "/health/checkups",
@@ -371,22 +375,17 @@ describe("use-notifications", () => {
       id: "checkup-2",
       type: "checkup",
       title: "Checkup",
-      body: "Body",
+      body: "Dental exam",
       person_id: "person-9",
       scheduledAt,
       url: "/health/checkups",
     } as NotificationForDevice);
 
-    expect(showNotificationMock).toHaveBeenNthCalledWith(
-      1,
-      "Checkup",
-      expect.objectContaining({ tag: "notification-person-9-checkup-1" }),
-    );
-    expect(showNotificationMock).toHaveBeenNthCalledWith(
-      2,
-      "Checkup",
-      expect.objectContaining({ tag: "notification-person-9-checkup-2" }),
-    );
+    expect([...visible]).toEqual([
+      ["notification-person-9-checkup-1", "Blood test"],
+      ["notification-person-9-checkup-2", "Dental exam"],
+    ]);
+    expect(getShownToday()).toEqual(new Set(["checkup-1", "checkup-2"]));
   });
 
   it("returns early in fallback when notification permission is denied", async () => {
@@ -413,7 +412,12 @@ describe("use-notifications", () => {
       },
     });
 
-    const { showNotificationFallback } = await import("./use-notifications");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { getShownToday, markShownToday, showNotificationFallback } =
+      await import("./use-notifications");
+    markShownToday("already-shown");
     await showNotificationFallback({
       id: "notif-denied",
       title: "Denied",
@@ -424,6 +428,8 @@ describe("use-notifications", () => {
     } as NotificationForDevice);
 
     expect(shownCtor).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(getShownToday()).toEqual(new Set(["already-shown"]));
   });
 
   it("handles service worker message payloads and skips already shown/future notifications", async () => {
@@ -529,35 +535,33 @@ describe("use-notifications", () => {
     expect(removeEventListenerMock).toHaveBeenCalledWith("message", expect.any(Function));
   });
 
-  it("returns early when Notification API is unavailable", async () => {
-    const addEventListenerMock = vi.fn();
-    const originalNotification = (globalThis as { Notification?: unknown }).Notification;
-    Object.defineProperty(globalThis.navigator, "serviceWorker", {
+  it("skips polling and worker acknowledgments when Notification API is unavailable", async () => {
+    const serviceWorker = new EventTarget();
+    Object.defineProperty(navigator, "serviceWorker", {
       configurable: true,
       writable: true,
-      value: {
-        controller: undefined,
-        addEventListener: addEventListenerMock,
-        removeEventListener: vi.fn(),
-        getRegistration: vi.fn().mockResolvedValue(null),
-      },
+      value: serviceWorker,
     });
-    Object.defineProperty(window, "Notification", {
-      configurable: true,
-      writable: true,
-      value: undefined,
-    });
-    // The hook checks `"Notification" in window`, so remove the key entirely.
-    delete (window as { Notification?: unknown }).Notification;
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ notifications: [] }) }));
+    vi.stubGlobal("fetch", fetchMock);
+    const originalNotification = Object.getOwnPropertyDescriptor(window, "Notification");
+    Reflect.deleteProperty(window, "Notification");
 
-    const { useNotifications } = await import("./use-notifications");
-    renderHook(() => useNotifications());
-    expect(addEventListenerMock).not.toHaveBeenCalled();
+    try {
+      const { getShownToday, useNotifications } = await import("./use-notifications");
+      const { unmount } = renderHook(() => useNotifications());
+      window.dispatchEvent(new Event("online"));
+      serviceWorker.dispatchEvent(
+        new MessageEvent("message", { data: { type: "notificationShown", id: "notif-1" } }),
+      );
 
-    Object.defineProperty(globalThis, "Notification", {
-      configurable: true,
-      writable: true,
-      value: originalNotification,
-    });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(getShownToday()).toEqual(new Set());
+      unmount();
+    } finally {
+      if (originalNotification) {
+        Object.defineProperty(window, "Notification", originalNotification);
+      }
+    }
   });
 });

@@ -118,7 +118,7 @@ describe("use-money-cards", () => {
     const created = {
       id: "card-1",
       account_id: "acc-1",
-      last4: "1234",
+      last4: "3499",
       card_label: "Travel",
     };
     const builder = createQueryBuilder({ data: created, error: null });
@@ -126,14 +126,21 @@ describe("use-money-cards", () => {
 
     const { useCreateMoneyCard } = await import("./use-money-cards");
     const { result, queryClient } = renderHookWithQueryClient(() => useCreateMoneyCard());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const cardsKey = ["money-cards", "acc-1"];
+    const otherCardsKey = ["money-cards", "acc-2"];
+    const combinedCardsKey = ["money-cards-by-accounts", ["acc-1", "acc-2"]];
+    queryClient.setQueryData(cardsKey, [{ id: "card-1" }]);
+    queryClient.setQueryData(otherCardsKey, [{ id: "card-2" }]);
+    queryClient.setQueryData(combinedCardsKey, [{ id: "card-1" }, { id: "card-2" }]);
 
     await act(async () => {
-      await result.current.mutateAsync({
-        account_id: "acc-1",
-        last4: "12-34 99",
-        card_label: "Travel",
-      });
+      await expect(
+        result.current.mutateAsync({
+          account_id: "acc-1",
+          last4: "12-34 99",
+          card_label: " Travel  ",
+        }),
+      ).resolves.toEqual(created);
     });
 
     expect(builder.insert).toHaveBeenCalledWith({
@@ -141,12 +148,9 @@ describe("use-money-cards", () => {
       last4: "3499",
       card_label: "Travel",
     });
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["money-cards", "acc-1"],
-    });
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["money-cards-by-accounts"],
-    });
+    expect(queryClient.getQueryState(cardsKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherCardsKey)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(combinedCardsKey)?.isInvalidated).toBe(true);
   });
 
   it("creates card with fallback values and propagates create errors", async () => {
@@ -185,21 +189,28 @@ describe("use-money-cards", () => {
 
     const { useUpdateMoneyCard } = await import("./use-money-cards");
     const { result, queryClient } = renderHookWithQueryClient(() => useUpdateMoneyCard());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const cardsKey = ["money-cards", "acc-1"];
+    const otherCardsKey = ["money-cards", "acc-2"];
+    const combinedCardsKey = ["money-cards-by-accounts", ["acc-1", "acc-2"]];
+    queryClient.setQueryData(cardsKey, [{ id: "card-1" }]);
+    queryClient.setQueryData(otherCardsKey, [{ id: "card-2" }]);
+    queryClient.setQueryData(combinedCardsKey, [{ id: "card-1" }, { id: "card-2" }]);
 
     await act(async () => {
-      await result.current.mutateAsync({
-        id: "card-1",
-        accountId: "acc-1",
-        updates: { last4: "AB98-76", card_label: "Main" },
-      });
+      await expect(
+        result.current.mutateAsync({
+          id: "card-1",
+          accountId: "acc-1",
+          updates: { last4: "AB98-76", card_label: "Main" },
+        }),
+      ).resolves.toEqual(updated);
     });
 
     expect(builder.update).toHaveBeenCalledWith({ last4: "9876", card_label: "Main" });
     expect(builder.eq).toHaveBeenCalledWith("id", "card-1");
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["money-cards", "acc-1"],
-    });
+    expect(queryClient.getQueryState(cardsKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherCardsKey)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(combinedCardsKey)?.isInvalidated).toBe(true);
   });
 
   it("updates without last4 and propagates update errors", async () => {
@@ -236,11 +247,13 @@ describe("use-money-cards", () => {
     const { result } = renderHookWithQueryClient(() => useUpdateMoneyCard());
 
     await act(async () => {
-      await result.current.mutateAsync({
-        id: "card-1",
-        accountId: "acc-1",
-        updates: { last4: "ABCD" },
-      });
+      await expect(
+        result.current.mutateAsync({
+          id: "card-1",
+          accountId: "acc-1",
+          updates: { last4: "ABCD" },
+        }),
+      ).resolves.toEqual(updated);
     });
 
     expect(builder.update).toHaveBeenCalledWith({ last4: "ABCD" });
@@ -252,7 +265,12 @@ describe("use-money-cards", () => {
 
     const { useDeleteMoneyCard } = await import("./use-money-cards");
     const { result, queryClient } = renderHookWithQueryClient(() => useDeleteMoneyCard());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const cardsKey = ["money-cards", "acc-1"];
+    const otherCardsKey = ["money-cards", "acc-2"];
+    const combinedCardsKey = ["money-cards-by-accounts", ["acc-1", "acc-2"]];
+    queryClient.setQueryData(cardsKey, [{ id: "card-1" }]);
+    queryClient.setQueryData(otherCardsKey, [{ id: "card-2" }]);
+    queryClient.setQueryData(combinedCardsKey, [{ id: "card-1" }, { id: "card-2" }]);
 
     await act(async () => {
       await result.current.mutateAsync({
@@ -263,12 +281,9 @@ describe("use-money-cards", () => {
 
     expect(builder.delete).toHaveBeenCalled();
     expect(builder.eq).toHaveBeenCalledWith("id", "card-1");
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["money-cards", "acc-1"],
-    });
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["money-cards-by-accounts"],
-    });
+    expect(queryClient.getQueryState(cardsKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherCardsKey)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(combinedCardsKey)?.isInvalidated).toBe(true);
   });
 
   it("propagates delete errors", async () => {

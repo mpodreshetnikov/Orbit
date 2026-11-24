@@ -95,15 +95,20 @@ describe("use-money-accounts", () => {
 
     const { useCreateMoneyAccount } = await import("./use-money-accounts");
     const { result, queryClient } = renderHookWithQueryClient(() => useCreateMoneyAccount());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const accountsKey = ["money-accounts", "person-1"];
+    const otherAccountsKey = ["money-accounts", "person-2"];
+    queryClient.setQueryData(accountsKey, [{ id: "existing-account" }]);
+    queryClient.setQueryData(otherAccountsKey, [{ id: "other-account" }]);
 
     await act(async () => {
-      await result.current.mutateAsync({
-        owner_person_id: "person-1",
-        account_kind: "cash",
-        account_label: "Cash",
-        currency: "USD",
-      });
+      await expect(
+        result.current.mutateAsync({
+          owner_person_id: "person-1",
+          account_kind: "cash",
+          account_label: "Cash",
+          currency: "USD",
+        }),
+      ).resolves.toEqual(created);
     });
 
     expect(builder.insert).toHaveBeenCalledWith({
@@ -115,9 +120,8 @@ describe("use-money-accounts", () => {
       external_account_id: null,
       is_active: true,
     });
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["money-accounts", "person-1"],
-    });
+    expect(queryClient.getQueryState(accountsKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherAccountsKey)?.isInvalidated).toBe(false);
   });
 
   it("maps RLS create errors to an actionable message", async () => {
@@ -160,20 +164,24 @@ describe("use-money-accounts", () => {
 
     const { useUpdateMoneyAccount } = await import("./use-money-accounts");
     const { result, queryClient } = renderHookWithQueryClient(() => useUpdateMoneyAccount());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const accountsKey = ["money-accounts", "person-1"];
+    const otherAccountsKey = ["money-accounts", "person-2"];
+    queryClient.setQueryData(accountsKey, [{ id: "existing-account" }]);
+    queryClient.setQueryData(otherAccountsKey, [{ id: "other-account" }]);
 
     await act(async () => {
-      await result.current.mutateAsync({
-        id: "acc-1",
-        updates: { account_label: "Wallet" },
-      });
+      await expect(
+        result.current.mutateAsync({
+          id: "acc-1",
+          updates: { account_label: "Wallet" },
+        }),
+      ).resolves.toEqual(updated);
     });
 
     expect(builder.update).toHaveBeenCalledWith({ account_label: "Wallet" });
     expect(builder.eq).toHaveBeenCalledWith("id", "acc-1");
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["money-accounts", "person-1"],
-    });
+    expect(queryClient.getQueryState(accountsKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherAccountsKey)?.isInvalidated).toBe(false);
   });
 
   it("deletes account and invalidates owner list", async () => {
@@ -184,7 +192,10 @@ describe("use-money-accounts", () => {
 
     const { useDeleteMoneyAccount } = await import("./use-money-accounts");
     const { result, queryClient } = renderHookWithQueryClient(() => useDeleteMoneyAccount());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const accountsKey = ["money-accounts", "person-1"];
+    const otherAccountsKey = ["money-accounts", "person-2"];
+    queryClient.setQueryData(accountsKey, [{ id: "existing-account" }]);
+    queryClient.setQueryData(otherAccountsKey, [{ id: "other-account" }]);
 
     await act(async () => {
       await result.current.mutateAsync({
@@ -195,8 +206,7 @@ describe("use-money-accounts", () => {
 
     expect(builder.delete).toHaveBeenCalled();
     expect(builder.eq).toHaveBeenCalledWith("id", "acc-1");
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["money-accounts", "person-1"],
-    });
+    expect(queryClient.getQueryState(accountsKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherAccountsKey)?.isInvalidated).toBe(false);
   });
 });
