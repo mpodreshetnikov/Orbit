@@ -21,6 +21,9 @@ function renderHookWithQueryClient<T>(hook: () => T) {
   };
 }
 
+const recordKey = ["record-observations", "r1"];
+const otherRecordKey = ["record-observations", "r2"];
+
 describe("use-record-observations", () => {
   beforeEach(() => {
     createClientMock.mockReset();
@@ -55,105 +58,109 @@ describe("use-record-observations", () => {
     expect((result.current.error as Error).message).toContain("rpc failed");
   });
 
-  it("creates observation and invalidates record query", async () => {
-    const created = {
-      id: "o1",
-      record_id: "r1",
-      person_id: "p1",
-    };
+  it("creates an observation and invalidates its record", async () => {
+    const input = { record_id: "r1", obs_name: "Glucose", value_numeric: 5.2 };
+    const created = { ...input, id: "o1" };
     const builder = createQueryBuilder({ data: created, error: null });
     createClientMock.mockReturnValue({ from: vi.fn(() => builder) });
 
     const { useCreateRecordObservation } = await import("./use-record-observations");
     const { result, queryClient } = renderHookWithQueryClient(() => useCreateRecordObservation());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    queryClient.setQueryData(recordKey, []);
+    queryClient.setQueryData(otherRecordKey, []);
 
     await act(async () => {
-      await result.current.mutateAsync({
-        record_id: "r1",
-        person_id: "p1",
-        obs_name: "Glucose",
-        source_anchor: "line",
-      } as import("@/types").CreateRecordObservationInput);
+      expect(await result.current.mutateAsync(input)).toEqual(created);
     });
 
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["record-observations", "r1"],
-    });
+    expect(builder.insert).toHaveBeenCalledWith(input);
+    expect(queryClient.getQueryState(recordKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherRecordKey)?.isInvalidated).toBe(false);
   });
 
-  it("handles empty batch create without supabase calls", async () => {
+  it("returns an empty batch without writing or invalidating cached queries", async () => {
     const { useCreateRecordObservations } = await import("./use-record-observations");
-    const { result } = renderHookWithQueryClient(() => useCreateRecordObservations());
+    const { result, queryClient } = renderHookWithQueryClient(() => useCreateRecordObservations());
+    queryClient.setQueryData(recordKey, [{ id: "o1", record_id: "r1" }]);
 
     await act(async () => {
-      await result.current.mutateAsync([]);
+      expect(await result.current.mutateAsync([])).toEqual([]);
     });
 
     expect(createClientMock).not.toHaveBeenCalled();
+    expect(queryClient.getQueryState(recordKey)?.isInvalidated).toBe(false);
   });
 
-  it("creates observation batch and invalidates record query", async () => {
-    const created = [{ id: "o1", record_id: "r1" }];
+  it("returns all created observations and invalidates their record", async () => {
+    const first = { record_id: "r1", obs_name: "Glucose", value_numeric: 5.2 };
+    const second = { ...first, obs_name: "Hemoglobin" };
+    const inputs = [first, second];
+    const created = [
+      { ...first, id: "o1" },
+      { ...second, id: "o2" },
+    ];
     const builder = createQueryBuilder({ data: created, error: null });
     createClientMock.mockReturnValue({ from: vi.fn(() => builder) });
 
     const { useCreateRecordObservations } = await import("./use-record-observations");
     const { result, queryClient } = renderHookWithQueryClient(() => useCreateRecordObservations());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    queryClient.setQueryData(recordKey, []);
+    queryClient.setQueryData(otherRecordKey, []);
 
     await act(async () => {
-      await result.current.mutateAsync([
-        { record_id: "r1", obs_name: "Glucose", source_anchor: "line" },
-      ] as unknown as import("@/types").CreateRecordObservationInput[]);
+      expect(await result.current.mutateAsync(inputs)).toEqual(created);
     });
 
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["record-observations", "r1"],
-    });
+    expect(builder.insert).toHaveBeenCalledWith(inputs);
+    expect(queryClient.getQueryState(recordKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherRecordKey)?.isInvalidated).toBe(false);
   });
 
-  it("updates observation and invalidates record query", async () => {
-    const updated = { id: "o1", record_id: "r1" };
+  it("returns the updated observation and invalidates its record", async () => {
+    const updated = { id: "o1", record_id: "r1", obs_name: "Hemoglobin" };
     const builder = createQueryBuilder({ data: updated, error: null });
     createClientMock.mockReturnValue({ from: vi.fn(() => builder) });
 
     const { useUpdateRecordObservation } = await import("./use-record-observations");
     const { result, queryClient } = renderHookWithQueryClient(() => useUpdateRecordObservation());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    queryClient.setQueryData(recordKey, [{ ...updated, obs_name: "Glucose" }]);
+    queryClient.setQueryData(otherRecordKey, []);
 
     await act(async () => {
-      await result.current.mutateAsync({
-        id: "o1",
-        updates: { obs_name: "Updated" },
-      } as { id: string; updates: import("@/types").UpdateRecordObservationInput });
+      expect(
+        await result.current.mutateAsync({
+          id: "o1",
+          updates: { obs_name: "Hemoglobin" },
+        }),
+      ).toEqual(updated);
     });
 
-    expect(builder.update).toHaveBeenCalledWith({ obs_name: "Updated" });
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["record-observations", "r1"],
-    });
+    expect(builder.update).toHaveBeenCalledWith({ obs_name: "Hemoglobin" });
+    expect(builder.eq).toHaveBeenCalledWith("id", "o1");
+    expect(queryClient.getQueryState(recordKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherRecordKey)?.isInvalidated).toBe(false);
   });
 
-  it("deletes observation and invalidates record query", async () => {
+  it("deletes one observation and invalidates its record", async () => {
     const builder = createQueryBuilder({ data: null, error: null });
     createClientMock.mockReturnValue({ from: vi.fn(() => builder) });
 
     const { useDeleteRecordObservation } = await import("./use-record-observations");
     const { result, queryClient } = renderHookWithQueryClient(() => useDeleteRecordObservation());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    queryClient.setQueryData(recordKey, [{ id: "o1" }, { id: "o2" }]);
+    queryClient.setQueryData(otherRecordKey, []);
 
     await act(async () => {
       await result.current.mutateAsync({ id: "o1", recordId: "r1" });
     });
 
     expect(builder.delete).toHaveBeenCalled();
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["record-observations", "r1"],
-    });
+    expect(builder.eq).toHaveBeenCalledWith("id", "o1");
+    expect(queryClient.getQueryState(recordKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherRecordKey)?.isInvalidated).toBe(false);
   });
 
-  it("deletes all observations and invalidates record query", async () => {
+  it("deletes all observations for one record and invalidates its list", async () => {
     const builder = createQueryBuilder({ data: null, error: null });
     createClientMock.mockReturnValue({ from: vi.fn(() => builder) });
 
@@ -161,33 +168,38 @@ describe("use-record-observations", () => {
     const { result, queryClient } = renderHookWithQueryClient(() =>
       useDeleteAllRecordObservations(),
     );
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    queryClient.setQueryData(recordKey, [{ id: "o1" }, { id: "o2" }]);
+    queryClient.setQueryData(otherRecordKey, []);
 
     await act(async () => {
       await result.current.mutateAsync("r1");
     });
 
     expect(builder.delete).toHaveBeenCalled();
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["record-observations", "r1"],
-    });
+    expect(builder.eq).toHaveBeenCalledWith("record_id", "r1");
+    expect(queryClient.getQueryState(recordKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherRecordKey)?.isInvalidated).toBe(false);
   });
 
-  it("verifies observation and invalidates record query", async () => {
+  it("verifies an observation and invalidates its record", async () => {
     const builder = createQueryBuilder({ data: null, error: null });
     createClientMock.mockReturnValue({ from: vi.fn(() => builder) });
 
     const { useVerifyRecordObservation } = await import("./use-record-observations");
     const { result, queryClient } = renderHookWithQueryClient(() => useVerifyRecordObservation());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    queryClient.setQueryData(recordKey, [{ id: "o1", is_user_verified: false }]);
+    queryClient.setQueryData(otherRecordKey, []);
 
     await act(async () => {
-      await result.current.mutateAsync({ id: "o1", recordId: "r1" });
+      expect(await result.current.mutateAsync({ id: "o1", recordId: "r1" })).toEqual({
+        id: "o1",
+        recordId: "r1",
+      });
     });
 
     expect(builder.update).toHaveBeenCalledWith({ is_user_verified: true });
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["record-observations", "r1"],
-    });
+    expect(builder.eq).toHaveBeenCalledWith("id", "o1");
+    expect(queryClient.getQueryState(recordKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherRecordKey)?.isInvalidated).toBe(false);
   });
 });

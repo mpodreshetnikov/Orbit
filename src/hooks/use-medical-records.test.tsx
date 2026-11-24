@@ -48,6 +48,10 @@ function recordRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
+const recordKey = ["medical-record", "record-1"];
+const recordsKey = ["medical-records", { person_id: "person-1", record_type: "lab" }];
+const otherPersonRecordsKey = ["medical-records", { person_id: "person-2" }];
+
 describe("use-medical-records", () => {
   beforeEach(() => {
     createClientMock.mockReset();
@@ -191,11 +195,9 @@ describe("use-medical-records", () => {
     expect((result.current.error as Error).message).toBe("record lookup failed");
   });
 
-  it("creates and updates record", async () => {
-    const builder = createQueryBuilder({
-      data: { id: "record-1", person_id: "person-1" },
-      error: null,
-    });
+  it("creates a draft and refreshes only its person's record lists", async () => {
+    const created = recordRow({ created_by_user_id: "user-1" });
+    const builder = createQueryBuilder({ data: created, error: null });
     createClientMock.mockReturnValue({
       auth: {
         getUser: vi.fn().mockResolvedValue({
@@ -205,29 +207,58 @@ describe("use-medical-records", () => {
       from: vi.fn(() => builder),
     });
 
-    const { useCreateMedicalRecord, useUpdateMedicalRecord } =
-      await import("./use-medical-records");
-    const createHook = renderHookWithQueryClient(() => useCreateMedicalRecord());
-    const updateHook = renderHookWithQueryClient(() => useUpdateMedicalRecord());
+    const { useCreateMedicalRecord } = await import("./use-medical-records");
+    const { result, queryClient } = renderHookWithQueryClient(() => useCreateMedicalRecord());
+    queryClient.setQueryData(recordsKey, []);
+    queryClient.setQueryData(otherPersonRecordsKey, []);
 
     await act(async () => {
-      await createHook.result.current.mutateAsync({
-        person_id: "person-1",
-        title: "Blood Test",
-      } as CreateMedicalRecordInput);
-      await updateHook.result.current.mutateAsync({
-        id: "record-1",
-        updates: { title: "Updated" },
-      } as { id: string; updates: UpdateMedicalRecordInput });
+      expect(
+        await result.current.mutateAsync({
+          person_id: "person-1",
+          title: "Blood Test",
+          record_type: "lab",
+        }),
+      ).toEqual(created);
     });
 
-    expect(builder.insert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        created_by_user_id: "user-1",
-        status: "draft",
-      }),
-    );
-    expect(builder.update).toHaveBeenCalled();
+    expect(builder.insert).toHaveBeenCalledWith({
+      person_id: "person-1",
+      title: "Blood Test",
+      record_type: "lab",
+      created_by_user_id: "user-1",
+      status: "draft",
+    });
+    expect(queryClient.getQueryState(recordsKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherPersonRecordsKey)?.isInvalidated).toBe(false);
+  });
+
+  it("returns the edited record and refreshes views that show its title", async () => {
+    const previous = recordRow();
+    const updated = recordRow({ title: "Updated" });
+    const builder = createQueryBuilder({ data: updated, error: null });
+    createClientMock.mockReturnValue({ from: vi.fn(() => builder) });
+
+    const { useUpdateMedicalRecord } = await import("./use-medical-records");
+    const { result, queryClient } = renderHookWithQueryClient(() => useUpdateMedicalRecord());
+    const conditionLinksKey = ["condition-records", "record", "record-1"];
+    queryClient.setQueryData(recordKey, previous);
+    queryClient.setQueryData(recordsKey, [previous]);
+    queryClient.setQueryData(otherPersonRecordsKey, []);
+    queryClient.setQueryData(conditionLinksKey, []);
+
+    await act(async () => {
+      expect(
+        await result.current.mutateAsync({ id: "record-1", updates: { title: "Updated" } }),
+      ).toEqual(updated);
+    });
+
+    expect(builder.update).toHaveBeenCalledWith(expect.objectContaining({ title: "Updated" }));
+    expect(builder.eq).toHaveBeenCalledWith("id", "record-1");
+    expect(queryClient.getQueryState(recordKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(recordsKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherPersonRecordsKey)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(conditionLinksKey)?.isInvalidated).toBe(true);
   });
 
   it("returns create/update errors and maps llm suggested completions", async () => {
@@ -315,35 +346,34 @@ describe("use-medical-records", () => {
     ).rejects.toThrow("Not authenticated");
   });
 
-  it("soft deletes and restores record", async () => {
-    const builder = createQueryBuilder({
-      data: { id: "record-1", person_id: "person-1" },
-      error: null,
-    });
-    createClientMock.mockReturnValue({
-      from: vi.fn(() => builder),
-    });
+  it("marks a record removed, then clears the removal date on restore", async () => {
+    const active = recordRow({ status: "active", removed_at: null });
+    const removed = { ...active, status: "removed", removed_at: "2026-11-24T00:00:00.000Z" };
+    const softDeleteBuilder = createQueryBuilder({ data: removed, error: null });
+    const restoreBuilder = createQueryBuilder({ data: active, error: null });
+    const from = vi.fn().mockReturnValueOnce(softDeleteBuilder).mockReturnValueOnce(restoreBuilder);
+    createClientMock.mockReturnValue({ from });
 
     const { useSoftDeleteRecord, useRestoreRecord } = await import("./use-medical-records");
     const softDelete = renderHookWithQueryClient(() => useSoftDeleteRecord());
     const restore = renderHookWithQueryClient(() => useRestoreRecord());
+    softDelete.queryClient.setQueryData(recordKey, active);
+    restore.queryClient.setQueryData(recordKey, removed);
 
     await act(async () => {
-      await softDelete.result.current.mutateAsync("record-1");
-      await restore.result.current.mutateAsync("record-1");
+      expect(await softDelete.result.current.mutateAsync("record-1")).toEqual(removed);
+      expect(await restore.result.current.mutateAsync("record-1")).toEqual(active);
     });
 
-    expect(builder.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        status: "removed",
-      }),
-    );
-    expect(builder.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        status: "active",
-        removed_at: null,
-      }),
-    );
+    expect(softDeleteBuilder.update).toHaveBeenCalledWith({
+      status: "removed",
+      removed_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+    });
+    expect(restoreBuilder.update).toHaveBeenCalledWith({ status: "active", removed_at: null });
+    expect(softDeleteBuilder.eq).toHaveBeenCalledWith("id", "record-1");
+    expect(restoreBuilder.eq).toHaveBeenCalledWith("id", "record-1");
+    expect(softDelete.queryClient.getQueryState(recordKey)?.isInvalidated).toBe(true);
+    expect(restore.queryClient.getQueryState(recordKey)?.isInvalidated).toBe(true);
   });
 
   it("returns soft-delete and restore errors", async () => {
@@ -383,15 +413,17 @@ describe("use-medical-records", () => {
     const remove = vi.fn().mockResolvedValue({ error: null });
     const storageFrom = vi.fn(() => ({ list, remove }));
 
+    const from = vi.fn().mockReturnValueOnce(recordBuilder).mockReturnValueOnce(deleteBuilder);
     createClientMock.mockReturnValue({
-      from: vi.fn((table: string) => (table === "medical_records" ? recordBuilder : deleteBuilder)),
+      from,
       storage: {
         from: storageFrom,
       },
     });
 
     const { useHardDeleteRecord } = await import("./use-medical-records");
-    const { result } = renderHookWithQueryClient(() => useHardDeleteRecord());
+    const { result, queryClient } = renderHookWithQueryClient(() => useHardDeleteRecord());
+    queryClient.setQueryData(recordsKey, [recordRow()]);
 
     await act(async () => {
       await result.current.mutateAsync("record-1");
@@ -400,7 +432,9 @@ describe("use-medical-records", () => {
     expect(storageFrom).toHaveBeenCalledWith("medical-attachments");
     expect(list).toHaveBeenCalledWith("person-1/record-1");
     expect(remove).toHaveBeenCalledWith(["person-1/record-1/a.png", "person-1/record-1/b.pdf"]);
-    expect(recordBuilder.delete).toHaveBeenCalled();
+    expect(deleteBuilder.delete).toHaveBeenCalled();
+    expect(deleteBuilder.eq).toHaveBeenCalledWith("id", "record-1");
+    expect(queryClient.getQueryState(recordsKey)?.isInvalidated).toBe(true);
   });
 
   it("hard deletes when record is missing and when folder has no files", async () => {
@@ -415,16 +449,22 @@ describe("use-medical-records", () => {
     const list = vi.fn().mockResolvedValue({ data: [] });
     const remove = vi.fn().mockResolvedValue({ error: null });
     const storageFrom = vi.fn(() => ({ list, remove }));
+    const from = vi
+      .fn()
+      .mockReturnValueOnce(recordMissingBuilder)
+      .mockReturnValueOnce(deleteBuilder);
     createClientMock.mockReturnValue({
-      from: vi.fn((table: string) =>
-        table === "medical_records" ? recordMissingBuilder : deleteBuilder,
-      ),
+      from,
       storage: { from: storageFrom },
     });
 
     const { useHardDeleteRecord } = await import("./use-medical-records");
     const missingRecord = renderHookWithQueryClient(() => useHardDeleteRecord());
-    await missingRecord.result.current.mutateAsync("record-1");
+    missingRecord.queryClient.setQueryData(recordsKey, [recordRow()]);
+    await act(async () => {
+      await missingRecord.result.current.mutateAsync("record-1");
+    });
+    expect(missingRecord.queryClient.getQueryState(recordsKey)?.isInvalidated).toBe(true);
     expect(list).not.toHaveBeenCalled();
     expect(remove).not.toHaveBeenCalled();
 
@@ -432,16 +472,19 @@ describe("use-medical-records", () => {
       data: { person_id: "person-1" },
       error: null,
     });
-    createClientMock.mockReturnValue({
-      from: vi.fn((table: string) =>
-        table === "medical_records" ? recordWithFolderBuilder : deleteBuilder,
-      ),
-      storage: { from: storageFrom },
-    });
+    from.mockReturnValueOnce(recordWithFolderBuilder).mockReturnValueOnce(deleteBuilder);
     const noFiles = renderHookWithQueryClient(() => useHardDeleteRecord());
-    await noFiles.result.current.mutateAsync("record-2");
+    noFiles.queryClient.setQueryData(recordsKey, [recordRow({ id: "record-2" })]);
+    await act(async () => {
+      await noFiles.result.current.mutateAsync("record-2");
+    });
+    expect(deleteBuilder.eq.mock.calls).toEqual([
+      ["id", "record-1"],
+      ["id", "record-2"],
+    ]);
     expect(list).toHaveBeenCalledWith("person-1/record-2");
     expect(remove).not.toHaveBeenCalled();
+    expect(noFiles.queryClient.getQueryState(recordsKey)?.isInvalidated).toBe(true);
   });
 
   it("returns hard-delete error when record delete fails", async () => {
@@ -478,28 +521,37 @@ describe("use-medical-records", () => {
       auth: { getSession },
       from: vi.fn(() => createQueryBuilder({ data: null, error: null })),
     });
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => ({
-        ok: true,
-        json: async () => ({
-          success: true,
-          extraction: {},
-        }),
-      })) as unknown as typeof fetch,
-    );
+    const response = {
+      success: true,
+      extraction: {
+        ocr_text: "Blood Test",
+        record_type: "lab",
+        title: "Blood Test",
+        record_date: "2026-11-24",
+        summary: "Routine blood test",
+        keywords: ["blood"],
+      },
+    };
+    const fetchMock = vi.fn(async () => Response.json(response));
+    vi.stubGlobal("fetch", fetchMock);
 
     const { useIngestRecord } = await import("./use-medical-records");
     const { result, queryClient } = renderHookWithQueryClient(() => useIngestRecord());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const otherRecordKey = ["medical-record", "record-2"];
+    queryClient.setQueryData(recordKey, recordRow());
+    queryClient.setQueryData(otherRecordKey, recordRow({ id: "record-2" }));
 
     await act(async () => {
-      await result.current.mutateAsync({ recordId: "record-1" });
+      expect(await result.current.mutateAsync({ recordId: "record-1" })).toEqual(response);
     });
 
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["medical-record", "record-1"],
+    expect(fetchMock).toHaveBeenCalledWith("https://supabase.test/functions/v1/ingest-record", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer token-1" },
+      body: JSON.stringify({ record_id: "record-1" }),
     });
+    expect(queryClient.getQueryState(recordKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherRecordKey)?.isInvalidated).toBe(false);
   });
 
   it("returns ingest error when session is missing", async () => {

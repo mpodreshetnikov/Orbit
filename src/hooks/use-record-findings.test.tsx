@@ -21,6 +21,10 @@ function renderHookWithQueryClient<T>(hook: () => T) {
   };
 }
 
+const recordKey = ["record-findings", "r1"];
+const otherRecordKey = ["record-findings", "r2"];
+const historyKey = ["person-finding-history", "p1", "nod"];
+
 describe("use-record-findings", () => {
   beforeEach(() => {
     createClientMock.mockReset();
@@ -55,149 +59,171 @@ describe("use-record-findings", () => {
     expect((result.current.error as Error).message).toContain("rpc failed");
   });
 
-  it("creates finding and invalidates list + history", async () => {
-    const created = {
-      id: "f1",
+  it("creates a finding and invalidates its record", async () => {
+    const input = {
       record_id: "r1",
+      finding_type_text: "Nodule",
       person_id: "p1",
+      source_anchor: "line",
     };
+    const created = { ...input, id: "f1" };
     const builder = createQueryBuilder({ data: created, error: null });
     createClientMock.mockReturnValue({ from: vi.fn(() => builder) });
 
     const { useCreateRecordFinding } = await import("./use-record-findings");
     const { result, queryClient } = renderHookWithQueryClient(() => useCreateRecordFinding());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    queryClient.setQueryData(recordKey, []);
+    queryClient.setQueryData(otherRecordKey, []);
+    queryClient.setQueryData(historyKey, []);
 
     await act(async () => {
-      await result.current.mutateAsync({
-        record_id: "r1",
-        person_id: "p1",
-        finding_type_text: "Nodule",
-        source_anchor: "line",
-      } as import("@/types").CreateRecordFindingInput);
+      expect(await result.current.mutateAsync(input)).toEqual(created);
     });
 
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["record-findings", "r1"],
-    });
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["person-finding-history"],
-    });
+    expect(builder.insert).toHaveBeenCalledWith(input);
+    expect(queryClient.getQueryState(recordKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherRecordKey)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(historyKey)?.isInvalidated).toBe(true);
   });
 
-  it("handles empty batch create without touching supabase", async () => {
+  it("returns an empty batch without writing or invalidating cached queries", async () => {
     const { useCreateRecordFindings } = await import("./use-record-findings");
-    const { result } = renderHookWithQueryClient(() => useCreateRecordFindings());
+    const { result, queryClient } = renderHookWithQueryClient(() => useCreateRecordFindings());
+    queryClient.setQueryData(recordKey, [{ id: "f1", record_id: "r1" }]);
+    queryClient.setQueryData(historyKey, []);
 
     await act(async () => {
-      await result.current.mutateAsync([]);
+      expect(await result.current.mutateAsync([])).toEqual([]);
     });
 
     expect(createClientMock).not.toHaveBeenCalled();
+    expect(queryClient.getQueryState(recordKey)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(historyKey)?.isInvalidated).toBe(false);
   });
 
-  it("creates batch findings and invalidates first record list", async () => {
+  it("returns all created findings and invalidates their record", async () => {
+    const first = {
+      record_id: "r1",
+      finding_type_text: "Nodule",
+      person_id: "p1",
+      source_anchor: "line",
+    };
+    const second = { ...first, finding_type_text: "Cyst" };
+    const inputs = [first, second];
     const created = [
-      { id: "f1", record_id: "r1" },
-      { id: "f2", record_id: "r1" },
+      { ...first, id: "f1" },
+      { ...second, id: "f2" },
     ];
     const builder = createQueryBuilder({ data: created, error: null });
     createClientMock.mockReturnValue({ from: vi.fn(() => builder) });
 
     const { useCreateRecordFindings } = await import("./use-record-findings");
     const { result, queryClient } = renderHookWithQueryClient(() => useCreateRecordFindings());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    queryClient.setQueryData(recordKey, []);
+    queryClient.setQueryData(otherRecordKey, []);
+    queryClient.setQueryData(historyKey, []);
 
     await act(async () => {
-      await result.current.mutateAsync([
-        { record_id: "r1", finding_type_text: "Nodule", source_anchor: "line" },
-      ] as import("@/types").CreateRecordFindingInput[]);
+      expect(await result.current.mutateAsync(inputs)).toEqual(created);
     });
 
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["record-findings", "r1"],
-    });
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["person-finding-history"],
-    });
+    expect(builder.insert).toHaveBeenCalledWith(inputs);
+    expect(queryClient.getQueryState(recordKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherRecordKey)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(historyKey)?.isInvalidated).toBe(true);
   });
 
-  it("updates finding and invalidates related caches", async () => {
-    const updated = { id: "f1", record_id: "r1" };
-    const builder = createQueryBuilder({ data: updated, error: null });
-    createClientMock.mockReturnValue({ from: vi.fn(() => builder) });
+  it("returns the updated finding and invalidates its record", async () => {
+    const updated = { id: "f1", record_id: "r1", finding_type_text: "Cyst" };
+    const writeBuilder = createQueryBuilder({ data: null, error: null });
+    const readBuilder = createQueryBuilder({ data: updated, error: null });
+    const from = vi.fn().mockReturnValueOnce(writeBuilder).mockReturnValueOnce(readBuilder);
+    createClientMock.mockReturnValue({ from });
 
     const { useUpdateRecordFinding } = await import("./use-record-findings");
     const { result, queryClient } = renderHookWithQueryClient(() => useUpdateRecordFinding());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    queryClient.setQueryData(recordKey, [{ ...updated, finding_type_text: "Nodule" }]);
+    queryClient.setQueryData(otherRecordKey, []);
+    queryClient.setQueryData(historyKey, []);
 
     await act(async () => {
-      await result.current.mutateAsync({
-        id: "f1",
-        updates: { finding_type_text: "Updated" },
-      } as { id: string; updates: import("@/types").UpdateRecordFindingInput });
+      expect(
+        await result.current.mutateAsync({
+          id: "f1",
+          updates: { finding_type_text: "Cyst" },
+        }),
+      ).toEqual(updated);
     });
 
-    expect(builder.update).toHaveBeenCalledWith({ finding_type_text: "Updated" });
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["record-findings", "r1"],
-    });
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["person-finding-history"],
-    });
+    expect(writeBuilder.update).toHaveBeenCalledWith({ finding_type_text: "Cyst" });
+    expect(writeBuilder.eq).toHaveBeenCalledWith("id", "f1");
+    expect(readBuilder.eq).toHaveBeenCalledWith("id", "f1");
+    expect(queryClient.getQueryState(recordKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherRecordKey)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(historyKey)?.isInvalidated).toBe(true);
   });
 
-  it("deletes finding and invalidates related caches", async () => {
+  it("deletes one finding and invalidates its record", async () => {
     const builder = createQueryBuilder({ data: null, error: null });
     createClientMock.mockReturnValue({ from: vi.fn(() => builder) });
 
     const { useDeleteRecordFinding } = await import("./use-record-findings");
     const { result, queryClient } = renderHookWithQueryClient(() => useDeleteRecordFinding());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    queryClient.setQueryData(recordKey, [{ id: "f1" }, { id: "f2" }]);
+    queryClient.setQueryData(otherRecordKey, []);
+    queryClient.setQueryData(historyKey, []);
 
     await act(async () => {
       await result.current.mutateAsync({ id: "f1", recordId: "r1" });
     });
 
     expect(builder.delete).toHaveBeenCalled();
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["record-findings", "r1"],
-    });
+    expect(builder.eq).toHaveBeenCalledWith("id", "f1");
+    expect(queryClient.getQueryState(recordKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherRecordKey)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(historyKey)?.isInvalidated).toBe(true);
   });
 
-  it("deletes all findings and invalidates list", async () => {
+  it("deletes all findings for one record and invalidates its list", async () => {
     const builder = createQueryBuilder({ data: null, error: null });
     createClientMock.mockReturnValue({ from: vi.fn(() => builder) });
 
     const { useDeleteAllRecordFindings } = await import("./use-record-findings");
     const { result, queryClient } = renderHookWithQueryClient(() => useDeleteAllRecordFindings());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    queryClient.setQueryData(recordKey, [{ id: "f1" }, { id: "f2" }]);
+    queryClient.setQueryData(otherRecordKey, []);
+    queryClient.setQueryData(historyKey, []);
 
     await act(async () => {
       await result.current.mutateAsync("r1");
     });
 
     expect(builder.delete).toHaveBeenCalled();
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["record-findings", "r1"],
-    });
+    expect(builder.eq).toHaveBeenCalledWith("record_id", "r1");
+    expect(queryClient.getQueryState(recordKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherRecordKey)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(historyKey)?.isInvalidated).toBe(true);
   });
 
-  it("verifies finding and invalidates record list", async () => {
+  it("verifies a finding and invalidates its record", async () => {
     const builder = createQueryBuilder({ data: null, error: null });
     createClientMock.mockReturnValue({ from: vi.fn(() => builder) });
 
     const { useVerifyRecordFinding } = await import("./use-record-findings");
     const { result, queryClient } = renderHookWithQueryClient(() => useVerifyRecordFinding());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    queryClient.setQueryData(recordKey, [{ id: "f1", is_user_verified: false }]);
+    queryClient.setQueryData(otherRecordKey, []);
 
     await act(async () => {
-      await result.current.mutateAsync({ id: "f1", recordId: "r1" });
+      expect(await result.current.mutateAsync({ id: "f1", recordId: "r1" })).toEqual({
+        id: "f1",
+        recordId: "r1",
+      });
     });
 
     expect(builder.update).toHaveBeenCalledWith({ is_user_verified: true });
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["record-findings", "r1"],
-    });
+    expect(builder.eq).toHaveBeenCalledWith("id", "f1");
+    expect(queryClient.getQueryState(recordKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherRecordKey)?.isInvalidated).toBe(false);
   });
 });
