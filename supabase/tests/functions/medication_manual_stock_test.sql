@@ -76,8 +76,8 @@ SELECT is(
   'mark_dose_taken leaves stock alone when automatic decrementing is off'
 );
 
--- The ledger still records what was asked for; only the running figure is the
--- owner's to move.
+-- The ledger records movements only: with automatic decrementing off the
+-- intake took nothing out, so there is nothing to write.
 SELECT is(
   (
     SELECT count(*)
@@ -85,8 +85,8 @@ SELECT is(
     WHERE regimen_id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
       AND type = 'decrement'
   ),
-  1::bigint,
-  'mark_dose_taken still writes the decrement transaction'
+  0::bigint,
+  'mark_dose_taken writes no decrement when stock did not move'
 );
 
 SELECT public.mark_dose_skipped('cccccccc-cccc-cccc-cccc-cccccccccccc');

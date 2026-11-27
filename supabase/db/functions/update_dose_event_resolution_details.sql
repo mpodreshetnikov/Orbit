@@ -16,6 +16,7 @@ DECLARE
   v_event record;
   v_old_amount numeric;
   v_new_amount numeric;
+  v_moved numeric;
   v_unit text;
   v_planned jsonb;
 BEGIN
@@ -45,44 +46,55 @@ BEGIN
     IF v_new_amount <> v_old_amount THEN
       PERFORM 1 FROM public.med_regimens r WHERE r.id = v_event.regimen_id FOR UPDATE;
 
-      -- Reverse old amount
-      INSERT INTO public.med_inventory_transactions (regimen_id, event_id, type, amount, unit, note)
-      VALUES (v_event.regimen_id, p_dose_event_id, 'correction', v_old_amount, v_unit, 'Edit amount taken');
+      -- Outstanding stock attributed to this event on the ledger (T-260901-pou).
+      SELECT COALESCE(
+               SUM(
+                 CASE t.type
+                   WHEN 'decrement' THEN t.amount
+                   WHEN 'correction' THEN -t.amount
+                   ELSE 0
+                 END
+               ),
+               0
+             ),
+             COALESCE(
+               (
+                 SELECT t.unit
+                 FROM public.med_inventory_transactions t
+                 WHERE t.event_id = p_dose_event_id
+                   AND t.type = 'decrement'
+                 ORDER BY t.created_at DESC
+                 LIMIT 1
+               ),
+               v_unit
+             )
+      INTO v_moved, v_unit
+      FROM public.med_inventory_transactions t
+      WHERE t.event_id = p_dose_event_id;
 
-      -- Gated on `auto_decrement_on_taken` as well as `enabled`, because that
-      -- is the pair the decrement being reversed was written under: with
-      -- automatic decrementing off the intake never reduced `current_amount`,
-      -- so adding the old amount back here would create stock out of nothing
-      -- and suppress the refill reminder that stock drives.
-      UPDATE public.med_regimens
-      SET inventory = jsonb_set(
-            inventory,
-            '{current_amount}',
-            to_jsonb(
-              GREATEST(
-                0,
-                COALESCE((inventory->>'current_amount')::numeric, 0) + v_old_amount
-              )
+      IF v_moved > 0 THEN
+        INSERT INTO public.med_inventory_transactions (regimen_id, event_id, type, amount, unit, note)
+        VALUES (v_event.regimen_id, p_dose_event_id, 'correction', v_moved, v_unit, 'Edit amount taken');
+
+        UPDATE public.med_regimens
+        SET inventory = jsonb_set(
+              inventory,
+              '{current_amount}',
+              to_jsonb(
+                GREATEST(
+                  0,
+                  COALESCE((inventory->>'current_amount')::numeric, 0) + v_moved
+                )
+              ),
+              true
             ),
-            true
-          ),
-          updated_at = now()
-      WHERE id = v_event.regimen_id
-        AND inventory IS NOT NULL
-        AND (inventory->>'enabled')::boolean IS TRUE
-        AND (inventory->>'auto_decrement_on_taken')::boolean IS TRUE;
+            updated_at = now()
+        WHERE id = v_event.regimen_id
+          AND inventory IS NOT NULL;
+      END IF;
 
-      -- Apply new amount
-      INSERT INTO public.med_inventory_transactions (regimen_id, event_id, type, amount, unit, note)
-      VALUES (
-        v_event.regimen_id,
-        p_dose_event_id,
-        'decrement',
-        v_new_amount,
-        v_unit,
-        NULLIF(trim(COALESCE(p_note, '')), '')
-      );
-
+      -- Applying the new amount is a fresh movement: only when settings still
+      -- auto-decrement, and only then write a ledger decrement.
       UPDATE public.med_regimens
       SET inventory = jsonb_set(
             inventory,
@@ -100,6 +112,18 @@ BEGIN
         AND inventory IS NOT NULL
         AND (inventory->>'enabled')::boolean IS TRUE
         AND (inventory->>'auto_decrement_on_taken')::boolean IS TRUE;
+
+      IF FOUND THEN
+        INSERT INTO public.med_inventory_transactions (regimen_id, event_id, type, amount, unit, note)
+        VALUES (
+          v_event.regimen_id,
+          p_dose_event_id,
+          'decrement',
+          v_new_amount,
+          v_unit,
+          NULLIF(trim(COALESCE(p_note, '')), '')
+        );
+      END IF;
 
       v_planned := jsonb_set(
         COALESCE(v_event.planned_intake, '{"intake":{"amount":1,"unit":"pill"},"active":[]}'::jsonb),
@@ -131,4 +155,4 @@ REVOKE ALL ON FUNCTION public.update_dose_event_resolution_details(uuid, timesta
 GRANT EXECUTE ON FUNCTION public.update_dose_event_resolution_details(uuid, timestamptz, numeric, text) TO authenticated;
 
 COMMENT ON FUNCTION public.update_dose_event_resolution_details(uuid, timestamptz, numeric, text) IS
-  'Update taken_at, note, and optionally amount taken (for taken events; adjusts inventory). Serializes on the dose and regimen rows (T-0020).';
+  'Update taken_at, note, and optionally amount taken (for taken events). Reverses outstanding ledger net then applies a new decrement only when stock moves (T-260901-pou). Serializes on the dose and regimen rows (T-0020).';
