@@ -138,7 +138,16 @@ describe("use-finding-history", () => {
 
     const { useMarkFindingResolved } = await import("./use-finding-history");
     const { result, queryClient } = renderHookWithQueryClient(() => useMarkFindingResolved());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const historyKey = ["person-finding-history", "person-1", "nod"];
+    const detailKey = ["single-finding-history", "person-1", "nodule", "lung"];
+    const recordKey = ["record-findings", "record-1"];
+    const otherRecordKey = ["record-findings", "record-2"];
+    const otherHistoryKey = ["person-finding-history", "person-2", "nod"];
+    queryClient.setQueryData(historyKey, [{ finding_code: "nodule", is_resolved: false }]);
+    queryClient.setQueryData(detailKey, { is_resolved: false });
+    queryClient.setQueryData(recordKey, []);
+    queryClient.setQueryData(otherRecordKey, []);
+    queryClient.setQueryData(otherHistoryKey, []);
 
     await act(async () => {
       await result.current.mutateAsync({
@@ -158,17 +167,21 @@ describe("use-finding-history", () => {
 
     expect(builder.insert).toHaveBeenCalledWith(
       expect.objectContaining({
+        person_id: "person-1",
+        record_id: "record-1",
+        finding_code: "nodule",
+        site_code: "lung",
+        laterality: "left",
         size_mm: null,
         count: null,
         resolution_status: "resolved",
       }),
     );
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["person-finding-history", "person-1"],
-    });
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["record-findings", "record-1"],
-    });
+    expect(queryClient.getQueryState(historyKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(detailKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(recordKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherRecordKey)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(otherHistoryKey)?.isInvalidated).toBe(false);
   });
 
   it("sorts severe findings first and falls back to older size/count values", async () => {

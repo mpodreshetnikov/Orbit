@@ -26,20 +26,23 @@ function item(overrides: Partial<CalloutItem> & { regionId: string }): CalloutIt
 const ALL_ITEMS = BODY_REGION_IDS.map((regionId) => item({ regionId }));
 
 function renderPanel(overrides: Partial<React.ComponentProps<typeof BodyMapPanel>> = {}) {
-  const onRegionSelect = vi.fn();
-  const utils = render(
-    <BodyMapPanel
-      model="male"
-      items={ALL_ITEMS}
-      tones={{}}
-      onRegionSelect={onRegionSelect}
-      regionLabel={(regionId) => `label:${regionId}`}
-      emptyLabel="no-value"
-      sideLabels={{ left: "side-left", right: "side-right" }}
-      {...overrides}
-    />,
-  );
-  return { ...utils, onRegionSelect };
+  function Panel() {
+    const [activeRegionId, setActiveRegionId] = React.useState(overrides.activeRegionId);
+    return (
+      <BodyMapPanel
+        model="male"
+        items={ALL_ITEMS}
+        tones={{}}
+        regionLabel={(regionId) => `label:${regionId}`}
+        emptyLabel="no-value"
+        sideLabels={{ left: "side-left", right: "side-right" }}
+        {...overrides}
+        activeRegionId={activeRegionId}
+        onRegionSelect={setActiveRegionId}
+      />
+    );
+  }
+  return render(<Panel />);
 }
 
 /** The positioned labels, i.e. the buttons overlaid on the body. */
@@ -111,11 +114,14 @@ describe("BodyMapPanel", () => {
 
   it("still lets an empty region be tapped — that is how a site is seeded", async () => {
     const user = userEvent.setup();
-    const { container, onRegionSelect } = renderPanel({
+    renderPanel({
       items: [item({ regionId: "chest", value: null })],
     });
-    await user.click(labels(container)[0].el);
-    expect(onRegionSelect).toHaveBeenCalledWith("chest");
+    await user.click(screen.getByRole("button", { name: "spoken:chest" }));
+    expect(screen.getByRole("button", { name: "label:chest" })).toHaveAttribute(
+      "data-active",
+      "true",
+    );
   });
 
   it("gives the label the spoken name, not just the value", () => {
@@ -127,10 +133,16 @@ describe("BodyMapPanel", () => {
 
   it("selects the region from the label as well as the body", async () => {
     const user = userEvent.setup();
-    const { container, onRegionSelect } = renderPanel();
-    const waist = labels(container).find((l) => l.regionId === "waist")!;
-    await user.click(waist.el);
-    expect(onRegionSelect).toHaveBeenCalledWith("waist");
+    renderPanel();
+    await user.click(screen.getByRole("button", { name: "label:chest" }));
+    expect(screen.getByRole("button", { name: "spoken:chest" })).toHaveClass("border-primary");
+
+    await user.click(screen.getByRole("button", { name: "spoken:waist" }));
+    expect(screen.getByRole("button", { name: "label:waist" })).toHaveAttribute(
+      "data-active",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "spoken:chest" })).not.toHaveClass("border-primary");
   });
 
   it("puts each label on its own region, not in a column at the edge", () => {

@@ -1,9 +1,8 @@
+import { isoDay, type SpendingPeriod } from "@orbit-types/money-spending-report";
 import {
-  isoDay,
   normalizeSpendingReport,
-  type SpendingPeriod,
   type SpendingReport,
-} from "@orbit-types/money-spending-report";
+} from "@orbit-types/money-spending-report-ux";
 import { supabase } from "@/lib/supabase";
 
 function check<T>({ data, error }: { data: T; error: { message: string } | null }): T {
@@ -40,6 +39,8 @@ export async function fetchSpendingReport(query: SpendingReportQuery): Promise<S
       p_report_currency: query.currency,
       p_account_ids: query.accountIds.length ? query.accountIds : null,
       p_category_id: query.categoryId,
+      p_brand_id: query.brandId ?? null,
+      p_merchant_name: query.merchantName ?? null,
     } as never),
   ) as unknown;
   return normalizeSpendingReport(data);
@@ -51,4 +52,6 @@ export interface SpendingReportQuery {
   currency: string;
   accountIds: string[];
   categoryId: string | null;
+  brandId?: string | null;
+  merchantName?: string | null;
 }

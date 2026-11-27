@@ -141,6 +141,8 @@ describe("use-money-categories", () => {
     const created = {
       id: "cat-1",
       parent_id: null,
+      canonical_category_id: "canon-food",
+      category_kind: "custom",
       depth: 0,
       name_ru: "Еда",
       name_en: "Food",
@@ -151,20 +153,32 @@ describe("use-money-categories", () => {
 
     const { useCreateMoneyCategory } = await import("./use-money-categories");
     const { result, queryClient } = renderHookWithQueryClient(() => useCreateMoneyCategory());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const categoriesKey = ["money-categories"];
+    queryClient.setQueryData(categoriesKey, [{ id: "cat-1", name_en: "Groceries" }]);
 
     await act(async () => {
-      await result.current.mutateAsync({
-        parent_id: null,
-        canonical_category_id: "canon-food",
-        depth: 0,
-        name_ru: "Еда",
-        name_en: "Food",
-        slug: "food",
-      });
+      await expect(
+        result.current.mutateAsync({
+          parent_id: null,
+          canonical_category_id: "canon-food",
+          depth: 0,
+          name_ru: "Еда",
+          name_en: "Food",
+          slug: "food",
+        }),
+      ).resolves.toEqual(created);
     });
 
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["money-categories"] });
+    expect(builder.insert).toHaveBeenCalledWith({
+      parent_id: null,
+      canonical_category_id: "canon-food",
+      category_kind: "custom",
+      depth: 0,
+      name_ru: "Еда",
+      name_en: "Food",
+      slug: "food",
+    });
+    expect(queryClient.getQueryState(categoriesKey)?.isInvalidated).toBe(true);
   });
 
   it("updates category and invalidates list", async () => {
@@ -181,18 +195,21 @@ describe("use-money-categories", () => {
 
     const { useUpdateMoneyCategory } = await import("./use-money-categories");
     const { result, queryClient } = renderHookWithQueryClient(() => useUpdateMoneyCategory());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const categoriesKey = ["money-categories"];
+    queryClient.setQueryData(categoriesKey, [{ id: "cat-1", name_en: "Groceries" }]);
 
     await act(async () => {
-      await result.current.mutateAsync({
-        id: "cat-1",
-        updates: { name_ru: "Питание" },
-      });
+      await expect(
+        result.current.mutateAsync({
+          id: "cat-1",
+          updates: { name_ru: "Питание" },
+        }),
+      ).resolves.toEqual(updated);
     });
 
     expect(builder.update).toHaveBeenCalledWith({ name_ru: "Питание" });
     expect(builder.eq).toHaveBeenCalledWith("id", "cat-1");
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["money-categories"] });
+    expect(queryClient.getQueryState(categoriesKey)?.isInvalidated).toBe(true);
   });
 
   it("deletes category and invalidates list", async () => {
@@ -201,7 +218,8 @@ describe("use-money-categories", () => {
 
     const { useDeleteMoneyCategory } = await import("./use-money-categories");
     const { result, queryClient } = renderHookWithQueryClient(() => useDeleteMoneyCategory());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const categoriesKey = ["money-categories"];
+    queryClient.setQueryData(categoriesKey, [{ id: "cat-1", name_en: "Groceries" }]);
 
     await act(async () => {
       await result.current.mutateAsync("cat-1");
@@ -209,6 +227,6 @@ describe("use-money-categories", () => {
 
     expect(builder.delete).toHaveBeenCalled();
     expect(builder.eq).toHaveBeenCalledWith("id", "cat-1");
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["money-categories"] });
+    expect(queryClient.getQueryState(categoriesKey)?.isInvalidated).toBe(true);
   });
 });

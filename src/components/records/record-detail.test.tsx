@@ -9,6 +9,7 @@ import type {
   RecordObservationWithCatalog,
 } from "@/types";
 import type { FindingHistorySummary, ObservationHistorySummary } from "./record-detail";
+import { RecordDetail } from "./record-detail-gate";
 
 const ruleOnClosureMock = vi.hoisted(() => vi.fn().mockResolvedValue(true));
 
@@ -36,7 +37,6 @@ const hookMocks = vi.hoisted(() => ({
   usePersonFindingHistory: vi.fn(),
   usePersonConditionRecordHistory: vi.fn(),
   usePersonObservationHistory: vi.fn(),
-  useBackgroundOCR: vi.fn(),
   usePersons: vi.fn(),
 }));
 
@@ -84,8 +84,8 @@ vi.mock("@/hooks", () => ({
     hookMocks.usePersonConditionRecordHistory(...args),
   usePersonObservationHistory: (...args: unknown[]) =>
     hookMocks.usePersonObservationHistory(...args),
-  useBackgroundOCR: (...args: unknown[]) => hookMocks.useBackgroundOCR(...args),
   usePersons: (...args: unknown[]) => hookMocks.usePersons(...args),
+  useBackgroundOCR: () => ({ retryOcr: vi.fn().mockResolvedValue(undefined) }),
 }));
 
 vi.mock("./attachment-preview", () => ({
@@ -315,13 +315,32 @@ function baseRecord(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function mockRecordQuery(
+  data: ReturnType<typeof baseRecord> | null | undefined,
+  { isLoading = false, error = null }: { isLoading?: boolean; error?: Error | null } = {},
+) {
+  hookMocks.useMedicalRecord.mockReturnValue({ data, isLoading, error, refetch: vi.fn() });
+}
+
+function pdfAttachment(filename: string) {
+  return {
+    id: `attachment-${filename}`,
+    record_id: "record-1",
+    storage_path: `person-1/record-1/${filename}`,
+    mime_type: "application/pdf",
+    original_filename: filename,
+    file_size: 1024,
+    sort_order: 0,
+    created_at: "2026-01-01T00:00:00.000Z",
+  };
+}
+
 describe("RecordDetail", () => {
   afterEach(() => {
     cleanup();
   });
 
   beforeEach(() => {
-    vi.resetModules();
     routerMock.back.mockReset();
     routerMock.push.mockReset();
     routerMock.replace.mockReset();
@@ -437,7 +456,6 @@ describe("RecordDetail", () => {
         },
       ],
     });
-    hookMocks.useBackgroundOCR.mockReturnValue({ retryOcr: vi.fn() });
     hookMocks.usePersons.mockReturnValue({ data: [{ id: "person-1", name: "Alex" }] });
 
     hookMocks.useSoftDeleteRecord.mockReturnValue(createMutationMock());
@@ -456,113 +474,97 @@ describe("RecordDetail", () => {
     hookMocks.useLinkConditionToRecord.mockReturnValue(createMutationMock());
   });
 
-  it("renders loading/error states and retries failed OCR", async () => {
-    const { RecordDetail } = await import("./record-detail");
+  it("renders loading placeholders", () => {
+    mockRecordQuery(null, { isLoading: true });
+    const { container } = render(<RecordDetail recordId="record-1" />);
+    expect(container.querySelectorAll(".animate-pulse")).toHaveLength(3);
+  });
 
-    hookMocks.useMedicalRecord.mockReturnValue({
-      data: null,
-      isLoading: true,
-      error: null,
-      refetch: vi.fn(),
-    });
-    const loadingView = render(<RecordDetail recordId="record-1" />);
-    expect(loadingView.container.querySelector(".animate-pulse")).toBeTruthy();
-    loadingView.unmount();
-
-    hookMocks.useMedicalRecord.mockReturnValue({
-      data: null,
-      isLoading: false,
-      error: new Error("failed"),
-      refetch: vi.fn(),
-    });
-    const errorView = render(<RecordDetail recordId="record-1" />);
-    expect(screen.getByText("common.error")).toBeInTheDocument();
-    await userEvent.setup().click(screen.getByRole("button", { name: "common.back" }));
-    expect(routerMock.back).toHaveBeenCalled();
-    errorView.unmount();
-
-    const retryOcr = vi.fn().mockResolvedValue(undefined);
-    const refetch = vi.fn();
-    hookMocks.useBackgroundOCR.mockReturnValue({ retryOcr });
-    hookMocks.useMedicalRecord.mockReturnValue({
-      data: baseRecord({
-        status: "ocr_failed",
-        ocr_error: "ocr failed",
-        attachments: [
-          {
-            id: "attachment-1",
-            record_id: "record-1",
-            storage_path: "person-1/record-1/report.pdf",
-            mime_type: "application/pdf",
-            original_filename: "report.pdf",
-            file_size: 1024,
-            sort_order: 0,
-            created_at: "2026-01-01T00:00:00.000Z",
-          },
-        ],
-      }),
-      isLoading: false,
-      error: null,
-      refetch,
-    });
-    render(<RecordDetail recordId="record-1" />);
-
-    expect(screen.getByText("processing.ocrFailed")).toBeInTheDocument();
-    expect(screen.getByText("ocr failed")).toBeInTheDocument();
-    await userEvent.setup().click(screen.getByRole("button", { name: "processing.retryOcr" }));
-
-    await waitFor(() => {
-      expect(retryOcr).toHaveBeenCalledWith({
-        recordId: "record-1",
-        personId: "person-1",
-        personName: "Alex",
-      });
-      expect(refetch).toHaveBeenCalled();
-    });
-  }, 20000);
-
-  it("disables OCR retry when no attachments are available", async () => {
-    const { RecordDetail } = await import("./record-detail");
-
-    const retryOcr = vi.fn().mockResolvedValue(undefined);
-    const refetch = vi.fn();
-    hookMocks.useBackgroundOCR.mockReturnValue({ retryOcr });
-    hookMocks.useMedicalRecord.mockReturnValue({
-      data: baseRecord({
+  it("shows no-attachments copy for unprocessed records without files", () => {
+    mockRecordQuery(
+      baseRecord({
         status: "ocr_failed",
         ocr_error: "No attachments found for this record",
         attachments: [],
       }),
-      isLoading: false,
-      error: null,
-      refetch,
-    });
+    );
     render(<RecordDetail recordId="record-1" />);
 
-    const retryButton = screen.getByRole("button", { name: "processing.retryOcr" });
-    expect(retryButton).toBeDisabled();
     expect(screen.getByText("records.detail.noAttachments")).toBeInTheDocument();
-
-    await userEvent.setup().click(retryButton);
-
-    expect(retryOcr).not.toHaveBeenCalled();
-    expect(refetch).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "processing.retryOcr" })).not.toBeInTheDocument();
   });
 
-  it("names the cause of a failed OCR in the reader's language", async () => {
-    const { RecordDetail } = await import("./record-detail");
+  it.each([
+    { state: "missing record", data: null },
+    { state: "unresolved data", data: undefined },
+    { state: "error without a message", data: null, error: new Error() },
+    { state: "failed request", data: null, error: new Error("failed") },
+    {
+      state: "failed refresh with cached data",
+      data: baseRecord({ status: "ocr_processing" }),
+      error: new Error("Record request failed"),
+    },
+  ])("shows an error for $state", async ({ data, error }) => {
+    mockRecordQuery(data, { error });
 
-    hookMocks.useBackgroundOCR.mockReturnValue({ retryOcr: vi.fn() });
-    hookMocks.useMedicalRecord.mockReturnValue({
-      data: baseRecord({
+    render(<RecordDetail recordId="record-1" />);
+
+    expect(screen.getByText(error?.message || "records.detail.notFound")).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "CBC Report" })).not.toBeInTheDocument();
+    expect(screen.queryByText("records.status.notProcessedHint")).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("button", { name: "common.back" }));
+    expect(routerMock.back).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["ocr_processing", "processing"])("opens saved files and OCR for %s", async (status) => {
+    mockRecordQuery(
+      baseRecord({
+        title: "",
+        status,
+        attachments: [pdfAttachment("report.pdf")],
+        ocr_text: "Synthetic OCR excerpt",
+        ocr_error: "Old OCR failure from a previous attempt",
+      }),
+    );
+    render(<RecordDetail recordId="record-1" />);
+    const user = userEvent.setup();
+    const toggle = screen.getByRole("button", { name: /records.detail.ocrText/ });
+
+    expect(screen.getByRole("heading", { name: "records.status.notProcessed" })).toBeVisible();
+    expect(screen.getByText("records.status.notProcessedHint")).toBeVisible();
+    expect(screen.getByText("attachment-grid")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "records.actions.remove" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("processing.pleaseWait")).not.toBeInTheDocument();
+    expect(screen.queryByText("Old OCR failure from a previous attempt")).not.toBeInTheDocument();
+    expect(screen.queryByText("Synthetic OCR excerpt")).not.toBeInTheDocument();
+    await user.click(toggle);
+    expect(screen.getByText("Synthetic OCR excerpt")).toBeVisible();
+    await user.click(toggle);
+    expect(screen.queryByText("Synthetic OCR excerpt")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "" }));
+    expect(routerMock.back).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows removal without inventing a failure reason for an older failed record", () => {
+    mockRecordQuery(baseRecord({ status: "ocr_failed", ocr_error: null }));
+    render(<RecordDetail recordId="record-1" />);
+
+    expect(screen.getByRole("heading", { name: "CBC Report" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "records.actions.remove" })).toBeEnabled();
+    expect(screen.queryByText("processing.failed")).not.toBeInTheDocument();
+  });
+
+  it("names the cause of a failed OCR in the reader's language", () => {
+    mockRecordQuery(
+      baseRecord({
         status: "ocr_failed",
         ocr_error:
           "ocr_cause:provider_auth the transcription service rejected this deployment's credentials",
       }),
-      isLoading: false,
-      error: null,
-      refetch: vi.fn(),
-    });
+    );
     const view = render(<RecordDetail recordId="record-1" />);
     // Not the server's English sentence: a rejected key is not a photograph to retake, and the
     // reader has to be told which of the two this was.
@@ -570,22 +572,17 @@ describe("RecordDetail", () => {
     view.unmount();
 
     // A row written before the causes existed still says what little it knows.
-    hookMocks.useMedicalRecord.mockReturnValue({
-      data: baseRecord({
+    mockRecordQuery(
+      baseRecord({
         status: "ocr_failed",
         ocr_error: "Failed to extract text from any attachment",
       }),
-      isLoading: false,
-      error: null,
-      refetch: vi.fn(),
-    });
+    );
     render(<RecordDetail recordId="record-1" />);
     expect(screen.getByText("Failed to extract text from any attachment")).toBeInTheDocument();
   });
 
-  it("says on the review screen that a page of the document was lost", async () => {
-    const { RecordDetail } = await import("./record-detail");
-
+  it("says on the review screen that a page of the document was lost", () => {
     hookMocks.useMedicalRecord.mockReturnValue({
       data: baseRecord({
         status: "ocr_review",
@@ -613,9 +610,7 @@ describe("RecordDetail", () => {
     expect(screen.queryByText("processing.ocrPartial")).not.toBeInTheDocument();
   });
 
-  it("renders ocr and structure review branches", async () => {
-    const { RecordDetail } = await import("./record-detail");
-
+  it("renders ocr and structure review branches", () => {
     hookMocks.useMedicalRecord.mockReturnValue({
       data: baseRecord({ status: "ocr_review" }),
       isLoading: false,
@@ -636,9 +631,7 @@ describe("RecordDetail", () => {
     expect(screen.getByText("structure-review-step")).toBeInTheDocument();
   });
 
-  it("keeps a failed structuring visible on the OCR review screen", async () => {
-    const { RecordDetail } = await import("./record-detail");
-
+  it("keeps a failed structuring visible on the OCR review screen", () => {
     hookMocks.useMedicalRecord.mockReturnValue({
       data: baseRecord({
         status: "ocr_review",
@@ -665,7 +658,6 @@ describe("RecordDetail", () => {
   });
 
   it("renders active detail and opens add observation dialog", async () => {
-    const { RecordDetail } = await import("./record-detail");
     render(<RecordDetail recordId="record-1" />);
 
     expect(screen.getByText("CBC Report")).toBeInTheDocument();
@@ -703,7 +695,6 @@ describe("RecordDetail", () => {
         },
       ],
     });
-    const { RecordDetail } = await import("./record-detail");
     render(<RecordDetail recordId="record-1" />);
     const user = userEvent.setup();
 
@@ -741,8 +732,6 @@ describe("RecordDetail", () => {
     hookMocks.useSoftDeleteRecord.mockReturnValue(softDeleteMutation);
     hookMocks.useHardDeleteRecord.mockReturnValue(hardDeleteMutation);
     hookMocks.useRestoreRecord.mockReturnValue(restoreMutation);
-
-    const { RecordDetail } = await import("./record-detail");
 
     const activeView = render(<RecordDetail recordId="record-1" />);
     const user = userEvent.setup();
@@ -786,7 +775,7 @@ describe("RecordDetail", () => {
     expect(routerMock.push).toHaveBeenCalledWith("/health");
   }, 20000);
 
-  it("renders active empty-state placeholders and metadata fallback branches", async () => {
+  it("renders active empty-state placeholders and metadata fallback branches", () => {
     hookMocks.useMedicalRecord.mockReturnValue({
       data: baseRecord({
         title: "Sparse record",
@@ -804,7 +793,6 @@ describe("RecordDetail", () => {
     hookMocks.useRecordFindings.mockReturnValue({ data: [] });
     hookMocks.useRecordConditions.mockReturnValue({ data: [] });
 
-    const { RecordDetail } = await import("./record-detail");
     render(<RecordDetail recordId="record-1" />);
 
     expect(screen.getByText("records.noDate")).toBeInTheDocument();
@@ -816,36 +804,44 @@ describe("RecordDetail", () => {
     expect(screen.queryByText("records.detail.ocrText")).not.toBeInTheDocument();
   });
 
-  it("renders processing status branches and refresh action", async () => {
-    const refetch = vi.fn();
-    hookMocks.useMedicalRecord.mockReturnValue({
-      data: baseRecord({
-        title: "",
-        status: "ocr_processing",
-      }),
-      isLoading: false,
-      error: null,
-      refetch,
-    });
-
-    const { RecordDetail } = await import("./record-detail");
+  it("shows neutral status for records left structuring", () => {
+    mockRecordQuery(baseRecord({ status: "structuring" }));
     render(<RecordDetail recordId="record-1" />);
+    expect(screen.getByText("records.status.notProcessedHint")).toBeVisible();
+  });
 
-    expect(screen.getByText("processing.processing")).toBeInTheDocument();
-    expect(screen.getByText("processing.ocrInProgress")).toBeInTheDocument();
-    await userEvent.setup().click(screen.getByRole("button", { name: "common.refresh" }));
-    expect(refetch).toHaveBeenCalled();
-
-    hookMocks.useMedicalRecord.mockReturnValue({
-      data: baseRecord({
-        status: "structuring",
+  it("soft-removes ocr_failed records from the unprocessed detail view", async () => {
+    const softDeleteMutation = createMutationMock();
+    softDeleteMutation.mutate = vi.fn((_, options?: { onSuccess?: () => void }) =>
+      options?.onSuccess?.(),
+    );
+    hookMocks.useSoftDeleteRecord.mockReturnValue(softDeleteMutation);
+    mockRecordQuery(
+      baseRecord({
+        status: "ocr_failed",
+        ocr_error: "ocr failed",
+        ocr_text: "Partial OCR from failed run",
+        attachments: [pdfAttachment("report.pdf")],
       }),
-      isLoading: false,
-      error: null,
-      refetch,
-    });
+    );
+
     render(<RecordDetail recordId="record-1" />);
-    expect(screen.getByText("processing.structureInProgress")).toBeInTheDocument();
+    const user = userEvent.setup();
+
+    expect(screen.getByText("records.status.notProcessedHint")).toBeInTheDocument();
+    expect(screen.getByText("records.status.viaAssistant")).toBeInTheDocument();
+    expect(screen.getByText("ocr failed")).toBeInTheDocument();
+    expect(screen.getByText("attachment-grid")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /records.detail.ocrText/ })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "processing.retryOcr" })).not.toBeInTheDocument();
+    expect(screen.queryByText("records.confirm.removeTitle")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "records.actions.remove" }));
+    expect(screen.getByText("records.confirm.removeTitle")).toBeVisible();
+    expect(softDeleteMutation.mutate).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "common.remove" }));
+    expect(softDeleteMutation.mutate).toHaveBeenCalledWith("record-1", expect.any(Object));
+    expect(screen.queryByText("records.confirm.removeTitle")).not.toBeInTheDocument();
+    expect(routerMock.push).toHaveBeenCalledWith("/health");
   });
 
   it("executes finding and condition mutation flows from dialogs/rows", async () => {
@@ -865,7 +861,6 @@ describe("RecordDetail", () => {
     hookMocks.useUpdateConditionRecord.mockReturnValue(updateConditionMutation);
     hookMocks.useDeleteConditionRecord.mockReturnValue(deleteConditionMutation);
 
-    const { RecordDetail } = await import("./record-detail");
     render(<RecordDetail recordId="record-1" />);
 
     const user = userEvent.setup();

@@ -69,17 +69,26 @@ describe("LogIntakeDialog", () => {
   it("submits taken amount and note", async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn().mockResolvedValue(undefined);
-    const onOpenChange = vi.fn();
+    const medication = regimen();
+    function ControlledDialog() {
+      const [open, setOpen] = React.useState(true);
+      return (
+        <LogIntakeDialog
+          open={open}
+          onOpenChange={setOpen}
+          regimen={medication}
+          onSubmit={onSubmit}
+        />
+      );
+    }
 
-    render(
-      <LogIntakeDialog open onOpenChange={onOpenChange} regimen={regimen()} onSubmit={onSubmit} />,
-    );
+    render(<ControlledDialog />);
 
     fireEvent.change(screen.getByLabelText(/medications\.logIntakeAmount/), {
       target: { value: "2.1" },
     });
     fireEvent.change(screen.getByLabelText("medications.note"), {
-      target: { value: "after meal" },
+      target: { value: "  after meal  " },
     });
 
     await user.click(screen.getByRole("button", { name: "common.save" }));
@@ -92,7 +101,9 @@ describe("LogIntakeDialog", () => {
         note: "after meal",
       });
     });
-    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(
+      screen.queryByRole("heading", { name: "medications.logIntake" }),
+    ).not.toBeInTheDocument();
   });
 
   it("submits skipped intake with zero amount and hides amount field", async () => {

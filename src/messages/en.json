@@ -80,6 +80,24 @@
       "routingPrefixPlaceholder": "e.g., My Dog",
       "routingPrefixHint": "Shown as (Prefix) in the notification title. Leave empty to use the person's name."
     },
+    "mcp": {
+      "title": "Connected assistants",
+      "description": "AI assistants you gave access to your Orbit health and money data. Revoking ends their access immediately and cannot be undone.",
+      "empty": "No assistants have access right now.",
+      "unnamedClient": "Unnamed assistant",
+      "lastUsed": "Last used {when}",
+      "neverUsed": "Never used",
+      "connectedAt": "Connected {when}",
+      "revoke": "Revoke access",
+      "revoking": "Revoking…",
+      "revokeConfirmTitle": "Revoke access for {name}?",
+      "revokeConfirmDescription": "This assistant will immediately lose access to your Orbit health and money data. This cannot be undone.",
+      "revokeConfirmAction": "Revoke access",
+      "revokeError": "Could not revoke access: {error}",
+      "revokeErrorFallback": "unknown error",
+      "loadError": "Could not load connected assistants: {error}",
+      "loadErrorFallback": "unknown error"
+    },
     "notificationsDebug": {
       "title": "Notifications debug",
       "description": "Manually trigger the notifications cron Edge Function for testing.",
@@ -124,7 +142,8 @@
     "activeFindings": "{count, plural, one {# active} other {# active}}",
     "overdueCheckups": "{count, plural, one {# overdue} other {# overdue}}",
     "allCheckups": "All",
-    "secondaryCharts": "Labs and measurements"
+    "secondaryCharts": "Labs and measurements",
+    "noRecordsViaAssistant": "Documents appear here after they are uploaded via the assistant."
   },
   "money": {
     "title": "Money",
@@ -883,7 +902,7 @@
     "spendingPeriodWeek": "Week",
     "spendingPeriodMonth": "Month",
     "spendingPeriodLast30": "30 days",
-    "spendingPeriodCustom": "Range…",
+    "spendingPeriodCustom": "Range",
     "spendingPrevious": "Previous period",
     "spendingNext": "Next period",
     "spendingCustomFrom": "From",
@@ -898,12 +917,28 @@
     "spendingVsPrevious": "vs previous period",
     "spendingVsPreviousShort": "vs prev.",
     "spendingVsLastYear": "vs {year} avg",
-    "spendingForecast": "Forecast for {date}",
+    "spendingCompareLegend": "vs prev. · vs {year} avg",
+    "spendingBadgePrevious": "vs {period}",
+    "spendingBadgeLastYear": "vs {year} avg",
+    "spendingForecast": "Expense forecast for {date}",
+    "spendingForecastIncome": "Income forecast for {date}",
+    "spendingForecastNet": "Net forecast for {date}",
+    "spendingForecastLine": "Forecast for {date}: ≈{amount}",
+    "spendingForecastLineLabel": "Forecast for {date}:",
+    "spendingForecastDate": "Forecast for {date}",
+    "spendingForecastShort": "Forecast ≈{amount}",
     "spendingForecastDaysLeft": "{days, plural, one {# day left} other {# days left}}",
-    "spendingForecastHint": "From your spending on these weekdays over 12 weeks.",
+    "spendingForecastHint": "From your pace on these weekdays over 12 weeks.",
+    "spendingChangeNew": "new",
+    "spendingShowAll": "Show all",
+    "spendingShowTop": "Show less",
+    "spendingViewTransactions": "View transactions from this report",
+    "spendingViewTransactionsShort": "Transactions",
+    "spendingFilterChipMerchant": "Shop: {name}",
+    "spendingMonthTooltip": "{month}: {amount}",
     "spendingCategories": "Categories",
-    "spendingCategoriesHint": "Click a tile to open its subcategories. The filter button shows the report for that category only.",
-    "spendingCategoriesHintTouch": "Tap a block to open its subcategories. The filter button shows the report for that category only.",
+    "spendingCategoriesHint": "Click a tile for subcategories or to filter.",
+    "spendingCategoriesHintTouch": "Press a tile for subcategories or to filter.",
     "spendingAllCategories": "All categories",
     "spendingColumnCategory": "Category",
     "spendingColumnAmount": "Amount",
@@ -963,6 +998,7 @@
   "records": {
     "title": "Medical Records",
     "search": "Search records...",
+    "clearSearch": "Clear search",
     "filterByType": "Filter by type",
     "allTypes": "All types",
     "showRemoved": "Show removed",
@@ -988,14 +1024,18 @@
       "structuring": "Structuring",
       "structureReview": "Review",
       "active": "Active",
-      "removed": "Removed"
+      "removed": "Removed",
+      "notProcessed": "Not processed",
+      "notProcessedHint": "Not processed — upload via assistant",
+      "viaAssistant": "New medical documents are added only through the external assistant (MCP). This record is kept; it is not deleted."
     },
     "statusFilter": {
       "active": "Active",
       "draft": "Draft",
       "drafts": "Drafts",
-      "processing": "Processing",
-      "removed": "Removed"
+      "processing": "Not processed",
+      "removed": "Removed",
+      "notProcessed": "Not processed"
     },
     "actions": {
       "view": "View",
@@ -1007,9 +1047,9 @@
       "activate": "Activate"
     },
     "noDrafts": "No drafts",
-    "noDraftsDescription": "Records waiting for review will appear here after OCR processing completes.",
-    "noProcessing": "No records processing",
-    "noProcessingDescription": "Records currently being analyzed by OCR will appear here.",
+    "noDraftsDescription": "Drafts and records awaiting review appear here.",
+    "noProcessing": "No unprocessed records",
+    "noProcessingDescription": "Records left in the former OCR pipeline will appear here.",
     "add": {
       "title": "Add Medical Record",
       "subtitle": "Upload files and fill in record details",
@@ -1051,7 +1091,8 @@
       "noOcrText": "No text extracted",
       "summary": "Summary",
       "findings": "Findings",
-      "openAttachment": "Open attachment"
+      "openAttachment": "Open attachment",
+      "notFound": "Record not found"
     },
     "confirm": {
       "removeTitle": "Remove Record",
@@ -1160,6 +1201,13 @@
       "reviewDescription": "Check the extracted information and make any corrections before saving.",
       "noKeywords": "No keywords extracted",
       "backToOcr": "Back to OCR"
+    },
+    "noNotProcessed": "No unprocessed records",
+    "noNotProcessedDescription": "Records left in the former OCR pipeline will appear here.",
+    "uploadRemoved": {
+      "title": "In-app upload is disabled",
+      "body": "Medical documents are added only through the external assistant (MCP). You can still view existing records.",
+      "back": "Back to records"
     }
   },
   "common": {

@@ -4,7 +4,6 @@ import { TopNav } from "./top-nav";
 import { Sidebar } from "./sidebar";
 import { MobileNav } from "./mobile-nav";
 import { LanguageSync } from "./language-sync";
-import { ProcessingIndicator } from "./processing-indicator";
 import { ScrollToTop } from "./scroll-to-top";
 import { RealtimeMonitor } from "./realtime-monitor";
 import { useEnsurePushSubscription, useNotifications } from "@/hooks";
@@ -19,7 +18,7 @@ export function AppShell({ children }: AppShellProps) {
   return (
     <div className="min-h-screen min-w-0 w-full max-w-full overflow-x-hidden bg-background">
       <LanguageSync />
-      {/* Realtime subscription for processing updates - stays active across all health pages */}
+      {/* Realtime subscription for record status updates across health pages */}
       <RealtimeMonitor />
       <TopNav />
       <div className="flex min-w-0 w-full max-w-full">
@@ -34,8 +33,6 @@ export function AppShell({ children }: AppShellProps) {
       </div>
       {/* Mobile bottom nav */}
       <MobileNav />
-      {/* Processing indicator for background OCR jobs */}
-      <ProcessingIndicator />
       {/* Scroll to top floating button when user scrolls down */}
       <ScrollToTop />
     </div>

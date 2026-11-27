@@ -3,6 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ConditionAddHistoryDialog } from "./condition-add-history-dialog";
+import { ControlledDialog } from "../../../test/utils/web/controlled-dialog";
 
 const hookMocks = vi.hoisted(() => ({
   useLinkConditionToRecord: vi.fn(),
@@ -136,74 +137,76 @@ describe("ConditionAddHistoryDialog", () => {
   });
 
   it("creates manual record and links condition when no record is selected", async () => {
-    const onOpenChange = vi.fn();
     const onSaved = vi.fn();
 
     render(
-      <ConditionAddHistoryDialog
-        open
-        onOpenChange={onOpenChange}
-        conditionId="cond-1"
-        conditionName="Asthma"
-        personId="person-1"
-        records={[]}
-        onSaved={onSaved}
-      />,
+      <ControlledDialog>
+        {(dialog) => (
+          <ConditionAddHistoryDialog
+            {...dialog}
+            conditionId="cond-1"
+            conditionName="Asthma"
+            personId="person-1"
+            records={[]}
+            onSaved={onSaved}
+          />
+        )}
+      </ControlledDialog>,
     );
 
     const user = userEvent.setup();
     await user.type(screen.getByLabelText("conditions.historyNote"), "manual note");
     await user.click(screen.getByRole("button", { name: "common.save" }));
 
-    await waitFor(() => {
-      expect(createRecordMutateAsync).toHaveBeenCalledWith({
-        person_id: "person-1",
-        title: "conditions.manualEntryTitle (Asthma)",
-        record_date: expect.any(String),
-        record_type: "other",
-        status: "active",
-        notes: "manual note",
-      });
-      expect(linkMutateAsync).toHaveBeenCalledWith({
-        condition_id: "cond-1",
-        record_id: "new-record",
-        status_in_record: "active",
-        source_anchor: "manual note",
-      });
-      expect(onSaved).toHaveBeenCalled();
-      expect(onOpenChange).toHaveBeenCalledWith(false);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "common.save" })).toBeNull());
+    expect(createRecordMutateAsync).toHaveBeenCalledWith({
+      person_id: "person-1",
+      title: "conditions.manualEntryTitle (Asthma)",
+      record_date: expect.any(String),
+      record_type: "other",
+      status: "active",
+      notes: "manual note",
     });
+    expect(linkMutateAsync).toHaveBeenCalledWith({
+      condition_id: "cond-1",
+      record_id: "new-record",
+      status_in_record: "active",
+      source_anchor: "manual note",
+    });
+    expect(onSaved).toHaveBeenCalled();
   });
 
   it("links to selected existing record without creating manual record", async () => {
     render(
-      <ConditionAddHistoryDialog
-        open
-        onOpenChange={vi.fn()}
-        conditionId="cond-1"
-        conditionName="Asthma"
-        personId="person-1"
-        records={
-          [
-            { id: "rec-1", title: "Visit record", record_date: "2026-02-01" },
-          ] as unknown as import("@/types").MedicalRecordListItem[]
-        }
-        preselectedRecordId="rec-1"
-      />,
+      <ControlledDialog>
+        {(dialog) => (
+          <ConditionAddHistoryDialog
+            {...dialog}
+            conditionId="cond-1"
+            conditionName="Asthma"
+            personId="person-1"
+            records={
+              [
+                { id: "rec-1", title: "Visit record", record_date: "2026-02-01" },
+              ] as unknown as import("@/types").MedicalRecordListItem[]
+            }
+            preselectedRecordId="rec-1"
+          />
+        )}
+      </ControlledDialog>,
     );
 
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "conditions.status.suspected" }));
     await user.click(screen.getByRole("button", { name: "common.save" }));
 
-    await waitFor(() => {
-      expect(createRecordMutateAsync).not.toHaveBeenCalled();
-      expect(linkMutateAsync).toHaveBeenCalledWith({
-        condition_id: "cond-1",
-        record_id: "rec-1",
-        status_in_record: "suspected",
-        source_anchor: undefined,
-      });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "common.save" })).toBeNull());
+    expect(createRecordMutateAsync).not.toHaveBeenCalled();
+    expect(linkMutateAsync).toHaveBeenCalledWith({
+      condition_id: "cond-1",
+      record_id: "rec-1",
+      status_in_record: "suspected",
+      source_anchor: undefined,
     });
   });
 });

@@ -3,6 +3,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MeasurementCatalog } from "@/types";
+import { ControlledDialog } from "../../../test/utils/web/controlled-dialog";
 
 const hookMocks = vi.hoisted(() => ({
   useCreateMeasurementCatalogItem: vi.fn(),
@@ -121,17 +122,21 @@ describe("MeasurementCatalogEditDialog", () => {
   });
 
   it("logs mutation errors and keeps dialog open", async () => {
+    const error = new Error("save failed");
     const createMutation = {
       isPending: false,
       mutate: vi.fn(),
-      mutateAsync: vi.fn().mockRejectedValue(new Error("save failed")),
+      mutateAsync: vi.fn().mockRejectedValueOnce(error).mockResolvedValue(undefined),
     };
     hookMocks.useCreateMeasurementCatalogItem.mockReturnValue(createMutation);
-    const onOpenChange = vi.fn();
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     const { MeasurementCatalogEditDialog } = await import("./measurement-catalog-edit-dialog");
-    render(<MeasurementCatalogEditDialog open onOpenChange={onOpenChange} measurement={null} />);
+    render(
+      <ControlledDialog>
+        {(dialog) => <MeasurementCatalogEditDialog {...dialog} measurement={null} />}
+      </ControlledDialog>,
+    );
 
     const user = userEvent.setup();
     await user.type(screen.getByLabelText("catalogs.measurementCode"), "weight");
@@ -141,11 +146,12 @@ describe("MeasurementCatalogEditDialog", () => {
     await user.type(screen.getByLabelText("catalogs.unitRu"), "kg-ru");
     await user.click(screen.getByRole("button", { name: "common.save" }));
 
-    await waitFor(() => {
-      expect(createMutation.mutateAsync).toHaveBeenCalled();
-      expect(onOpenChange).not.toHaveBeenCalledWith(false);
-      expect(errorSpy).toHaveBeenCalled();
-    });
+    expect(errorSpy).toHaveBeenCalledWith("Failed to save measurement:", error);
+    expect(screen.getByLabelText("catalogs.measurementCode")).toHaveValue("weight");
+    expect(screen.getByRole("button", { name: "common.save" })).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "common.save" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "common.save" })).toBeNull());
 
     errorSpy.mockRestore();
   });

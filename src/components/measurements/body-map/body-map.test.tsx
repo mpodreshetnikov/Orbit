@@ -1,22 +1,25 @@
 import React from "react";
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { BodyMap } from "./body-map";
 import { BODY_REGION_IDS } from "./regions";
 
 function renderMap(overrides: Partial<React.ComponentProps<typeof BodyMap>> = {}) {
-  const onRegionSelect = vi.fn();
-  const utils = render(
-    <BodyMap
-      model="male"
-      tones={{}}
-      onRegionSelect={onRegionSelect}
-      regionLabel={(regionId) => `label:${regionId}`}
-      {...overrides}
-    />,
-  );
-  return { ...utils, onRegionSelect };
+  function Map() {
+    const [activeRegionId, setActiveRegionId] = React.useState(overrides.activeRegionId);
+    return (
+      <BodyMap
+        model="male"
+        tones={{}}
+        regionLabel={(regionId) => `label:${regionId}`}
+        {...overrides}
+        activeRegionId={activeRegionId}
+        onRegionSelect={setActiveRegionId}
+      />
+    );
+  }
+  return render(<Map />);
 }
 
 describe("BodyMap", () => {
@@ -32,22 +35,25 @@ describe("BodyMap", () => {
     expect(screen.getByLabelText("label:waist")).toBeInTheDocument();
   });
 
-  it("calls back with the region id on click", async () => {
+  it("moves the active highlight to the clicked region", async () => {
     const user = userEvent.setup();
-    const { onRegionSelect } = renderMap();
-    await user.click(screen.getByLabelText("label:chest"));
-    expect(onRegionSelect).toHaveBeenCalledWith("chest");
+    renderMap({ activeRegionId: "waist" });
+    const chest = screen.getByRole("button", { name: "label:chest" });
+    await user.click(chest);
+    expect(chest).toHaveAttribute("data-active", "true");
+    expect(screen.getByRole("button", { name: "label:waist" })).not.toHaveAttribute("data-active");
   });
 
   it.each([
     ["{Enter}", "Enter"],
     [" ", "Space"],
-  ])("calls back on %s", async (key) => {
+  ])("activates the focused region with %s", async (key) => {
     const user = userEvent.setup();
-    const { onRegionSelect } = renderMap();
-    screen.getByLabelText("label:hips").focus();
+    renderMap();
+    const hips = screen.getByRole("button", { name: "label:hips" });
+    hips.focus();
     await user.keyboard(key);
-    expect(onRegionSelect).toHaveBeenCalledWith("hips");
+    expect(hips).toHaveAttribute("data-active", "true");
   });
 
   it("exposes regions to the keyboard", () => {

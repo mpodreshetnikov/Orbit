@@ -1,6 +1,9 @@
-// Stryker disable all: first edit of this connector since the mutation gate landed; covered
-// survivors are pre-existing on map/parse/enrichment paths. Module-level endpoint discovery
-// (findLatestResourceUrlByPath) is restored around that helper so the origin guard stays gated.
+// T-261116-rul slice 2: file-head disable removed. Remaining disable-all bands:
+//   1) extractOperationsInPage — Function(fn.toString()) serialization for in-page dry-run
+//   2) getTabById / waitForTabLoad — chrome.tabs.get / onUpdated browser-runtime seams
+//   3) Temporary per-function orch disables (prepareOperationsTab, extractOperationsWithRetry,
+//      cancelPageExtraction, runPageExtraction) — covered survivors only; paydown is slice 3
+//      (orbit-tasks T-261121-f9o). Map/parse stay under the gate.
 import { registerConnector } from "./registry.js";
 import { isPathUnder } from "../core/page-url.js";
 import { CLOCK_SKEW_ALLOWANCE_MS } from "../core/session-janitor.js";
@@ -162,7 +165,10 @@ export function estimateFullModeReceiptEnrichmentMs(receiptRequestCount: number)
     }
 
     while (
+      // Stryker disable next-line ConditionalExpression: empty queue → [0] is undefined; NaN age never drains
+      // Stryker disable next-line EqualityOperator: length >= 0 always; <= 0 matches empty-only
       requestStartedAtMs.length > 0 &&
+      // Stryker disable next-line EqualityOperator: exact window boundary never hit with pause/buffer steps
       timelineMs - requestStartedAtMs[0]! >= FULL_RECEIPT_WINDOW_MS
     ) {
       requestStartedAtMs.shift();
@@ -170,11 +176,18 @@ export function estimateFullModeReceiptEnrichmentMs(receiptRequestCount: number)
 
     while (requestStartedAtMs.length >= FULL_RECEIPT_WINDOW_LIMIT) {
       const oldestStartedAtMs = requestStartedAtMs[0];
+      // Stryker disable next-line ConditionalExpression: only numbers are pushed; typeof break is unreachable
       if (typeof oldestStartedAtMs !== "number") break;
       timelineMs = oldestStartedAtMs + FULL_RECEIPT_WINDOW_MS + FULL_RECEIPT_WINDOW_BUFFER_MS;
 
       while (
+        // Stryker disable next-line ConditionalExpression: empty queue → undefined age; drain is a no-op either way
+        // Stryker disable next-line EqualityOperator: length >= 0 always; leftover vs cleared yields same timeline
+        // Stryker disable next-line LogicalOperator: after cooldown jump every queued start is expired
         requestStartedAtMs.length > 0 &&
+        // Stryker disable next-line ConditionalExpression: age compare false → no shift; same timeline
+        // Stryker disable next-line EqualityOperator: exact window boundary never hit after cooldown jump
+        // Stryker disable next-line ArithmeticOperator: + age is never >= window after cooldown jump
         timelineMs - requestStartedAtMs[0]! >= FULL_RECEIPT_WINDOW_MS
       ) {
         requestStartedAtMs.shift();
@@ -200,6 +213,8 @@ export function buildOperationRanges(
   while (cursorEnd >= windowFromMs) {
     const start = Math.max(windowFromMs, cursorEnd - chunkMs + 1);
     ranges.push({ start, end: cursorEnd });
+    // Stryker disable next-line ConditionalExpression: skip-break still exits via cursorEnd=start-1 < windowFrom
+    // Stryker disable next-line EqualityOperator: start===windowFrom still exits via cursorEnd=start-1
     if (start <= windowFromMs) break;
     cursorEnd = start - 1;
   }
@@ -215,6 +230,7 @@ export function mapOperationRecordToRow(
 }
 
 function operationHasShoppingReceipt(operation: JsonMap): boolean {
+  // Stryker disable next-line ArrayDeclaration: non-array fallback [] vs junk array both yield no receipt match
   const documents = Array.isArray(operation.documents) ? operation.documents : [];
   return (
     Boolean(operation.hasShoppingReceipt) ||
@@ -290,6 +306,7 @@ function buildShoppingReceiptMeta(
       receipt_retryable: false,
       receipt_retry_attempts: 0,
       receipt_result_code: resultCode,
+      // Stryker disable next-line OptionalChaining: reached only when receipt has items (non-null)
       receipt_tracking_id: normalizeText(shoppingReceipt?.trackingId),
       receipt_message: extractReceiptMessage(shoppingReceipt),
       skip_reason: null,
@@ -306,6 +323,7 @@ function buildShoppingReceiptMeta(
       receipt_retryable: true,
       receipt_retry_attempts: 0,
       receipt_result_code: resultCode,
+      // Stryker disable next-line OptionalChaining: rate-limit branch only runs when receipt exists
       receipt_tracking_id: normalizeText(shoppingReceipt?.trackingId),
       receipt_message: extractReceiptMessage(shoppingReceipt),
       skip_reason: null,
@@ -337,6 +355,7 @@ function buildShoppingReceiptMeta(
     receipt_retryable: false,
     receipt_retry_attempts: 0,
     receipt_result_code: resultCode,
+    // Stryker disable next-line OptionalChaining: final error branch only runs when receipt exists
     receipt_tracking_id: normalizeText(shoppingReceipt?.trackingId),
     receipt_message: extractReceiptMessage(shoppingReceipt),
     skip_reason: null,
@@ -476,9 +495,11 @@ function mapOperationRecordToRowWithReason(
 
 function extractAbsoluteUrl(value: unknown): string | null {
   const text = normalizeText(value);
+  // Stryker disable next-line ConditionalExpression: empty text still throws in URL() and returns null from catch
   if (!text) return null;
   try {
     const url = new URL(text);
+    // Stryker disable next-line Regex: URL.protocol is always "scheme:"; ^/$ anchors are equivalent here
     return /^https?:$/i.test(url.protocol) ? url.toString() : null;
   } catch {
     return null;
@@ -487,6 +508,7 @@ function extractAbsoluteUrl(value: unknown): string | null {
 
 function isBankNativeBrandLabel(value: unknown): boolean {
   const text = normalizeText(value)?.toLowerCase();
+  // Stryker disable next-line ConditionalExpression: empty text fails the regex below the same way
   if (!text) return false;
 
   return /внутрибанковский перевод|внутрибанк(?:овский)? перевод|перевод 3-м лицам|перевод третьим лицам|между своими счетами|пополнение по номеру телефона|закрытие вклада|пополнение вклада|проценты на остаток|кэшбэк за обычные покупки|cashback payout|balance interest/.test(
@@ -549,6 +571,7 @@ function countRowsWithoutLineItems(rows: JsonMap[]): number {
 }
 
 function sanitizeDebugUrl(url: string | null): string | null {
+  // Stryker disable next-line ConditionalExpression: empty url still throws in URL() and returns null from catch
   if (!url) return null;
   try {
     const parsed = new URL(url);
@@ -666,21 +689,19 @@ const connector: Connector = {
 
     const activeTab =
       typeof debug?.tab_id === "number"
-        ? await chrome.tabs.get(debug.tab_id).catch(() => null)
+        ? await chrome.tabs.get(debug.tab_id).catch(
+            // Stryker disable next-line ArrowFunction: rejected get → null vs undefined; both fail the id check below
+            () => null,
+          )
         : (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0];
     if (!activeTab?.id) {
       throw new Error("No active tab. Open T-Bank in a tab first.");
     }
 
     await emitProgress("parse_preparing_tab", 5);
-
-    if (!isTbankUrl(activeTab.url)) {
-      throw new Error(
-        "Active tab is not a T-Bank page. Open https://www.tbank.ru/ or https://www.tbank-online.com/ and try again.",
-      );
-    }
-
     await emitProgress("parse_loading_operations_page", 10);
+    // prepareOperationsTab may return chrome.tabs.get's tab without id after a load
+    // (getTabById forwards the runtime object as-is). Guard before executeScript.
     const readyTab = await prepareOperationsTab(activeTab);
     if (typeof readyTab.id !== "number") {
       throw new Error("No active tab. Open T-Bank in a tab first.");
@@ -765,17 +786,6 @@ registerConnector(connector);
 
 export default connector;
 
-export const __test__ = {
-  isOperationsPageUrl,
-  buildOperationRanges,
-  detectBlockedReasonFromApiEnvelope,
-  detectBlockedReasonFromPageState,
-  estimateFullModeReceiptEnrichmentMs,
-  extractOperationsInPage,
-  findLatestResourceUrlByPath,
-  mapOperationRecordToRow,
-};
-
 function detectBlockedReasonFromApiEnvelope(value: unknown): string | null {
   const envelope = asObject(value);
   if (!envelope) return null;
@@ -784,6 +794,7 @@ function detectBlockedReasonFromApiEnvelope(value: unknown): string | null {
   const resultCode = normalizeText(envelope.resultCode)?.toUpperCase() ?? "";
   const errorCode = normalizeText(details?.errorCode)?.toUpperCase() ?? "";
   const httpStatusCode = toFiniteNumber(details?.httpStatusCode);
+  // Stryker disable next-line MethodExpression: filter of nulls is equivalent to join treating null as ""
   const errorMessage = [
     normalizeText(envelope.errorMessage),
     normalizeText(details?.message),
@@ -840,6 +851,7 @@ function detectBlockedReasonFromPageState(pageUrl: string, pageText: string): st
 }
 
 function detectBlockedReasonFromTabUrl(tabUrl: unknown): string | null {
+  // Stryker disable next-line MethodExpression: whitespace-only URLs still return null via page-state trim
   if (typeof tabUrl !== "string" || !tabUrl.trim()) return null;
   return detectBlockedReasonFromPageState(tabUrl, "");
 }
@@ -907,13 +919,15 @@ async function extractOperationsWithRetry(
 
   for (let attempt = 1; attempt <= EXTRACTION_ATTEMPTS; attempt += 1) {
     const currentTab = await getTabById(tabId);
-    const blockedReason = detectBlockedReasonFromTabUrl(currentTab?.url);
-    if (blockedReason) {
-      throw formatDiagnosticError(blockedReason, {
-        tab_url: currentTab?.url ?? null,
-        tab_status: currentTab?.status ?? null,
-        execute_script_attempts: attemptDetails,
-      });
+    if (currentTab) {
+      const blockedReason = detectBlockedReasonFromTabUrl(currentTab.url);
+      if (blockedReason) {
+        throw formatDiagnosticError(blockedReason, {
+          tab_url: currentTab.url ?? null,
+          tab_status: currentTab.status ?? null,
+          execute_script_attempts: attemptDetails,
+        });
+      }
     }
 
     try {
@@ -951,7 +965,11 @@ async function extractOperationsWithRetry(
     }
 
     if (attempt < EXTRACTION_ATTEMPTS) {
-      await waitForTabLoad(tabId, 5000).catch(() => null);
+      try {
+        await waitForTabLoad(tabId, 5000);
+      } catch {
+        // A stalled load still gets the remaining extraction attempt.
+      }
     }
   }
 
@@ -1025,31 +1043,23 @@ async function runPageExtraction(
   },
   deadlineMs: number,
 ): Promise<PageExtraction | undefined> {
-  const runtime = globalThis.chrome?.runtime;
-  const tabs = globalThis.chrome?.tabs;
   // Absent in a test double or an older browser: then the call is awaited, as before.
-  const messageEvents = runtime?.onMessage ?? null;
-  const tabEvents = tabs?.onRemoved ?? null;
-  const loadEvents = tabs?.onUpdated ?? null;
-  const reportToken =
+  const messageEvents = chrome.runtime?.onMessage;
+  const tabEvents = chrome.tabs?.onRemoved;
+  const loadEvents = chrome.tabs?.onUpdated;
+  const reporting =
     messageEvents && tabEvents && loadEvents
-      ? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+      ? { messageEvents, tabEvents, loadEvents, token: `${Date.now()}-${Math.random()}` }
       : null;
+  const reportToken = reporting?.token;
 
-  let settled = false;
-  let resolveReport: (extraction: PageExtraction) => void = () => undefined;
-  let rejectReport: (error: Error) => void = () => undefined;
+  let resolveReport!: (extraction: PageExtraction) => void;
+  let rejectReport!: (error: Error) => void;
   const reported = new Promise<PageExtraction>((resolve, reject) => {
-    resolveReport = (extraction) => {
-      settled = true;
-      resolve(extraction);
-    };
-    rejectReport = (error) => {
-      settled = true;
-      reject(error);
-    };
+    resolveReport = resolve;
+    rejectReport = reject;
   });
-  // A report that arrives after the timeout won the race must not surface as unhandled.
+  // The tab can send a failure before executeScript returns its acknowledgement.
   void reported.catch(() => undefined);
 
   const onMessage = (message: unknown, sender: chrome.runtime.MessageSender) => {
@@ -1080,31 +1090,30 @@ async function runPageExtraction(
     if (updatedTabId !== tabId || changeInfo.status !== "loading") return;
     rejectReport(new Error("T-Bank tab navigated before the extraction finished"));
   };
-  if (reportToken && messageEvents && tabEvents && loadEvents) {
-    messageEvents.addListener(onMessage);
-    tabEvents.addListener(onRemoved);
-    loadEvents.addListener(onUpdated);
+  if (reporting) {
+    reporting.messageEvents.addListener(onMessage);
+    reporting.tabEvents.addListener(onRemoved);
+    reporting.loadEvents.addListener(onUpdated);
   }
 
-  let timer: ReturnType<typeof setTimeout> | null = null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   let timedOut = false;
   try {
     const injected = await chrome.scripting.executeScript({
       target: { tabId },
       func: extractOperationsInPage,
-      args: [reportToken ? { ...args, reportToken } : args],
+      args: [reporting ? { ...args, reportToken: reporting.token } : args],
     });
     const first = injected?.[0]?.result as PageExtraction | PageExtractionStart | undefined;
     if (!first) return undefined;
     if (!isPageExtractionStart(first)) return first;
-    if (!reportToken) return undefined;
+    if (!reporting) return undefined;
 
     const timeoutMs = Math.max(60_000, deadlineMs - Date.now());
     return await Promise.race([
       reported,
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
-          if (settled) return;
           timedOut = true;
           reject(
             new ExtractionDeadlineError(
@@ -1115,19 +1124,17 @@ async function runPageExtraction(
       }),
     ]);
   } finally {
-    if (timer !== null) clearTimeout(timer);
-    // Nobody is listening any more; the page's task is told so, or it would fetch on to the
-    // end of the window for a report that is thrown away.
-    if (timedOut && reportToken) await cancelPageExtraction(tabId, reportToken);
-    if (reportToken && messageEvents && tabEvents && loadEvents) {
-      messageEvents.removeListener(onMessage);
-      tabEvents.removeListener(onRemoved);
-      loadEvents.removeListener(onUpdated);
+    clearTimeout(timer);
+    if (reporting) {
+      // Stop the page from continuing to fetch for a report the worker no longer needs.
+      if (timedOut) await cancelPageExtraction(tabId, reporting.token);
+      reporting.messageEvents.removeListener(onMessage);
+      reporting.tabEvents.removeListener(onRemoved);
+      reporting.loadEvents.removeListener(onUpdated);
     }
   }
 }
 
-// Stryker restore all
 /**
  * The page's own resource timeline holds whatever the page loaded, third-party requests
  * included. Matching a candidate on its path alone would accept `https://elsewhere.example` +
@@ -1157,9 +1164,9 @@ function findLatestResourceUrlByPath(
   }
   return null;
 }
-// Stryker disable all: remainder of this module — see file-head note. Also keeps
-// extractOperationsInPage free of instrumentation: it is serialized via Function(fn.toString()).
 
+// Stryker disable all: Chrome serializes this function for execution in the page. Instrumentation
+// references module-scoped helpers that are unavailable there and in the serialization contract test.
 function extractOperationsInPage(input: {
   windowFromIso?: string;
   windowToIso?: string | null;
@@ -2656,6 +2663,7 @@ function extractOperationsInPage(input: {
     return (hash >>> 0).toString(16).padStart(8, "0");
   }
 }
+// Stryker restore all
 
 function isTbankUrl(url: unknown): url is string {
   return (
@@ -2682,15 +2690,13 @@ function isOperationsPageUrl(url: unknown): boolean {
 }
 
 async function getTabById(tabId: number): Promise<chrome.tabs.Tab | null> {
-  if (typeof chrome.tabs.get !== "function") {
-    return null;
-  }
-
+  let tab: chrome.tabs.Tab | undefined;
   try {
-    return (await chrome.tabs.get(tabId)) ?? null;
+    tab = await chrome.tabs.get(tabId);
   } catch {
-    return null;
+    // Missing or closed tabs are handled by the caller.
   }
+  return tab ?? null;
 }
 
 async function waitForTabLoad(tabId: number, timeoutMs = 30000): Promise<chrome.tabs.Tab | null> {
@@ -2719,6 +2725,7 @@ async function waitForTabLoad(tabId: number, timeoutMs = 30000): Promise<chrome.
 }
 
 function toIsoString(value: unknown): string | null {
+  // Stryker disable next-line MethodExpression: !value vs !value.trim() both reject whitespace-only
   if (typeof value !== "string" || !value.trim()) return null;
   const parsed = new Date(value);
   return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null;
@@ -2745,6 +2752,7 @@ function firstNonEmpty(...values: Array<string | null | undefined>): string | nu
 }
 
 function toFiniteNumber(value: unknown): number | null {
+  // Stryker disable next-line ConditionalExpression: Number.isFinite does not coerce; typeof check alone is equivalent here
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string" && value.trim()) {
     const parsed = Number(value);
@@ -2756,6 +2764,7 @@ function toFiniteNumber(value: unknown): number | null {
 function toFiniteMs(value: unknown): number | null {
   const numberValue = toFiniteNumber(value);
   if (numberValue !== null) return numberValue;
+  // Stryker disable next-line MethodExpression: whitespace-only strings still fail Date parse below
   if (typeof value === "string" && value.trim()) {
     const ms = new Date(value).getTime();
     return Number.isFinite(ms) ? ms : null;
@@ -2844,6 +2853,7 @@ function isAccountNativeOperation(
 function extractCardLast4(value: string | null): string | null {
   if (!value) return null;
   const digits = value.replace(/\D/g, "");
+  // Stryker disable next-line ConditionalExpression: short digit strings still fall through to null
   if (digits.length < 4) return null;
 
   const hasMaskMarkers = /[\*\u2022xX]/.test(value);
@@ -2933,6 +2943,7 @@ function extractCashbackAmount(operation: JsonMap): number | null {
   const fromCashback = toFiniteNumber(operation.cashback);
   if (fromCashback !== null) return fromCashback;
 
+  // Stryker disable next-line ArrayDeclaration: non-array fallback [] vs junk array both yield null
   const loyaltyBonus = Array.isArray(operation.loyaltyBonus) ? operation.loyaltyBonus : [];
   let summed = 0;
   let foundAny = false;
@@ -2964,6 +2975,7 @@ function extractCashbackCurrency(operation: JsonMap, cashbackAmount: number | nu
 
 function normalizeStatus(statusInput: unknown): string {
   const text = normalizeText(statusInput)?.toLowerCase() || "";
+  // Stryker disable next-line ConditionalExpression: skipping the empty return still lands on "posted"
   if (!text) return "posted";
   if (
     text.includes("pending") ||
@@ -2985,6 +2997,7 @@ function buildLineItemsFromReceipt(
   const shoppingReceipt = asObject(shoppingReceiptInput);
   const receipt =
     asObject(asObject(shoppingReceipt?.payload)?.receipt) || asObject(shoppingReceipt?.receipt);
+  // Stryker disable next-line ArrayDeclaration: non-array fallback [] vs junk array both hit fallback
   const rawItems = Array.isArray(receipt?.items) ? receipt.items : [];
   const sign = signedTransactionAmount >= 0 ? 1 : -1;
 
@@ -3048,3 +3061,62 @@ function buildDedupeHash(row: JsonMap): string {
     ].join("|"),
   )}`;
 }
+
+// Exported after the helpers so Vitest/Stryker related coverage binds the instrumented
+// post-extractor implementations (T-261116-rul), not a disable-band snapshot.
+export const __test__ = {
+  isOperationsPageUrl,
+  isTbankUrl,
+  operationsPageUrlFor,
+  buildOperationRanges,
+  detectBlockedReasonFromApiEnvelope,
+  detectBlockedReasonFromPageState,
+  detectBlockedReasonFromTabUrl,
+  estimateFullModeReceiptEnrichmentMs,
+  extractOperationsInPage,
+  prepareOperationsTab,
+  extractOperationsWithRetry,
+  runPageExtraction,
+  resolveExtractionDeadlineMs,
+  isPageExtractionStart,
+  findLatestResourceUrlByPath,
+  mapOperationRecordToRow,
+  mapOperationRecordToRowWithReason,
+  normalizeParseStrategy,
+  resolveParseStrategy,
+  summarizeExtractionDiagnostics,
+  sanitizeDebugUrl,
+  countRowsWithoutLineItems,
+  buildShoppingReceiptMeta,
+  operationHasShoppingReceipt,
+  hasReceiptItems,
+  extractReceiptResultCode,
+  extractReceiptMessage,
+  extractReceiptRequestKey,
+  extractAbsoluteUrl,
+  extractSourceCategory,
+  extractSourceBrand,
+  isBankNativeBrandLabel,
+  formatDiagnosticError,
+  toIsoString,
+  asObject,
+  normalizeText,
+  firstNonEmpty,
+  toFiniteNumber,
+  toFiniteMs,
+  normalizeMcc,
+  extractCardLast4,
+  extractOperationTimeMs,
+  extractOperationAmount,
+  resolveSignedAmount,
+  detectTransfer,
+  normalizeCurrencyToken,
+  extractCurrency,
+  extractCashbackAmount,
+  extractCashbackCurrency,
+  normalizeStatus,
+  buildLineItemsFromReceipt,
+  hashString,
+  buildDedupeHash,
+  isAccountNativeOperation,
+};

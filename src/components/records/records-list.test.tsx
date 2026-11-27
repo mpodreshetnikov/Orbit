@@ -1,9 +1,9 @@
 import React from "react";
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { MedicalRecordListItem } from "@/types";
-import { RecordsList } from "./records-list";
+import type { MedicalRecordFilters, MedicalRecordListItem } from "@/types";
+import { RecordsList } from "./records-list-view";
 
 const hookMocks = vi.hoisted(() => ({
   useMedicalRecords: vi.fn(),
@@ -21,11 +21,6 @@ const routerMock = {
 };
 
 let searchParamsState = new URLSearchParams();
-
-const softDeleteMutate = vi.fn();
-const restoreMutate = vi.fn();
-const hardDeleteMutate = vi.fn();
-const updateMutate = vi.fn();
 
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -45,84 +40,14 @@ vi.mock("@/hooks", () => ({
   useUpdateMedicalRecord: (...args: unknown[]) => hookMocks.useUpdateMedicalRecord(...args),
 }));
 
-vi.mock("./record-card", () => ({
-  RecordCard: ({
-    record,
-    onView,
-    onRemove,
-    onRestore,
-    onDelete,
-    onActivate,
-  }: {
-    record: MedicalRecordListItem;
-    onView: (record: MedicalRecordListItem) => void;
-    onRemove: (record: MedicalRecordListItem) => void;
-    onRestore?: (record: MedicalRecordListItem) => void;
-    onDelete?: (record: MedicalRecordListItem) => void;
-    onActivate?: (record: MedicalRecordListItem) => void;
-  }) => (
-    <div data-testid={`record-card-${record.id}`}>
-      <span>{record.title}</span>
-      <button type="button" onClick={() => onView(record)}>
-        view-{record.id}
-      </button>
-      <button type="button" onClick={() => onRemove(record)}>
-        remove-{record.id}
-      </button>
-      {onRestore && (
-        <button type="button" onClick={() => onRestore(record)}>
-          restore-{record.id}
-        </button>
-      )}
-      {onDelete && (
-        <button type="button" onClick={() => onDelete(record)}>
-          delete-{record.id}
-        </button>
-      )}
-      {onActivate && (
-        <button type="button" onClick={() => onActivate(record)}>
-          activate-{record.id}
-        </button>
-      )}
-    </div>
-  ),
-}));
-
-vi.mock("@/components/ui/alert-dialog", () => ({
-  AlertDialog: ({ open, children }: { open?: boolean; children: React.ReactNode }) =>
-    open ? <div>{children}</div> : null,
-  AlertDialogContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  AlertDialogHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  AlertDialogTitle: ({ children }: { children: React.ReactNode }) => <h2>{children}</h2>,
-  AlertDialogDescription: ({ children }: { children: React.ReactNode }) => <p>{children}</p>,
-  AlertDialogFooter: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  AlertDialogCancel: ({ children }: { children: React.ReactNode }) => (
-    <button type="button">{children}</button>
-  ),
-  AlertDialogAction: ({
-    children,
-    onClick,
-  }: {
-    children: React.ReactNode;
-    onClick?: () => void;
-  }) => (
-    <button type="button" onClick={onClick}>
-      {children}
-    </button>
-  ),
-}));
-
-function makeRecord(
-  id: string,
-  overrides: Partial<MedicalRecordListItem> = {},
-): MedicalRecordListItem {
+function baseRecord(overrides: Partial<MedicalRecordListItem> = {}): MedicalRecordListItem {
   return {
-    id,
+    id: "record-1",
     person_id: "person-1",
     created_by_user_id: "user-1",
     record_type: "lab",
     record_date: "2026-01-01",
-    title: `Record ${id}`,
+    title: "CBC",
     notes: null,
     status: "active",
     removed_at: null,
@@ -139,147 +64,305 @@ function makeRecord(
   };
 }
 
-function setupMedicalRecords(options: {
-  active?: MedicalRecordListItem[];
-  draft?: MedicalRecordListItem[];
-  removed?: MedicalRecordListItem[];
-  processing?: MedicalRecordListItem[];
-  isLoading?: boolean;
-  error?: Error | null;
-}) {
-  const {
-    active = [],
-    draft = [],
-    removed = [],
-    processing = [],
-    isLoading = false,
-    error = null,
-  } = options;
+function recordQuery(
+  data: MedicalRecordListItem[] | undefined,
+  { isLoading = false, error = null }: { isLoading?: boolean; error?: Error | null } = {},
+) {
+  return { data, isLoading, error };
+}
 
-  hookMocks.useMedicalRecords.mockImplementation(
-    (filters: { person_id?: string; status?: string }) => {
-      if (filters.person_id === "") return { data: [], isLoading: false, error: null };
-      if (filters.status === "draft") return { data: draft, isLoading: false, error: null };
-      if (filters.status === "removed") return { data: removed, isLoading: false, error: null };
-      if (filters.status === "processing") {
-        return { data: processing, isLoading: false, error: null };
-      }
-      return { data: active, isLoading, error };
-    },
-  );
+function openActions(user: ReturnType<typeof userEvent.setup>) {
+  return user.click(screen.getByRole("button", { name: "common.actions" }));
 }
 
 describe("RecordsList", () => {
   beforeEach(() => {
     searchParamsState = new URLSearchParams();
-
     routerMock.push.mockReset();
     routerMock.replace.mockReset();
-    routerMock.refresh.mockReset();
-    routerMock.prefetch.mockReset();
-    routerMock.prefetch.mockResolvedValue(undefined);
-
-    softDeleteMutate.mockReset();
-    restoreMutate.mockReset();
-    hardDeleteMutate.mockReset();
-    updateMutate.mockReset();
-
-    hookMocks.useSoftDeleteRecord.mockReturnValue({ mutate: softDeleteMutate, isPending: false });
-    hookMocks.useRestoreRecord.mockReturnValue({ mutate: restoreMutate, isPending: false });
-    hookMocks.useHardDeleteRecord.mockReturnValue({ mutate: hardDeleteMutate, isPending: false });
-    hookMocks.useUpdateMedicalRecord.mockReturnValue({ mutate: updateMutate, isPending: false });
-  });
-
-  it("renders loading state for active records", () => {
-    setupMedicalRecords({ isLoading: true });
-    render(<RecordsList personId="person-1" personName="Alex" />);
-
-    expect(screen.getByRole("heading", { name: /health.title/i })).toBeInTheDocument();
-    expect(screen.getByText("records.statusFilter.active")).toBeInTheDocument();
-    expect(screen.getByText("records.statusFilter.processing")).toBeInTheDocument();
-  });
-
-  it("renders error state when records request fails", () => {
-    setupMedicalRecords({ error: new Error("boom") });
-    render(<RecordsList personId="person-1" personName="Alex" />);
-
-    expect(screen.getByText("common.error")).toBeInTheDocument();
-    expect(screen.getByText("boom")).toBeInTheDocument();
-  });
-
-  it("handles view and soft-delete confirmation for active records", async () => {
-    setupMedicalRecords({
-      active: [makeRecord("record-1", { title: "CBC" })],
-      draft: [makeRecord("record-draft", { status: "draft" })],
-      processing: [makeRecord("record-proc", { status: "processing" })],
+    hookMocks.useSoftDeleteRecord.mockReturnValue({
+      mutate: vi.fn(),
+      isPending: false,
     });
+    hookMocks.useRestoreRecord.mockReturnValue({ mutate: vi.fn() });
+    hookMocks.useHardDeleteRecord.mockReturnValue({ mutate: vi.fn() });
+    hookMocks.useUpdateMedicalRecord.mockReturnValue({ mutate: vi.fn() });
+    hookMocks.useMedicalRecords.mockReturnValue(recordQuery([]));
+  });
 
-    render(<RecordsList personId="person-1" personName="Alex" />);
+  it("has no upload CTA and uses not-processed tab copy", () => {
+    render(<RecordsList personId="person-1" personName="Ada" />);
+    expect(screen.queryByText("health.addRecord")).not.toBeInTheDocument();
+    expect(screen.getByText("records.statusFilter.notProcessed")).toBeInTheDocument();
+    expect(screen.getByText("health.noRecordsViaAssistant")).toBeInTheDocument();
+  });
+
+  it("opens an existing record from the active list", async () => {
     const user = userEvent.setup();
-
-    expect(screen.getByText("CBC")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "view-record-1" }));
+    hookMocks.useMedicalRecords.mockReturnValue(recordQuery([baseRecord()]));
+    render(<RecordsList personId="person-1" personName="Ada" />);
+    expect(screen.queryByText("health.addRecord")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "health.noRecords" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("heading", { name: "CBC" }));
     expect(routerMock.push).toHaveBeenCalledWith("/health/records/record-1");
-
-    await user.click(screen.getByRole("button", { name: "remove-record-1" }));
-    expect(screen.getByText("records.confirm.removeTitle")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "common.remove" }));
-
-    expect(softDeleteMutate).toHaveBeenCalledWith("record-1");
   });
 
-  it("handles restore and permanent delete actions in removed tab", async () => {
-    searchParamsState = new URLSearchParams("tab=removed");
-    setupMedicalRecords({
-      removed: [makeRecord("record-2", { status: "removed", removed_at: "2026-01-02T00:00:00Z" })],
+  it.each([
+    ["active", "active", "health.noRecords", "health.noRecordsViaAssistant", null],
+    ["draft", "drafts", "records.noDrafts", "records.noDraftsDescription", "file-stack"],
+    [
+      "processing",
+      "notProcessed",
+      "records.noNotProcessed",
+      "records.noNotProcessedDescription",
+      "circle-slash",
+    ],
+    ["removed", "removed", "common.noResults", "common.noResults", null],
+  ])("selects the %s tab and identifies its empty state", (tab, label, title, body, tabIcon) => {
+    searchParamsState = new URLSearchParams(`tab=${tab}`);
+    render(<RecordsList personId="person-1" personName="Ada" />);
+
+    const selected = screen.getByRole("button", { name: `records.statusFilter.${label}` });
+    expect(selected).toHaveClass("bg-secondary");
+    expect(selected.classList.contains("gap-1")).toBe(Boolean(tabIcon));
+    if (tabIcon) expect(selected.querySelector("svg")).toHaveClass(`lucide-${tabIcon}`);
+    else expect(selected.querySelector("svg")).toBeNull();
+    for (const other of screen.getAllByRole("button", { name: /^records.statusFilter\./ })) {
+      if (other !== selected) expect(other).not.toHaveClass("bg-secondary");
+    }
+    const empty = screen.getByRole("heading", { name: title }).parentElement;
+    expect(empty?.querySelectorAll("svg")).toHaveLength(1);
+    expect(empty?.querySelector("svg")).toHaveClass(`lucide-${tabIcon ?? "file-text"}`);
+    expect(empty?.querySelector("p")).toHaveTextContent(body);
+    expect(screen.queryByRole("list")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["active", "?person=ada"],
+    ["drafts", "?person=ada&tab=draft&showDrafts=true"],
+    ["notProcessed", "?person=ada&tab=processing&showDrafts=true"],
+    ["removed", "?person=ada&tab=removed&showDrafts=true"],
+  ])("writes the %s tab to the URL and preserves unrelated parameters", async (label, query) => {
+    searchParamsState = new URLSearchParams("person=ada&tab=removed&showDrafts=true");
+    render(<RecordsList personId="person-1" personName="Ada" />);
+
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: `records.statusFilter.${label}` }));
+
+    expect(routerMock.push).toHaveBeenCalledExactlyOnceWith(`/health/records${query}`);
+  });
+
+  it("returns to the plain records URL when only tab filters are present", async () => {
+    searchParamsState = new URLSearchParams("tab=removed&showDrafts=true");
+    render(<RecordsList personId="person-1" personName="Ada" />);
+
+    expect(screen.getByRole("heading", { name: "common.noResults" })).toBeVisible();
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "records.statusFilter.active" }));
+
+    expect(routerMock.push).toHaveBeenCalledExactlyOnceWith("/health/records");
+  });
+
+  it("lists the selected person's records and accents other tabs with pending work", () => {
+    hookMocks.useMedicalRecords.mockImplementation((filters?: MedicalRecordFilters) => {
+      const { status, person_id: personId } = filters ?? {};
+      const data =
+        personId === "person-1" && status
+          ? [baseRecord({ title: `Ada ${status}`, status })]
+          : personId === "person-2" && status === "processing"
+            ? [baseRecord({ title: "Lin OCR", status: "ocr_processing" })]
+            : undefined;
+      return recordQuery(data);
     });
+    const { rerender } = render(<RecordsList personId="person-1" personName="Ada" />);
+    const drafts = () => screen.getByRole("button", { name: /records.statusFilter.drafts/ });
+    const unprocessed = () =>
+      screen.getByRole("button", { name: /records.statusFilter.notProcessed/ });
 
-    render(<RecordsList personId="person-1" personName="Alex" />);
-    const user = userEvent.setup();
+    expect(screen.getByRole("heading", { name: "Ada active" })).toBeVisible();
+    expect(drafts()).toHaveClass("text-primary");
+    expect(unprocessed()).toHaveClass("text-primary");
+    expect(within(drafts()).getByText("1")).toBeVisible();
+    expect(within(unprocessed()).getByText("1")).toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: "restore-record-2" }));
-    expect(restoreMutate).toHaveBeenCalledWith("record-2");
-
-    await user.click(screen.getByRole("button", { name: "delete-record-2" }));
-    expect(screen.getByText("records.confirm.deleteTitle")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "common.delete" }));
-
-    expect(hardDeleteMutate).toHaveBeenCalledWith("record-2");
-  });
-
-  it("handles draft activation and clear filters", async () => {
     searchParamsState = new URLSearchParams("tab=draft");
-    setupMedicalRecords({
-      draft: [makeRecord("record-3", { status: "draft", title: "Draft record" })],
-    });
+    rerender(<RecordsList personId="person-1" personName="Ada" />);
+    expect(screen.getByRole("heading", { name: "Ada draft" })).toBeVisible();
+    expect(drafts()).not.toHaveClass("text-primary");
+    expect(within(drafts()).queryByText("1")).not.toBeInTheDocument();
+    expect(unprocessed()).toHaveClass("text-primary");
 
-    render(<RecordsList personId="person-1" personName="Alex" />);
+    searchParamsState = new URLSearchParams("tab=processing");
+    rerender(<RecordsList personId="person-1" personName="Ada" />);
+    expect(screen.getByRole("heading", { name: "Ada processing" })).toBeVisible();
+    expect(unprocessed()).not.toHaveClass("text-primary");
+    expect(within(unprocessed()).queryByText("1")).not.toBeInTheDocument();
+    expect(drafts()).toHaveClass("text-primary");
+
+    rerender(<RecordsList personId="person-2" personName="Lin" />);
+    expect(screen.getByRole("heading", { name: "Lin OCR" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: /Ada/ })).not.toBeInTheDocument();
+    expect(drafts()).not.toHaveClass("text-primary");
+    expect(unprocessed()).not.toHaveClass("text-primary");
+
+    hookMocks.useMedicalRecords.mockReturnValue(recordQuery([baseRecord()]));
+    rerender(<RecordsList personId="person-2" personName="Lin" />);
+    expect(within(unprocessed()).getByText("1")).toBeVisible();
+    expect(unprocessed()).not.toHaveClass("text-primary");
+  });
+
+  it("debounces search and never displays results for a superseded query", () => {
+    vi.useFakeTimers();
+    try {
+      hookMocks.useMedicalRecords.mockImplementation((filters?: MedicalRecordFilters) =>
+        recordQuery(filters?.status === "active" && filters.search === "CBC" ? [baseRecord()] : []),
+      );
+      render(<RecordsList personId="person-1" personName="Ada" />);
+      const search = screen.getByRole("textbox");
+      expect(screen.queryByRole("button", { name: "records.clearSearch" })).not.toBeInTheDocument();
+
+      fireEvent.change(search, { target: { value: "CBC" } });
+      act(() => vi.advanceTimersByTime(200));
+      fireEvent.change(search, { target: { value: "CMP" } });
+      act(() => vi.advanceTimersByTime(100));
+      expect(screen.queryByRole("heading", { name: "CBC" })).not.toBeInTheDocument();
+
+      fireEvent.change(search, { target: { value: " CBC " } });
+      act(() => vi.advanceTimersByTime(299));
+      expect(screen.queryByRole("heading", { name: "CBC" })).not.toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(1));
+      expect(screen.getByRole("heading", { name: "CBC" })).toBeVisible();
+
+      fireEvent.click(screen.getByRole("button", { name: "records.clearSearch" }));
+      expect(search).toHaveValue("");
+      act(() => vi.advanceTimersByTime(300));
+      expect(screen.queryByRole("heading", { name: "CBC" })).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("queries only the selected record type and resets the filter", async () => {
+    hookMocks.useMedicalRecords.mockImplementation((filters?: MedicalRecordFilters) =>
+      recordQuery(filters?.status === "active" && !filters.record_type ? [baseRecord()] : []),
+    );
+    render(<RecordsList personId="person-1" personName="Ada" />);
     const user = userEvent.setup();
 
-    expect(screen.getByText("Draft record")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "activate-record-3" }));
-    expect(screen.getByText("records.confirm.activateTitle")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "records.actions.activate" }));
-
-    expect(updateMutate).toHaveBeenCalledWith({
-      id: "record-3",
-      updates: { status: "active" },
-    });
+    expect(screen.getByRole("heading", { name: "CBC" })).toBeVisible();
+    screen.getByRole("combobox").focus();
+    await user.keyboard("{ArrowDown}");
+    await user.click(screen.getByRole("option", { name: "records.types.imaging" }));
+    expect(screen.getByRole("combobox")).toHaveTextContent("records.types.imaging");
+    expect(screen.queryByRole("heading", { name: "CBC" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "common.noResults" })).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "common.clear" }));
+    expect(screen.getByRole("combobox")).toHaveTextContent("records.allTypes");
+    expect(screen.getByRole("heading", { name: "CBC" })).toBeVisible();
     expect(routerMock.replace).toHaveBeenCalledWith("/health/records");
   });
 
-  it("renders active empty state and routes to create page", async () => {
-    setupMedicalRecords({ active: [], draft: [], processing: [] });
-    render(<RecordsList personId="person-1" personName="Alex" />);
+  it.each([
+    { data: undefined, isLoading: false },
+    { data: [baseRecord()], isLoading: true },
+    { data: [], isLoading: true },
+    { data: [baseRecord()], error: new Error("Records unavailable") },
+    { data: [], error: new Error("Records unavailable") },
+  ])(
+    "keeps results and empty state hidden while the query is unavailable ($#)",
+    ({ data, ...state }) => {
+      hookMocks.useMedicalRecords.mockReturnValue(recordQuery(data, state));
+      render(<RecordsList personId="person-1" personName="Ada" />);
+
+      expect(screen.queryByRole("list")).not.toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "health.noRecords" })).not.toBeInTheDocument();
+      if (state.error) expect(screen.getByText(state.error.message)).toBeVisible();
+    },
+  );
+
+  it("shows loading placeholders until records arrive", () => {
+    hookMocks.useMedicalRecords.mockReturnValue(recordQuery(undefined, { isLoading: true }));
+    const { container, rerender } = render(<RecordsList personId="person-1" personName="Ada" />);
+
+    expect(container.querySelectorAll(".animate-pulse")).toHaveLength(6);
+
+    hookMocks.useMedicalRecords.mockReturnValue(recordQuery([baseRecord()]));
+    rerender(<RecordsList personId="person-1" personName="Ada" />);
+
+    expect(container.querySelectorAll(".animate-pulse")).toHaveLength(0);
+    expect(screen.getByRole("heading", { name: "CBC" })).toBeVisible();
+  });
+
+  it.each([
+    {
+      tab: "draft",
+      status: "draft" as const,
+      action: "activate",
+      hook: hookMocks.useUpdateMedicalRecord,
+      payload: { id: "record-1", updates: { status: "active" } },
+    },
+    {
+      tab: "removed",
+      status: "removed" as const,
+      action: "restore",
+      hook: hookMocks.useRestoreRecord,
+      payload: "record-1",
+    },
+    {
+      tab: "removed",
+      status: "removed" as const,
+      action: "delete",
+      hook: hookMocks.useHardDeleteRecord,
+      payload: "record-1",
+    },
+  ])(
+    "can $action the selected record on the $tab tab",
+    async ({ tab, status, action, hook, payload }) => {
+      const mutate = vi.fn();
+      hook.mockReturnValue({ mutate });
+      hookMocks.useMedicalRecords.mockReturnValue(recordQuery([baseRecord({ status })]));
+      const user = userEvent.setup();
+      const { rerender } = render(<RecordsList personId="person-1" personName="Ada" />);
+      await openActions(user);
+      expect(
+        screen.queryByRole("menuitem", { name: `records.actions.${action}` }),
+      ).not.toBeInTheDocument();
+      await user.keyboard("{Escape}");
+
+      searchParamsState = new URLSearchParams(`tab=${tab}`);
+      rerender(<RecordsList personId="person-1" personName="Ada" />);
+      await openActions(user);
+      await user.click(screen.getByRole("menuitem", { name: `records.actions.${action}` }));
+
+      expect(mutate).toHaveBeenCalledExactlyOnceWith(payload);
+      expect(routerMock.push).not.toHaveBeenCalled();
+    },
+  );
+
+  it("soft-removes from the list", async () => {
     const user = userEvent.setup();
+    const mutate = vi.fn();
+    hookMocks.useSoftDeleteRecord.mockReturnValue({ mutate, isPending: false });
+    hookMocks.useMedicalRecords.mockReturnValue(recordQuery([baseRecord()]));
+    render(<RecordsList personId="person-1" personName="Ada" />);
+    await openActions(user);
+    await user.click(screen.getByRole("menuitem", { name: "records.actions.remove" }));
+    const confirmRemove = screen.getByRole("button", { name: "common.remove" });
+    expect(confirmRemove).toBeVisible();
+    expect(mutate).not.toHaveBeenCalled();
 
-    expect(screen.getByText("health.noRecords")).toBeInTheDocument();
-    const addButtons = screen.getAllByRole("button", { name: "health.addRecord" });
-    await user.click(addButtons[0]);
+    await user.click(screen.getByRole("button", { name: "common.cancel" }));
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(mutate).not.toHaveBeenCalled();
 
-    expect(routerMock.push).toHaveBeenCalledWith("/health/records/new");
+    await openActions(user);
+    await user.click(screen.getByRole("menuitem", { name: "records.actions.remove" }));
+    await user.click(screen.getByRole("button", { name: "common.remove" }));
+
+    expect(mutate).toHaveBeenCalledWith("record-1");
+    expect(confirmRemove).not.toBeInTheDocument();
   });
 });

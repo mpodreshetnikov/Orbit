@@ -77,19 +77,28 @@ const BICEP = measurement({
 function renderDialog(
   props: Partial<React.ComponentProps<typeof MeasurementVisibilityDialog>> = {},
 ) {
-  const onToggle = vi.fn();
-  render(
-    <MeasurementVisibilityDialog
-      open
-      onOpenChange={vi.fn()}
-      measurements={[WEIGHT, HEIGHT, BICEP]}
-      hiddenCodes={new Set()}
-      onToggle={onToggle}
-      locale="en"
-      {...props}
-    />,
-  );
-  return { onToggle };
+  function VisibilitySettings() {
+    const [hiddenCodes, setHiddenCodes] = React.useState(props.hiddenCodes ?? new Set<string>());
+    return (
+      <MeasurementVisibilityDialog
+        open
+        onOpenChange={vi.fn()}
+        measurements={[WEIGHT, HEIGHT, BICEP]}
+        locale="en"
+        {...props}
+        hiddenCodes={hiddenCodes}
+        onToggle={(code) =>
+          setHiddenCodes((previous) => {
+            const next = new Set(previous);
+            if (next.has(code)) next.delete(code);
+            else next.add(code);
+            return next;
+          })
+        }
+      />
+    );
+  }
+  render(<VisibilitySettings />);
 }
 
 describe("MeasurementVisibilityDialog", () => {
@@ -117,22 +126,24 @@ describe("MeasurementVisibilityDialog", () => {
     expect(screen.getByLabelText(/Height/)).not.toBeChecked();
   });
 
-  it("reports the toggled code", async () => {
-    const { onToggle } = renderDialog();
+  it("hides only the measurement the user unchecks", async () => {
+    renderDialog();
     const user = userEvent.setup();
 
     await user.click(screen.getByLabelText(/Height/));
 
-    expect(onToggle).toHaveBeenCalledWith("height");
+    expect(screen.getByLabelText(/Height/)).not.toBeChecked();
+    expect(screen.getByLabelText(/Weight/)).toBeChecked();
   });
 
   it("unhides through the same control", async () => {
-    const { onToggle } = renderDialog({ hiddenCodes: new Set(["height"]) });
+    renderDialog({ hiddenCodes: new Set(["height", "weight"]) });
     const user = userEvent.setup();
 
     await user.click(screen.getByLabelText(/Height/));
 
-    expect(onToggle).toHaveBeenCalledWith("height");
+    expect(screen.getByLabelText(/Height/)).toBeChecked();
+    expect(screen.getByLabelText(/Weight/)).not.toBeChecked();
   });
 
   it("uses Russian names and units when the locale is ru", () => {

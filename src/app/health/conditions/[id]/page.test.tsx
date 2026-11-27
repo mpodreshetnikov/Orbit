@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -227,6 +227,8 @@ describe("ConditionDetailPage", () => {
   });
 
   it("handles delete flow when condition can be deleted", async () => {
+    const deletion = Promise.withResolvers<void>();
+    deleteMutateAsync.mockReturnValueOnce(deletion.promise);
     hookMocks.useConditionDetail.mockReturnValue({
       data: makeCondition({ mention_count: 0, history: [] }),
       isLoading: false,
@@ -242,13 +244,16 @@ describe("ConditionDetailPage", () => {
     await user.click(screen.getByRole("button", { name: "conditions.deleteCondition" }));
     await user.click(screen.getAllByRole("button", { name: "conditions.deleteCondition" })[1]);
 
-    await waitFor(() => {
-      expect(deleteMutateAsync).toHaveBeenCalledWith({
-        id: "cond-1",
-        personId: "person-1",
-      });
-      expect(routerMock.push).toHaveBeenCalledWith("/health/conditions");
+    expect(screen.getByText("conditions.deleteConditionConfirm")).toBeInTheDocument();
+    expect(routerMock.push).not.toHaveBeenCalled();
+    expect(deleteMutateAsync).toHaveBeenCalledWith({
+      id: "cond-1",
+      personId: "person-1",
     });
+
+    await act(async () => deletion.resolve());
+    expect(screen.queryByText("conditions.deleteConditionConfirm")).toBeNull();
+    expect(routerMock.push).toHaveBeenCalledWith("/health/conditions");
   });
 
   describe("ruling on a proposed closure", () => {
@@ -280,15 +285,20 @@ describe("ConditionDetailPage", () => {
     const refetchMock = vi.fn();
 
     async function renderWith(history: Record<string, unknown>[]) {
-      refetchMock.mockClear();
-      hookMocks.useConditionDetail.mockReturnValue({
+      refetchMock.mockReset();
+      const detail = {
         data: makeCondition({ history, mention_count: history.length }),
         isLoading: false,
         error: null,
         refetch: refetchMock,
-      });
+      };
+      hookMocks.useConditionDetail.mockReturnValue(detail);
       const Page = (await import("./page")).default;
-      render(<Page params={resolvedParams("cond-1")} />);
+      const { rerender } = render(<Page params={resolvedParams("cond-1")} />);
+      return (nextHistory: Record<string, unknown>[]) => {
+        detail.data = makeCondition({ history: nextHistory, mention_count: nextHistory.length });
+        rerender(<Page params={resolvedParams("cond-1")} />);
+      };
     }
 
     it("shows the measurement the proposal rests on, read back rather than asserted", async () => {
@@ -309,39 +319,54 @@ describe("ConditionDetailPage", () => {
       expect(screen.queryByText("Витамин B12")).not.toBeInTheDocument();
     });
 
-    it("confirming verifies the mention, which is what lets it reach the chart", async () => {
-      await renderWith([pendingClosure]);
+    it("confirms the cited mention and removes review controls once verified", async () => {
+      const refreshHistory = await renderWith([pendingClosure]);
+      ruleMutateAsync.mockImplementationOnce(async () => {
+        refreshHistory([
+          { ...pendingClosure, is_user_verified: true, review_decision: "confirmed" },
+        ]);
+        return true;
+      });
 
       await userEvent
         .setup()
         .click(screen.getByRole("button", { name: /conditions.confirmClosure/ }));
 
-      await waitFor(() => {
-        expect(ruleMutateAsync).toHaveBeenCalledWith(
-          expect.objectContaining({
-            id: "hist-pending",
-            record_id: "rec-2",
-            condition_id: "cond-1",
-            supporting_obs_code: "vitamin_b12",
-          }),
-          "confirmed",
-        );
-      });
+      expect(screen.queryByText("conditions.awaitingReview")).toBeNull();
+      expect(screen.queryByRole("button", { name: /conditions.confirmClosure/ })).toBeNull();
+      expect(screen.getByRole("link", { name: /Lab/ })).toBeInTheDocument();
+      expect(ruleMutateAsync).toHaveBeenCalledWith(
+        {
+          id: "hist-pending",
+          record_id: "rec-2",
+          condition_id: "cond-1",
+          status_in_record: "resolved",
+          supporting_obs_code: "vitamin_b12",
+        },
+        "confirmed",
+      );
+      expect(refetchMock).not.toHaveBeenCalled();
     });
 
     it("dismissing records the decision and neither verifies nor deletes the row", async () => {
-      await renderWith([pendingClosure]);
+      const refreshHistory = await renderWith([pendingClosure]);
+      ruleMutateAsync.mockImplementationOnce(async () => {
+        refreshHistory([{ ...pendingClosure, review_decision: "dismissed" }]);
+        return true;
+      });
 
       await userEvent
         .setup()
         .click(screen.getByRole("button", { name: "conditions.dismissClosure" }));
 
-      await waitFor(() => {
-        expect(ruleMutateAsync).toHaveBeenCalledWith(
-          expect.objectContaining({ id: "hist-pending" }),
-          "dismissed",
-        );
-      });
+      expect(await screen.findByText("conditions.dismissed")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "conditions.dismissClosure" })).toBeNull();
+      expect(screen.getByRole("link", { name: /Lab/ })).toBeInTheDocument();
+      expect(ruleMutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "hist-pending" }),
+        "dismissed",
+      );
+      expect(refetchMock).not.toHaveBeenCalled();
     });
 
     it("offers no ruling on a mention nobody needs to rule on", async () => {
@@ -357,13 +382,18 @@ describe("ConditionDetailPage", () => {
       // The guard itself lives in useRuleOnProposedClosure and is tested there. What this page owes
       // is not to keep displaying a measurement the record no longer supports.
       ruleMutateAsync.mockResolvedValueOnce(false);
-      await renderWith([pendingClosure]);
+      const refreshHistory = await renderWith([pendingClosure]);
+      refetchMock.mockImplementationOnce(async () => {
+        refreshHistory([{ ...pendingClosure, supporting_observation: null }]);
+      });
+      expect(screen.getByText("704 пг/мл")).toBeInTheDocument();
 
       await userEvent
         .setup()
         .click(screen.getByRole("button", { name: /conditions.confirmClosure/ }));
 
-      await waitFor(() => expect(refetchMock).toHaveBeenCalled());
+      expect(await screen.findByText("conditions.measurementGone")).toBeInTheDocument();
+      expect(screen.queryByText("704 пг/мл")).toBeNull();
     });
 
     it("offers no ruling once a person has dismissed it", async () => {

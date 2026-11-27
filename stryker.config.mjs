@@ -51,6 +51,12 @@ const config = {
     "dist",
     ".next",
     "node_modules",
+    // Dual-repo cloud checkouts symlink skill trees / task registry as
+    // directories; Stryker's copyFile treats those links as files and fails
+    // with EISDIR. CI runners do not have these links.
+    ".agents",
+    ".claude",
+    "docs/tasks",
   ],
   reporters: ["clear-text", "progress", "html", "json"],
   htmlReporter: {

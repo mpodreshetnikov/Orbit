@@ -4,16 +4,7 @@ import React from "react";
 import { useTranslations } from "next-intl";
 import { format } from "date-fns";
 import { useDateFnsLocale } from "@/lib/date-locale";
-import {
-  Calendar,
-  Paperclip,
-  MoreVertical,
-  Eye,
-  Trash2,
-  RotateCcw,
-  Loader2,
-  FileCheck,
-} from "lucide-react";
+import { Calendar, Paperclip, MoreVertical, Eye, Trash2, RotateCcw, FileCheck } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { MedicalRecordListItem, RecordType } from "@/types";
+import { isUnprocessedRecordStatus, shouldHideSoftRemove } from "@/lib/medical-record-status";
 import { cn } from "@/lib/utils";
 
 interface RecordCardProps {
@@ -60,18 +52,16 @@ export function RecordCard({
 
   const isRemoved = record.status === "removed";
   const isDraft = record.status === "draft";
-  const isProcessing =
-    record.status === "ocr_processing" ||
-    record.status === "structuring" ||
-    record.status === "processing";
-  const isOcrFailed = record.status === "ocr_failed";
+  const isUnprocessed = isUnprocessedRecordStatus(record.status);
+  // Soft-remove stays for ocr_failed (and active/draft); hide only while still "in pipeline".
+  const hideSoftRemove = shouldHideSoftRemove(record.status);
 
   return (
     <Card
       className={cn(
         "group tap-target cursor-pointer select-none transition-all hover:shadow-md min-w-0 w-full overflow-hidden",
         isRemoved && "opacity-60",
-        (isProcessing || isOcrFailed) && "border-primary/50",
+        isUnprocessed && "border-muted-foreground/30",
       )}
       onClick={() => onView(record)}
     >
@@ -86,15 +76,9 @@ export function RecordCard({
               >
                 {t(`records.types.${record.record_type}`)}
               </Badge>
-              {isProcessing && (
-                <Badge variant="outline" className="text-xs gap-1 border-primary/50 text-primary">
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  {t("records.status.processing")}
-                </Badge>
-              )}
-              {isOcrFailed && (
-                <Badge variant="outline" className="text-xs border-destructive/50 text-destructive">
-                  {t("processing.failedTapToRetry")}
+              {isUnprocessed && (
+                <Badge variant="outline" className="text-xs text-muted-foreground">
+                  {t("records.status.notProcessed")}
                 </Badge>
               )}
               {isDraft && (
@@ -145,7 +129,7 @@ export function RecordCard({
                 className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
               >
                 <MoreVertical className="h-4 w-4" />
-                <span className="sr-only">Actions</span>
+                <span className="sr-only">{t("common.actions")}</span>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
@@ -162,7 +146,7 @@ export function RecordCard({
                 </DropdownMenuItem>
               )}
 
-              {!isRemoved && !isProcessing && (
+              {!isRemoved && !hideSoftRemove && (
                 <DropdownMenuItem
                   onClick={() => onRemove(record)}
                   className="text-destructive focus:text-destructive"

@@ -291,7 +291,8 @@ and installs — and after that deploys every commit that reaches `main`.
     as variables and `GOOGLE_CLIENT_SECRET` as a secret; for backups, the `BACKUP_*` names. These
     go under _Secrets_, which nobody can read back: `GOOGLE_CLIENT_SECRET`, `OPENROUTER_API_KEY`,
     `JEV_API_KEY`, `WHO_ICD_CLIENT_SECRET`, the four `BACKUP_*_ACCESS_KEY_ID` / `_SECRET_ACCESS_KEY`,
-    `ALERT_TELEGRAM_BOT_TOKEN`, `BACKUP_HEALTHCHECK_URL`, `OBS_GRAFANA_CLOUD_OTLP_HEADERS` (and, when
+    `ALERT_TELEGRAM_BOT_TOKEN`, `BACKUP_HEALTHCHECK_URL`, `OBS_GRAFANA_CLOUD_OTLP_HEADERS`,
+    `ORBIT_TASKS_GITHUB_TOKEN` (RO PAT for private `orbit-tasks`; Maxim work board only) (and, when
     moving from hosted Supabase, `JWT_SECRET`, `ANON_KEY`, `SERVICE_ROLE_KEY`, `VAPID_*`). Everything
     else is a _Variable_ — a setting saved as a secret under any other name is not read. Optional:
     `ORBIT_SERVER_USER` if your provider's login is not `root` (e.g. `ubuntu`),
@@ -356,7 +357,8 @@ inherited and this job could deploy the wrong server). For Igor use Environment
 `ORBIT_SERVER_USER`, `ORBIT_SERVER_PORT` (when SSH is not on 22 and the host has no `:port`),
 `ORBIT_SSH_KNOWN_HOSTS`, `ORBIT_HTTP_ONLY`, `MCP_SERVER_ENABLED`,
 `OPENROUTER_API_KEY`, `JEV_API_KEY`, `WHO_ICD_CLIENT_ID` / `WHO_ICD_CLIENT_SECRET`, `BACKUP_*`,
-`ALERT_TELEGRAM_BOT_TOKEN`, `BACKUP_HEALTHCHECK_URL`, `OBS_GRAFANA_CLOUD_OTLP_HEADERS`, and — only
+`ALERT_TELEGRAM_BOT_TOKEN`, `BACKUP_HEALTHCHECK_URL`, `OBS_GRAFANA_CLOUD_OTLP_HEADERS`,
+`ORBIT_TASKS_GITHUB_TOKEN` (Maxim work board RO to private `orbit-tasks`), and — only
 when moving from a hosted project — `JWT_SECRET`, `ANON_KEY`, `SERVICE_ROLE_KEY`, `VAPID_*`,
 `SOURCE_*`. Use separate backup buckets/prefixes from production.
 

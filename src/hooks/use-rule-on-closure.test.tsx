@@ -89,14 +89,15 @@ describe("useRuleOnProposedClosure", () => {
   });
 
   it("refuses when the measurement is gone from the record", async () => {
-    observationRows.data = [];
+    observationRows.data = [inRange({ obs_code: "folate" })];
     const { result } = renderHook(() => useRuleOnProposedClosure());
 
     await act(async () => {
-      await result.current.ruleOnClosure(closure, "confirmed");
+      expect(await result.current.ruleOnClosure(closure, "confirmed")).toBe(false);
     });
 
     expect(mutateAsync).not.toHaveBeenCalled();
+    expect(toastError).toHaveBeenCalledWith("conditions.confirmClosureNoLongerHolds");
   });
 
   it("refuses when the evidence cannot be read at all", async () => {
@@ -118,7 +119,7 @@ describe("useRuleOnProposedClosure", () => {
     const { result } = renderHook(() => useRuleOnProposedClosure());
 
     await act(async () => {
-      await result.current.ruleOnClosure(closure, "dismissed");
+      expect(await result.current.ruleOnClosure(closure, "dismissed")).toBe(true);
     });
 
     // Neither verified nor deleted: the row stays, carrying the decision.
@@ -131,13 +132,20 @@ describe("useRuleOnProposedClosure", () => {
   });
 
   it("skips the re-check for a mention that never cited a measurement", async () => {
+    observationRows.error = { message: "network" };
     const { result } = renderHook(() => useRuleOnProposedClosure());
 
     await act(async () => {
-      await result.current.ruleOnClosure({ ...closure, supporting_obs_code: null }, "confirmed");
+      expect(
+        await result.current.ruleOnClosure({ ...closure, supporting_obs_code: null }, "confirmed"),
+      ).toBe(true);
     });
 
-    expect(mutateAsync).toHaveBeenCalled();
+    expect(mutateAsync).toHaveBeenCalledWith({
+      id: "cr-1",
+      conditionId: "cond-1",
+      updates: { is_user_verified: true },
+    });
   });
 
   it("reports which mention is being ruled on while the write is in flight", async () => {

@@ -231,6 +231,13 @@ describe("use-regimens", () => {
     const undo = renderHookWithQueryClient(() => useUndoDoseIntake());
     const updateResolution = renderHookWithQueryClient(() => useUpdateDoseEventResolutionDetails());
     const snooze = renderHookWithQueryClient(() => useSnoozeDose());
+    const eventsKey = ["dose-events-regimen", "reg-1"];
+    const inventoryKey = ["inventory-transactions", "reg-1"];
+    const intakeHooks = [markTaken, markSkipped, undo, updateResolution];
+    for (const { queryClient } of [...intakeHooks, snooze]) {
+      queryClient.setQueryData(eventsKey, [baseDoseEventRow()]);
+      queryClient.setQueryData(inventoryKey, [baseInventoryRow()]);
+    }
 
     await act(async () => {
       await markTaken.result.current.mutateAsync({
@@ -279,11 +286,22 @@ describe("use-regimens", () => {
     });
     expect(notifyResolvedMock).toHaveBeenCalledWith(["dose-1"]);
     expect(notifyResolvedMock).toHaveBeenCalledWith(["dose-2"]);
+    for (const { queryClient } of intakeHooks) {
+      expect(queryClient.getQueryState(eventsKey)?.isInvalidated).toBe(true);
+      expect(queryClient.getQueryState(inventoryKey)?.isInvalidated).toBe(true);
+    }
+    expect(snooze.queryClient.getQueryState(eventsKey)?.isInvalidated).toBe(true);
+    expect(snooze.queryClient.getQueryState(inventoryKey)?.isInvalidated).toBe(false);
   });
 
   it("creates and updates regimen", async () => {
     const regimenBuilder = createQueryBuilder({
       data: baseRegimenRow(),
+      error: null,
+    });
+    regimenBuilder.single.mockResolvedValueOnce({ data: baseRegimenRow(), error: null });
+    regimenBuilder.single.mockResolvedValueOnce({
+      data: baseRegimenRow({ custom_name: "Vitamin D3", notes: "night" }),
       error: null,
     });
     createClientMock.mockReturnValue({
@@ -294,20 +312,26 @@ describe("use-regimens", () => {
     const { useCreateRegimen, useUpdateRegimen } = await import("./use-regimens");
     const createHook = renderHookWithQueryClient(() => useCreateRegimen());
     const updateHook = renderHookWithQueryClient(() => useUpdateRegimen());
+    const listKey = ["regimens", "person-1", "active"];
+    const detailKey = ["regimen", "reg-1"];
+    createHook.queryClient.setQueryData(listKey, []);
+    updateHook.queryClient.setQueryData(detailKey, baseRegimenRow());
 
     await act(async () => {
-      await createHook.result.current.mutateAsync({
+      const created = await createHook.result.current.mutateAsync({
         person_id: "person-1",
         custom_name: "Vitamin D",
         intake_unit: "pill",
         schedule: { type: "daily" },
         duration: { type: "ongoing" },
       } as unknown as import("@/types").CreateMedRegimenInput);
+      expect(created).toMatchObject({ id: "reg-1", custom_name: "Vitamin D", status: "active" });
 
-      await updateHook.result.current.mutateAsync({
+      const updated = await updateHook.result.current.mutateAsync({
         id: "reg-1",
         updates: { custom_name: "Vitamin D3", notes: "night" },
       } as { id: string; updates: UpdateMedRegimenInput });
+      expect(updated).toMatchObject({ id: "reg-1", custom_name: "Vitamin D3", notes: "night" });
     });
 
     expect(regimenBuilder.insert).toHaveBeenCalled();
@@ -321,6 +345,8 @@ describe("use-regimens", () => {
       reminder_prefs: undefined,
       inventory: undefined,
     });
+    expect(createHook.queryClient.getQueryState(listKey)?.isInvalidated).toBe(true);
+    expect(updateHook.queryClient.getQueryState(detailKey)?.isInvalidated).toBe(true);
   });
 
   it("refuses to record a one-time dose when the course's strength cannot be read", async () => {
@@ -375,6 +401,12 @@ describe("use-regimens", () => {
       await import("./use-regimens");
     const addOneTime = renderHookWithQueryClient(() => useAddOneTimeDoseToRegimen());
     const updateInventory = renderHookWithQueryClient(() => useUpdateRegimenInventory());
+    const eventsKey = ["dose-events-regimen", "reg-1"];
+    const inventoryKey = ["inventory-transactions", "reg-1"];
+    const otherInventoryKey = ["inventory-transactions", "reg-2"];
+    addOneTime.queryClient.setQueryData(eventsKey, []);
+    updateInventory.queryClient.setQueryData(inventoryKey, []);
+    updateInventory.queryClient.setQueryData(otherInventoryKey, []);
 
     await act(async () => {
       await addOneTime.result.current.mutateAsync({
@@ -409,6 +441,9 @@ describe("use-regimens", () => {
       p_amount: 20,
       p_note: "restock",
     });
+    expect(addOneTime.queryClient.getQueryState(eventsKey)?.isInvalidated).toBe(true);
+    expect(updateInventory.queryClient.getQueryState(inventoryKey)?.isInvalidated).toBe(true);
+    expect(updateInventory.queryClient.getQueryState(otherInventoryKey)?.isInvalidated).toBe(false);
   });
 
   it("deletes, archives, and unarchives regimen", async () => {
@@ -428,6 +463,13 @@ describe("use-regimens", () => {
     const deleteHook = renderHookWithQueryClient(() => useDeleteRegimen());
     const archiveHook = renderHookWithQueryClient(() => useArchiveRegimen());
     const unarchiveHook = renderHookWithQueryClient(() => useUnarchiveRegimen());
+    const listKey = ["regimens", "person-1", "active"];
+    const otherListKey = ["regimens", "person-2", "active"];
+    const regimenHooks = [deleteHook, archiveHook, unarchiveHook];
+    for (const { queryClient } of regimenHooks) {
+      queryClient.setQueryData(listKey, [baseRegimenRow()]);
+      queryClient.setQueryData(otherListKey, []);
+    }
 
     await act(async () => {
       await deleteHook.result.current.mutateAsync({
@@ -449,6 +491,10 @@ describe("use-regimens", () => {
     expect(regimenBuilder.update).toHaveBeenCalledWith({ status: "active" });
     expect(eventBuilder.delete).toHaveBeenCalled();
     expect(eventBuilder.in).toHaveBeenCalledWith("status", ["scheduled", "sent", "snoozed"]);
+    for (const { queryClient } of regimenHooks) {
+      expect(queryClient.getQueryState(listKey)?.isInvalidated).toBe(true);
+      expect(queryClient.getQueryState(otherListKey)?.isInvalidated).toBe(false);
+    }
   });
 
   it("covers helper normalizers and row mappers", async () => {

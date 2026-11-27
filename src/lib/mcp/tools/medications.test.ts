@@ -98,7 +98,9 @@ describe("list_medications", () => {
 
     const result = await (await handlers()).get("list_medications")!({ ...PAGE }, ctx());
 
-    expect(result.content[0].text).toContain("Ferrous sulfate — completed, 1 pill");
+    expect(result.content[0].text.split("\n")[1]).toBe(
+      "- Ferrous sulfate — completed, 1 pill, schedule daily_times (id r-1)",
+    );
   });
 
   it("prints the milligrams, the course window, the stock and the note the row carries", async () => {
@@ -157,7 +159,9 @@ describe("list_medications", () => {
     const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
       .text;
 
-    expect(text).toContain("at 09:00 (0.5 pill), 22:00 (1.5 pill) (local wall clock)");
+    expect(text.split("\n")[1]).toBe(
+      "- Атаракс — active, 0.5 pill, schedule daily_times at 09:00 (0.5 pill), 22:00 (1.5 pill) (local wall clock) (id r-1)",
+    );
   });
 
   it("says the strength belongs to the base dose when a slot overrides the amount", async () => {
@@ -184,7 +188,11 @@ describe("list_medications", () => {
     const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
       .text;
 
-    expect(text).toContain("strength on file is for the 1.5 pill dose only");
+    expect(text.split("\n")[1]).toBe(
+      "- Золофт — active, 1.5 pill (Сертралин 150 milligram), " +
+        "schedule daily_times at 09:00 (1.5 pill), 21:00 (0.5 pill) (local wall clock), " +
+        "strength on file is for the 1.5 pill dose only (id r-1)",
+    );
   });
 
   it("drops that warning on a course whose strength is recorded per unit", async () => {
@@ -274,7 +282,9 @@ describe("list_medications", () => {
     // T-0027: an instant is converted and labelled, or it is not printed. The
     // tool resolves the saved preference (Europe/Berlin in these tests), so the
     // due time is quoted with its offset rather than left in the payload.
-    expect(text).toContain("schedule one_off, due 2026-08-30 04:00 +02:00");
+    expect(text.split("\n")[1]).toBe(
+      "- Флуконазол — active, 1 capsule, schedule one_off, due 2026-08-30 04:00 +02:00 (id r-1)",
+    );
   });
 
   it("refuses a timezone it cannot resolve rather than listing in UTC", async () => {
@@ -305,7 +315,9 @@ describe("list_medications", () => {
     const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
       .text;
 
-    expect(text).toContain("every 3d at 09:00 (local wall clock)");
+    expect(text.split("\n")[1]).toBe(
+      "- Метотрексат — active, 1 pill, schedule interval_days every 3d at 09:00 (local wall clock) (id r-1)",
+    );
   });
 
   it("says how long a for_days course runs when it records no start date", async () => {
@@ -327,7 +339,10 @@ describe("list_medications", () => {
     const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
       .text;
 
-    expect(text).toContain("for 7 days (start date not recorded)");
+    expect(text.split("\n")[1]).toBe(
+      "- Аугментин — active, 1 pill, schedule daily_times at 09:00 (local wall clock), " +
+        "for 7 days (start date not recorded) (id r-1)",
+    );
   });
 
   it("warns when an interval_hours schedule overrides the base amount", async () => {
@@ -552,10 +567,20 @@ describe("get_medication", () => {
   it("summarizes the dose windows", async () => {
     meds.getMedication.mockResolvedValue({
       regimen: { custom_name: "Ferrous sulfate", effective_status: "active" },
-      upcomingDoses: [{ id: "d-1" }, { id: "d-2" }],
+      upcomingDoses: [
+        { id: "d-1", scheduled_at: "2026-06-15T08:00:00Z", status: "scheduled" },
+        { id: "d-2", scheduled_at: "2026-06-16T08:00:00Z", status: "scheduled" },
+      ],
       upcomingTotal: 2,
       recentTotal: 1,
-      recentDoses: [{ id: "d-0" }],
+      recentDoses: [
+        {
+          id: "d-0",
+          scheduled_at: "2026-06-14T08:00:00Z",
+          taken_at: "2026-06-14T08:15:00Z",
+          status: "taken",
+        },
+      ],
       inventoryTransactions: [],
     });
 
@@ -564,7 +589,10 @@ describe("get_medication", () => {
       ctx(),
     );
 
-    expect(result.content[0].text).toContain("2 upcoming dose(s), 1 in the recent window");
+    expect(result.content[0].text.split("\n")[0]).toBe(
+      "Ferrous sulfate — active. 2 upcoming dose(s), 1 in the recent window. " +
+        "Times are Europe/Berlin; next 2026-06-15 10:00 +02:00; last 2026-06-14 10:15 +02:00.",
+    );
   });
 
   it("reports an unknown regimen", async () => {
@@ -749,7 +777,13 @@ describe("get_medication", () => {
       )
     ).content[0].text;
 
-    expect(text).toContain("...15 more; call list_medication_doses with regimen_id: r-1");
+    const upcoming = text.split("\nUpcoming intakes:\n")[1]?.split("\n");
+    expect(upcoming).toHaveLength(11);
+    expect(upcoming?.[0]).toBe("- 2026-08-01 10:00 +02:00 — 1 pill [scheduled]");
+    expect(upcoming?.[9]).toBe("- 2026-08-10 10:00 +02:00 — 1 pill [scheduled]");
+    expect(upcoming?.[10]).toBe(
+      "- ...15 more; call list_medication_doses with regimen_id: r-1 and a from/to range for them",
+    );
   });
 
   it("counts the whole horizon, not the page the query returned", async () => {
@@ -887,7 +921,16 @@ describe("list_medication_doses", () => {
       ctx(),
     );
 
-    expect(result.content[0].text).toContain("Europe/Berlin");
+    expect(result.content[0].text).toBe(
+      "No medication intakes for Maria (2026-06-15 to 2026-06-15, Europe/Berlin) found.",
+    );
+    expect(meds.listMedicationDoses).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        from: "2026-06-14T22:00:00.000Z",
+        to: "2026-06-15T21:59:59.999Z",
+      }),
+    );
   });
 
   it("renders an intake with its amount and status", async () => {
@@ -1148,7 +1191,10 @@ describe("list_medication_doses", () => {
     const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
       .text;
 
-    expect(text).toContain("on Sun, Wed, 7 (never dosed)");
+    expect(text.split("\n")[1]).toBe(
+      "- Метотрексат — active, 1 pill, schedule days_of_week on Sun, Wed, 7 (never dosed) " +
+        "at 08:00 (local wall clock) (id r-1)",
+    );
   });
 
   it("names the time an interval_days course doses at when the row records none", async () => {
@@ -1220,7 +1266,10 @@ describe("list_medication_doses", () => {
     const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
       .text;
 
-    expect(text).toContain("not generated: the interval must be a whole number of hours");
+    expect(text.split("\n")[1]).toBe(
+      "- Ибупрофен — active, 1 pill, schedule interval_hours every 1.5h — not generated: " +
+        "the interval must be a whole number of hours (id r-1)",
+    );
   });
 
   it("ignores an amount that has no slot to dose it", async () => {
@@ -1465,7 +1514,11 @@ describe("list_medication_doses", () => {
     const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
       .text;
 
-    expect(text).toContain("…28 more");
+    expect(text.split("\n")[1]).toBe(
+      "- Hourly — active, 1 pill, schedule daily_times at " +
+        "00:00, 00:30, 01:00, 01:30, 02:00, 02:30, 03:00, 03:30, 04:00, 04:30, 05:00, 05:30, " +
+        "…28 more (local wall clock) (id r-1)",
+    );
   });
 
   it("prints the strength plainly when the intake is the course's own amount", async () => {
@@ -1495,7 +1548,9 @@ describe("list_medication_doses", () => {
       )
     ).content[0].text;
 
-    expect(text).toContain("Золофт, 1.5 pill (Сертралин 150 milligram) [taken]");
+    expect(text.split("\n")[1]).toBe(
+      "- 2026-06-15 10:00 +02:00 — Золофт, 1.5 pill (Сертралин 150 milligram) [taken]",
+    );
   });
 
   it("renders a weekly schedule's per-slot amounts", async () => {
@@ -1523,7 +1578,10 @@ describe("list_medication_doses", () => {
     const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
       .text;
 
-    expect(text).toContain("on Mon, Thu at 08:00 (0.5 pill), 20:00 (1.5 pill)");
+    expect(text.split("\n")[1]).toBe(
+      "- Метотрексат — active, 0.5 pill, schedule days_of_week on Mon, Thu at 08:00 (0.5 pill), " +
+        "20:00 (1.5 pill) (local wall clock) (id r-1)",
+    );
   });
 
   it("cuts a long intake note instead of flooding the page with one", async () => {
@@ -1780,17 +1838,19 @@ describe("add_medication", () => {
   });
 
   it("checks for duplicates before writing, not after", async () => {
-    meds.findRegimensByName.mockResolvedValue([
-      { id: "r-old", custom_name: "Ferrous sulfate", effective_status: "active" },
-    ]);
+    const existing = { id: "r-old", custom_name: "Ferrous sulfate", effective_status: "active" };
+    meds.findRegimensByName.mockResolvedValue([existing]);
 
-    await (await handlers()).get("add_medication")!(args, ctx());
+    const result = await (await handlers()).get("add_medication")!(args, ctx());
 
     expect(meds.findRegimensByName).toHaveBeenCalledWith(expect.anything(), {
       personId: "p-1",
       name: "Ferrous sulfate",
     });
+    expect(meds.createRegimen).not.toHaveBeenCalled();
     expect(regen.regenerateDoseEvents).not.toHaveBeenCalled();
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent?.existing_medications).toStrictEqual([existing]);
   });
 
   it("reports partial success when regeneration fails after the save", async () => {
@@ -1922,11 +1982,22 @@ describe("log_dose", () => {
     // The 08:00 dose swallowed at 08:15. Reading both times as one, the tool
     // looked for a plan at 08:15, found none, and filed a second intake beside
     // the 08:00 one it left owed -- two doses on the record, stock down twice.
-    await (await handlers()).get("log_dose")!(
+    meds.logDose.mockResolvedValueOnce({
+      regimen: { id: "r-1", custom_name: "Атаракс" },
+      dose: {
+        ...dose,
+        scheduled_at: "2026-08-19T01:00:00.000Z",
+        taken_at: "2026-08-19T01:15:00.000Z",
+      },
+      planned: true,
+    });
+
+    const result = await (await handlers()).get("log_dose")!(
       {
         regimen_id: "r-1",
         taken_at: "2026-08-19T08:15:00+07:00",
         planned_for: "2026-08-19T08:00:00+07:00",
+        timezone: "Asia/Bangkok",
         status: "taken",
       },
       ctx(),
@@ -1940,6 +2011,10 @@ describe("log_dose", () => {
       status: "taken",
       note: null,
     });
+    expect(result.content[0].text).toBe(
+      "Logged 0.5 pill of Атаракс as taken at 2026-08-19 08:15 +07:00 (Asia/Bangkok). " +
+        "This resolved the dose already on the plan for 2026-08-19 08:00 +07:00.",
+    );
   });
 
   it("quotes the time the record ended up carrying, not the one asked for", async () => {
@@ -1996,10 +2071,19 @@ describe("log_dose", () => {
   });
 
   it("logging an intake does not regenerate the plan", async () => {
-    await (await handlers()).get("log_dose")!({ regimen_id: "r-1", status: "taken" }, ctx());
+    const result = await (await handlers()).get("log_dose")!(
+      { regimen_id: "r-1", status: "taken" },
+      ctx(),
+    );
 
     // The schedule did not change, so the upcoming events are still correct.
     expect(regen.regenerateDoseEvents).not.toHaveBeenCalled();
+    expect(result.structuredContent).toMatchObject({
+      medication: { id: "r-1" },
+      dose: { id: "d-1", status: "taken" },
+      planned: false,
+      already_recorded: false,
+    });
   });
 
   it("defaults the time to now and leaves the amount to the regimen", async () => {
@@ -2072,7 +2156,7 @@ describe("log_dose", () => {
   });
 
   it("reads the saved zone even for an offset-bearing time, to quote it back", async () => {
-    await (await handlers()).get("log_dose")!(
+    const result = await (await handlers()).get("log_dose")!(
       { regimen_id: "r-1", taken_at: "2026-08-19T23:10:00+07:00", status: "taken" },
       ctx(),
     );
@@ -2082,6 +2166,10 @@ describe("log_dose", () => {
     // Reading the preference is free of side effects; resolving it is not.
     expect(regen.readTimezonePreference).toHaveBeenCalled();
     expect(regen.resolveTimezone).not.toHaveBeenCalled();
+    expect(result.content[0].text).toBe(
+      "Logged 0.5 pill of Атаракс as taken at 2026-08-19 18:10 +02:00 (Europe/Berlin). " +
+        "Recorded as an extra intake outside the plan.",
+    );
   });
 
   it("quotes the intake back in the caller's zone, never in UTC", async () => {

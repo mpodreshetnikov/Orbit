@@ -203,29 +203,36 @@ describe("createInstrumentedServerFetch", () => {
   });
 
   it("passes through non-RPC URLs without wrapping", async () => {
-    await instrumentedFetch("https://example.test/rest/v1/conditions");
+    const response = await instrumentedFetch("https://example.test/rest/v1/conditions");
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe("ok");
     expect(withServerSpanMock).not.toHaveBeenCalled();
     expect(baseFetch).toHaveBeenCalledWith("https://example.test/rest/v1/conditions", undefined);
   });
 
   it("resolves the RPC name from string, URL, and Request inputs", async () => {
-    await instrumentedFetch("https://example.test/rest/v1/rpc/money_list");
+    const money = await instrumentedFetch("https://example.test/rest/v1/rpc/money_list");
+    expect(money.status).toBe(200);
     expect(withServerSpanMock).toHaveBeenCalledWith(
       "api.supabase.rpc.money_list",
       expect.any(Function),
     );
 
     withServerSpanMock.mockClear();
-    await instrumentedFetch(new URL("https://example.test/rest/v1/rpc/health_ingest?x=1"));
+    const health = await instrumentedFetch(
+      new URL("https://example.test/rest/v1/rpc/health_ingest?x=1"),
+    );
+    expect(health.status).toBe(200);
     expect(withServerSpanMock).toHaveBeenCalledWith(
       "api.supabase.rpc.health_ingest",
       expect.any(Function),
     );
 
     withServerSpanMock.mockClear();
-    await instrumentedFetch(
+    const apply = await instrumentedFetch(
       new Request("https://example.test/rest/v1/rpc/apply_rule", { method: "POST" }),
     );
+    expect(apply.status).toBe(200);
     expect(withServerSpanMock).toHaveBeenCalledWith(
       "api.supabase.rpc.apply_rule",
       expect.any(Function),

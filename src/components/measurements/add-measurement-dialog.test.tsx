@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MeasurementCatalog } from "@/types";
 import { AddMeasurementDialog } from "./add-measurement-dialog";
+import { ControlledDialog } from "../../../test/utils/web/controlled-dialog";
 
 const hookMocks = vi.hoisted(() => ({
   useMeasurementCatalog: vi.fn(),
@@ -122,9 +123,12 @@ describe("AddMeasurementDialog", () => {
 
   it("creates measurement for selected catalog entry", async () => {
     const user = userEvent.setup();
-    const onOpenChange = vi.fn();
 
-    render(<AddMeasurementDialog open onOpenChange={onOpenChange} personId="person-1" />);
+    render(
+      <ControlledDialog>
+        {(dialog) => <AddMeasurementDialog {...dialog} personId="person-1" />}
+      </ControlledDialog>,
+    );
 
     await user.click(screen.getByRole("button", { name: /Weight/ }));
     fireEvent.change(screen.getByLabelText("measurements.value"), {
@@ -139,16 +143,14 @@ describe("AddMeasurementDialog", () => {
 
     await user.click(screen.getByRole("button", { name: "common.save" }));
 
-    await waitFor(() => {
-      expect(createMutateAsync).toHaveBeenCalledWith({
-        person_id: "person-1",
-        catalog_id: "cat-1",
-        value: 72.5,
-        measured_at: new Date("2026-02-22T09:45").toISOString(),
-        notes: "morning weight",
-      });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "common.save" })).toBeNull());
+    expect(createMutateAsync).toHaveBeenCalledWith({
+      person_id: "person-1",
+      catalog_id: "cat-1",
+      value: 72.5,
+      measured_at: new Date("2026-02-22T09:45").toISOString(),
+      notes: "morning weight",
     });
-    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
   it("respects preselected code and blocks submit when person is missing", async () => {
@@ -244,7 +246,12 @@ describe("AddMeasurementDialog", () => {
     });
 
     it("does not query while the dialog is closed", () => {
-      render(
+      hookMocks.useSingleMeasurementHistory.mockImplementation((personId, code) =>
+        personId === "person-1" && code === "weight"
+          ? historyFor(72.5)
+          : { data: null, isLoading: false },
+      );
+      const { rerender } = render(
         <AddMeasurementDialog
           open={false}
           onOpenChange={vi.fn()}
@@ -253,7 +260,29 @@ describe("AddMeasurementDialog", () => {
         />,
       );
 
-      expect(hookMocks.useSingleMeasurementHistory).toHaveBeenCalledWith(null, null);
+      expect(screen.queryByRole("heading", { name: "measurements.addMeasurement" })).toBeNull();
+      expect(hookMocks.useSingleMeasurementHistory).toHaveBeenLastCalledWith(null, null);
+
+      rerender(
+        <AddMeasurementDialog
+          open
+          onOpenChange={vi.fn()}
+          personId="person-1"
+          preselectedCode="weight"
+        />,
+      );
+      expect(screen.getByText(/72\.5 kg/)).toBeInTheDocument();
+
+      rerender(
+        <AddMeasurementDialog
+          open={false}
+          onOpenChange={vi.fn()}
+          personId="person-1"
+          preselectedCode="weight"
+        />,
+      );
+      expect(screen.queryByText(/72\.5 kg/)).toBeNull();
+      expect(hookMocks.useSingleMeasurementHistory).toHaveBeenLastCalledWith(null, null);
     });
 
     it("still lists every catalog entry in the dropdown", () => {

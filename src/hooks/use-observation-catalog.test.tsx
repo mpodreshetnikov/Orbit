@@ -139,7 +139,8 @@ describe("use-observation-catalog", () => {
 
     const { useCreateObservation } = await import("./use-observation-catalog");
     const { result, queryClient } = renderHookWithQueryClient(() => useCreateObservation());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const listKey = ["observation-catalog", "glu"];
+    queryClient.setQueryData(listKey, []);
 
     await act(async () => {
       await result.current.mutateAsync({
@@ -162,9 +163,7 @@ describe("use-observation-catalog", () => {
         canonical_unit: "mmol/L",
       }),
     );
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["observation-catalog"],
-    });
+    expect(queryClient.getQueryState(listKey)?.isInvalidated).toBe(true);
   });
 
   it("creates observation with defaults and propagates create errors", async () => {
@@ -212,7 +211,13 @@ describe("use-observation-catalog", () => {
 
     const { useUpdateObservation } = await import("./use-observation-catalog");
     const { result, queryClient } = renderHookWithQueryClient(() => useUpdateObservation());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const listKey = ["observation-catalog", "glu"];
+    const detailKey = ["observation", "obs-1"];
+    const otherItemKey = ["observation", "obs-2"];
+    const previous = { ...updated, name_en: "Glucose" };
+    queryClient.setQueryData(detailKey, previous);
+    queryClient.setQueryData(otherItemKey, { id: "obs-2" });
+    queryClient.setQueryData(listKey, [previous]);
 
     await act(async () => {
       await result.current.mutateAsync({
@@ -228,12 +233,9 @@ describe("use-observation-catalog", () => {
       expect.objectContaining({ name_en: "Serum glucose" }),
     );
     expect(builder.eq).toHaveBeenCalledWith("id", "obs-1");
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["observation-catalog"],
-    });
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["observation", "obs-1"],
-    });
+    expect(queryClient.getQueryState(listKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(detailKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherItemKey)?.isInvalidated).toBe(false);
   });
 
   it("updates observation without accepted_units and propagates update errors", async () => {
@@ -267,7 +269,8 @@ describe("use-observation-catalog", () => {
 
     const { useDeleteObservation } = await import("./use-observation-catalog");
     const { result, queryClient } = renderHookWithQueryClient(() => useDeleteObservation());
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const listKey = ["observation-catalog", "glu"];
+    queryClient.setQueryData(listKey, [{ id: "obs-1" }]);
 
     await act(async () => {
       await result.current.mutateAsync("obs-1");
@@ -275,9 +278,7 @@ describe("use-observation-catalog", () => {
 
     expect(builder.delete).toHaveBeenCalled();
     expect(builder.eq).toHaveBeenCalledWith("id", "obs-1");
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["observation-catalog"],
-    });
+    expect(queryClient.getQueryState(listKey)?.isInvalidated).toBe(true);
   });
 
   it("propagates delete observation errors", async () => {

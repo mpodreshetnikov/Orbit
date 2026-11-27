@@ -35,3 +35,4 @@ export * from "./use-money-category-debug";
 export * from "./use-money-transactions";
 export * from "./use-money-merchant-default-categories";
 export * from "./use-money-reports";
+export * from "./use-mcp-clients";

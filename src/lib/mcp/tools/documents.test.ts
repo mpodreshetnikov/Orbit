@@ -226,6 +226,31 @@ describe("create_medical_record duplicates", () => {
 });
 
 describe("ingest_medical_document", () => {
+  /**
+   * Regression for Maxim decision B (UI medical upload removed): documents still enter
+   * only through MCP create → upload links → ingest → health-ingest. Do not weaken this path.
+   */
+  it("still ingests via health-ingest after UI upload removal (MCP regression)", async () => {
+    userClient.invokeEdgeFunctionAsUser.mockResolvedValue({
+      status: 200,
+      payload: { success: true, rejected: [] },
+    });
+    records.getRecordObservations.mockResolvedValue([]);
+    records.getRecordFindings.mockResolvedValue([]);
+    records.getRecordConditions.mockResolvedValue([]);
+    documents.getRecordExtractionIssues.mockResolvedValue([]);
+
+    const result = await (await handlers()).get("ingest_medical_document")!(SUBMISSION, ctx);
+
+    expect(result.isError).toBeUndefined();
+    expect(userClient.invokeEdgeFunctionAsUser).toHaveBeenCalledWith(
+      expect.objectContaining({ authUserId: "11111111-1111-1111-1111-111111111111" }),
+      "health-ingest",
+      expect.objectContaining({ record_id: RECORD_ID }),
+    );
+    expect(result.content[0].text.length).toBeGreaterThan(0);
+  });
+
   it("refuses a record a person has already approved, without calling the server", async () => {
     documents.getIngestableRecord.mockResolvedValue({ ...RECORD, status: "active" });
     const result = await (await handlers()).get("ingest_medical_document")!(SUBMISSION, ctx);
@@ -345,13 +370,22 @@ describe("ingest_medical_document", () => {
   });
 
   it("records the uploaded pages' sizes before handing the document to the server", async () => {
-    userClient.invokeEdgeFunctionAsUser.mockResolvedValue({
-      status: 200,
-      payload: { success: true, rejected: [] },
+    let pageSizesRecorded = false;
+    documents.recordPageSizes.mockImplementationOnce(async () => {
+      await Promise.resolve();
+      pageSizesRecorded = true;
     });
-    await (await handlers()).get("ingest_medical_document")!(SUBMISSION, ctx);
+    userClient.invokeEdgeFunctionAsUser.mockImplementationOnce(async () =>
+      pageSizesRecorded
+        ? { status: 200, payload: { success: true, rejected: [] } }
+        : { status: 409, payload: { error: "Missing page sizes" } },
+    );
+
+    const result = await (await handlers()).get("ingest_medical_document")!(SUBMISSION, ctx);
 
     expect(documents.recordPageSizes).toHaveBeenCalledWith(expect.anything(), RECORD);
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent).toMatchObject({ record_id: RECORD_ID, rejected: [] });
   });
 
   it("says in the text block what was stored, refused, unrecognised and pending", async () => {

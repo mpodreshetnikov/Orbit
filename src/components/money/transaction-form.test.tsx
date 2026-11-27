@@ -1,23 +1,13 @@
 import React from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { Toaster } from "sonner";
+import { describe, expect, it, vi } from "vitest";
 import type { MoneyAccount, MoneyCategory } from "@/types";
 import { MoneyTransactionForm } from "./transaction-form";
 
-const toastErrorMock = vi.fn();
-
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
-}));
-
-vi.mock("sonner", () => ({
-  toast: {
-    error: (...args: unknown[]) => toastErrorMock(...args),
-    success: vi.fn(),
-    warning: vi.fn(),
-    info: vi.fn(),
-  },
 }));
 
 vi.mock("@/lib/date-locale", () => ({
@@ -187,27 +177,26 @@ const decimalInputs = () =>
   Array.from(document.querySelectorAll<HTMLInputElement>("input[inputmode='decimal']"));
 
 describe("MoneyTransactionForm", () => {
-  beforeEach(() => {
-    toastErrorMock.mockReset();
-  });
-
   it("shows required-field validation errors before submit", async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     const user = userEvent.setup();
 
     render(
-      <MoneyTransactionForm
-        mode="create"
-        accounts={accounts}
-        categories={categories}
-        persons={persons}
-        onSubmit={onSubmit}
-        onCancel={vi.fn()}
-      />,
+      <>
+        <Toaster />
+        <MoneyTransactionForm
+          mode="create"
+          accounts={accounts}
+          categories={categories}
+          persons={persons}
+          onSubmit={onSubmit}
+          onCancel={vi.fn()}
+        />
+      </>,
     );
 
     await user.click(screen.getByRole("button", { name: "money.saveTransaction" }));
-    expect(toastErrorMock).toHaveBeenLastCalledWith("money.validationAccountRequired");
+    expect(await screen.findByText("money.validationAccountRequired")).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: /Main account \(RUB\)/ }));
 
@@ -216,11 +205,11 @@ describe("MoneyTransactionForm", () => {
     ) as HTMLInputElement;
     await user.clear(postedAtInput);
     await user.click(screen.getByRole("button", { name: "money.saveTransaction" }));
-    expect(toastErrorMock).toHaveBeenLastCalledWith("money.validationPostedAtRequired");
+    expect(await screen.findByText("money.validationPostedAtRequired")).toBeVisible();
 
     await user.type(postedAtInput, "2026-02-21T09:30");
     await user.click(screen.getByRole("button", { name: "money.saveTransaction" }));
-    expect(toastErrorMock).toHaveBeenLastCalledWith("money.validationAmountRequired");
+    expect(await screen.findByText("money.validationAmountRequired")).toBeVisible();
 
     expect(onSubmit).not.toHaveBeenCalled();
   });
@@ -286,6 +275,9 @@ describe("MoneyTransactionForm", () => {
         }),
       );
     });
+    expect(
+      screen.getByText("Food / Food RU", { selector: '[role="combobox"] span' }),
+    ).toBeVisible();
   });
 
   it("reads a decimal comma in the amounts", async () => {
@@ -325,6 +317,7 @@ describe("MoneyTransactionForm", () => {
         }),
       );
     });
+    expect(screen.getByText("RUB 12.50")).toBeVisible();
   });
 
   it("supports merchant suggestions, mismatch warning, and cancel action", async () => {
@@ -372,7 +365,7 @@ describe("MoneyTransactionForm", () => {
         onSubmit={onSubmit}
         onCancel={vi.fn()}
         selectedPersonId="person-1"
-        merchantDefaultCategoryId={{ "Shop A": "cat-food" }}
+        merchantDefaultCategoryId={{ "Shop A": "cat-food", "Shop A Updated": "cat-food" }}
       />,
     );
 
@@ -401,6 +394,9 @@ describe("MoneyTransactionForm", () => {
       target: { value: "Shop A Updated" },
     });
 
+    expect(
+      screen.getByText("Other / Other RU", { selector: '[role="combobox"] span' }),
+    ).toBeVisible();
     await user.click(screen.getByRole("button", { name: "money.saveTransaction" }));
 
     await waitFor(() => {
@@ -479,6 +475,10 @@ describe("MoneyTransactionForm", () => {
       />,
     );
 
+    expect(screen.getByPlaceholderText("money.lineItemTitle")).toHaveValue("Flat white");
+    expect(
+      screen.getByText("Food / Food RU", { selector: '[role="combobox"] span' }),
+    ).toBeVisible();
     await user.click(screen.getByRole("button", { name: "money.updateTransaction" }));
 
     await waitFor(() => {

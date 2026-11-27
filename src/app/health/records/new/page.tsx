@@ -3,43 +3,25 @@
 import React, { useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
-import { AddRecordWizard } from "@/components/records";
-import { useUIStore } from "@/stores/ui-store";
-import { usePersons } from "@/hooks";
-import { UserX } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
+/**
+ * Medical document upload was removed from the UI (Maxim decision B).
+ * Ingest is MCP-only; keep this route as a soft redirect so old bookmarks do not 404.
+ */
 export default function NewRecordPage() {
   const t = useTranslations();
   const router = useRouter();
-  const selectedPersonId = useUIStore((state) => state.selectedPersonId);
-  const { data: persons, isLoading } = usePersons();
 
-  const selectedPerson = persons?.find((p) => p.id === selectedPersonId);
-
-  // Redirect if no person selected
   useEffect(() => {
-    if (!isLoading && !selectedPerson) {
-      router.push("/health");
-    }
-  }, [isLoading, selectedPerson, router]);
+    router.replace("/health");
+  }, [router]);
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center p-12">
-        <p className="text-muted-foreground">{t("common.loading")}</p>
-      </div>
-    );
-  }
-
-  if (!selectedPerson) {
-    return (
-      <div className="flex flex-col items-center justify-center rounded-lg border border-dashed p-12 text-center">
-        <UserX className="h-12 w-12 text-muted-foreground/50" />
-        <h3 className="mt-4 text-lg font-semibold">{t("person.noPerson")}</h3>
-        <p className="mt-2 text-sm text-muted-foreground">{t("person.selectPrompt")}</p>
-      </div>
-    );
-  }
-
-  return <AddRecordWizard personId={selectedPerson.id} personName={selectedPerson.name} />;
+  return (
+    <div className="mx-auto flex max-w-lg flex-col items-center justify-center gap-4 rounded-lg border border-dashed p-12 text-center">
+      <h1 className="text-xl font-semibold">{t("records.uploadRemoved.title")}</h1>
+      <p className="text-sm text-muted-foreground">{t("records.uploadRemoved.body")}</p>
+      <Button onClick={() => router.push("/health")}>{t("records.uploadRemoved.back")}</Button>
+    </div>
+  );
 }

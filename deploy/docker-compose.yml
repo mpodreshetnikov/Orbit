@@ -135,6 +135,12 @@ services:
       OBS_GRAFANA_CLOUD_OTLP_HEADERS: ${OBS_GRAFANA_CLOUD_OTLP_HEADERS:-}
       OBS_ENV: production
       OBS_RELEASE: ${ORBIT_VERSION:-}
+      # Live orbit-tasks board (T-261121-q3r). Default off. Enable only on Maxim instances —
+      # never kakos/cacos. Requires ORBIT_TASKS_GITHUB_TOKEN (RO to private orbit-tasks).
+      ORBIT_WORK_BOARD_ENABLED: ${ORBIT_WORK_BOARD_ENABLED:-0}
+      ORBIT_TASKS_GITHUB_TOKEN: ${ORBIT_TASKS_GITHUB_TOKEN:-}
+      ORBIT_TASKS_GITHUB_REPO: ${ORBIT_TASKS_GITHUB_REPO:-mpodreshetnikov/orbit-tasks}
+      ORBIT_WORK_BOARD_CACHE_TTL_MS: ${ORBIT_WORK_BOARD_CACHE_TTL_MS:-}
 
   caddy:
     container_name: orbit-caddy

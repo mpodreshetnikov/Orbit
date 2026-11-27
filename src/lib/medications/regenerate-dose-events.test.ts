@@ -14,11 +14,20 @@ function makeSupabase(options: {
   prefsTimezone?: string | null;
   rpcResults?: Record<string, { data?: unknown; error?: { message: string } }>;
 }) {
-  const upsert = vi.fn().mockResolvedValue({ error: null });
-  const maybeSingle = vi.fn().mockResolvedValue({
-    data: options.prefsTimezone ? { checkup_notification_timezone: options.prefsTimezone } : null,
-    error: null,
-  });
+  const preferences = new Map<string, string>();
+  if (options.prefsTimezone) preferences.set("user-1", options.prefsTimezone);
+  const upsert = vi.fn(
+    ({
+      auth_user_id,
+      checkup_notification_timezone,
+    }: {
+      auth_user_id: string;
+      checkup_notification_timezone: string;
+    }) => {
+      preferences.set(auth_user_id, checkup_notification_timezone);
+      return Promise.resolve({ error: null });
+    },
+  );
 
   const rpc = vi.fn(async (name: string) => {
     const configured = options.rpcResults?.[name];
@@ -28,7 +37,17 @@ function makeSupabase(options: {
 
   const client = {
     from: vi.fn(() => ({
-      select: vi.fn(() => ({ eq: vi.fn(() => ({ maybeSingle })) })),
+      select: () => ({
+        eq: (_column: string, userId: string) => ({
+          maybeSingle: () => {
+            const timezone = preferences.get(userId);
+            return Promise.resolve({
+              data: timezone ? { checkup_notification_timezone: timezone } : null,
+              error: null,
+            });
+          },
+        }),
+      }),
       upsert,
     })),
     rpc,
@@ -83,12 +102,19 @@ describe("regenerateDoseEvents", () => {
         { auth_user_id: "user-1", checkup_notification_timezone: "Europe/Berlin" },
         { onConflict: "auth_user_id" },
       );
+
+      const nextRun = await regenerateDoseEvents(client, { authUserId: "user-1" });
+      expect(nextRun.timezone).toBe("Europe/Berlin");
     });
 
     it("does not write when the timezone is unchanged", async () => {
       const { client, upsert } = makeSupabase({ prefsTimezone: "Asia/Tokyo" });
 
-      await regenerateDoseEvents(client, { authUserId: "user-1", timezone: "Asia/Tokyo" });
+      const result = await regenerateDoseEvents(client, {
+        authUserId: "user-1",
+        timezone: "Asia/Tokyo",
+      });
+      expect(result.timezone).toBe("Asia/Tokyo");
 
       expect(upsert).not.toHaveBeenCalled();
     });
@@ -139,14 +165,20 @@ describe("regenerateDoseEvents", () => {
     });
 
     it("treats a blank person id as no person", async () => {
-      const { client, rpc } = makeSupabase({});
+      const { client, rpc } = makeSupabase({
+        rpcResults: {
+          clear_future_med_dose_events: { data: 3 },
+          generate_med_dose_events_for_horizon: { data: 9 },
+        },
+      });
 
-      await regenerateDoseEvents(client, { authUserId: "user-1", personId: "  " });
+      const result = await regenerateDoseEvents(client, { authUserId: "user-1", personId: "  " });
 
       expect(rpc).toHaveBeenCalledWith(
         "clear_future_med_dose_events",
         expect.objectContaining({ p_auth_user_id: "user-1" }),
       );
+      expect(result).toEqual({ eventsCleared: 3, eventsGenerated: 9, timezone: "UTC" });
     });
   });
 

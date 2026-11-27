@@ -112,6 +112,7 @@ describe("MobileNav", () => {
     expect(screen.getByText("health.records")).toBeInTheDocument();
     expect(screen.getByText("measurements.navTitle")).toBeInTheDocument();
     expect(screen.getByText("checkups.navTitle")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "nav.regularMedication" })).not.toBeInTheDocument();
 
     const measurementDialog = screen.getByTestId("add-measurement-dialog");
     expect(measurementDialog).toHaveAttribute("data-open", "false");
@@ -123,9 +124,12 @@ describe("MobileNav", () => {
     await fireEvent.click(screen.getByRole("button", { name: "nav.medication" }));
     expect(screen.getByText("nav.regularMedication")).toBeInTheDocument();
     expect(screen.getByText("nav.oneTimeMedication")).toBeInTheDocument();
+    expect(screen.queryByText("nav.medicalRecord")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "nav.medicalRecord" })).not.toBeInTheDocument();
 
     await fireEvent.click(screen.getByRole("button", { name: "nav.regularMedication" }));
     expect(navMocks.router.push).toHaveBeenCalledWith("/health/medications/new?kind=regular");
+    expect(screen.queryByRole("button", { name: "nav.regularMedication" })).not.toBeInTheDocument();
 
     await fireEvent.click(screen.getByRole("button", { name: "nav.medication" }));
     await fireEvent.click(screen.getByRole("button", { name: "nav.oneTimeMedication" }));
@@ -144,6 +148,8 @@ describe("MobileNav", () => {
     expect(screen.getByText("money.accounts")).toBeInTheDocument();
     expect(screen.getByText("money.categories")).toBeInTheDocument();
     expect(screen.getByText("money.rules")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "money.import" })).toHaveClass("text-primary");
+    expect(screen.getByRole("link", { name: "money.reports" })).not.toHaveClass("text-primary");
 
     expect(screen.getByText("money.addTransaction")).toBeInTheDocument();
     expect(screen.getByText("money.addAccount")).toBeInTheDocument();
@@ -153,15 +159,16 @@ describe("MobileNav", () => {
   });
 
   it("toggles right-edge shadow based on horizontal scroll position", () => {
-    const { container } = render(<MobileNav />);
+    const { container, rerender, unmount } = render(<MobileNav />);
     const scrollEl = container.querySelector(".overflow-x-auto") as HTMLDivElement;
     const getRightShadow = () =>
       container.querySelector("div.pointer-events-none.absolute.right-0.top-0.bottom-0.w-6");
 
     let scrollLeft = 0;
+    let scrollWidth = 200;
     Object.defineProperty(scrollEl, "scrollWidth", {
       configurable: true,
-      get: () => 200,
+      get: () => scrollWidth,
     });
     Object.defineProperty(scrollEl, "clientWidth", {
       configurable: true,
@@ -172,12 +179,33 @@ describe("MobileNav", () => {
       get: () => scrollLeft,
     });
 
-    scrollLeft = 20;
+    expect(getRightShadow()).not.toBeInTheDocument();
+
+    // At a fractional offset, an exactly fitting tab strip still has no overflow.
+    scrollWidth = 100;
+    scrollLeft = -1.5;
+    fireEvent.scroll(scrollEl);
+    expect(getRightShadow()).not.toBeInTheDocument();
+
+    scrollWidth = 200;
+    scrollLeft = 98;
     fireEvent.scroll(scrollEl);
     expect(getRightShadow()).toBeInTheDocument();
 
-    scrollLeft = 100;
+    scrollLeft = 99;
     fireEvent.scroll(scrollEl);
     expect(getRightShadow()).not.toBeInTheDocument();
+
+    scrollLeft = 0;
+    navMocks.section = "money";
+    navMocks.pathname = "/money/import";
+    rerender(<MobileNav />);
+    expect(getRightShadow()).toBeInTheDocument();
+
+    const disconnect = vi.spyOn(ResizeObserver.prototype, "disconnect");
+    const removeEventListener = vi.spyOn(scrollEl, "removeEventListener");
+    unmount();
+    expect(disconnect).toHaveBeenCalledOnce();
+    expect(removeEventListener).toHaveBeenCalledWith("scroll", expect.any(Function));
   });
 });
