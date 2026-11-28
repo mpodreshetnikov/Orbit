@@ -1,4 +1,4 @@
-import { context, SpanStatusCode, trace } from "@opentelemetry/api";
+import { context, propagation, ROOT_CONTEXT, SpanStatusCode, trace } from "@opentelemetry/api";
 import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentations-node";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { resourceFromAttributes } from "@opentelemetry/resources";
@@ -30,6 +30,18 @@ function createSdk(): NodeSDK {
     }),
     instrumentations: [
       getNodeAutoInstrumentations({
+        "@opentelemetry/instrumentation-http": {
+          startIncomingSpanHook(request) {
+            const pathname = request.url?.split("?")[0];
+            if (pathname !== "/api/mcp" && pathname !== "/api/mcp/") return {};
+
+            const caller = trace.getSpanContext(propagation.extract(ROOT_CONTEXT, request.headers));
+            // The HTTP instrumentation extracts its parent from these headers after this hook.
+            delete request.headers.traceparent;
+            delete request.headers.tracestate;
+            return caller ? { "orbit.mcp.caller_trace_id": caller.traceId } : {};
+          },
+        },
         "@opentelemetry/instrumentation-winston": {
           enabled: false,
         },
